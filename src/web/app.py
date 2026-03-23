@@ -294,6 +294,16 @@ def create_app(db_path: Optional[Path] = None) -> FastAPI:
         store.set(Memory(key=req.key, value=req.value, tags=req.tags))
         return {"status": "saved", "key": req.key}
 
+    @app.put("/api/memories/{key}")
+    async def update_memory(key: str, req: MemoryIn):
+        store = _get_memory_store()
+        try:
+            store.get(key)  # Verify exists
+        except KeyError:
+            raise HTTPException(404, f"Memory '{key}' not found.")
+        store.set(Memory(key=key, value=req.value, tags=req.tags))
+        return {"status": "updated", "key": key}
+
     @app.delete("/api/memories/{key}")
     async def delete_memory(key: str):
         store = _get_memory_store()
@@ -302,6 +312,27 @@ def create_app(db_path: Optional[Path] = None) -> FastAPI:
             return {"status": "deleted", "key": key}
         except KeyError as e:
             raise HTTPException(404, str(e))
+
+    @app.post("/api/memories/bulk-delete")
+    async def bulk_delete_memories(keys: List[str]):
+        store = _get_memory_store()
+        deleted = 0
+        for key in keys:
+            try:
+                store.delete(key)
+                deleted += 1
+            except KeyError:
+                pass
+        return {"status": "deleted", "count": deleted}
+
+    @app.get("/api/export-memories")
+    async def export_memories(tag: str = Query("")):
+        store = _get_memory_store()
+        if tag:
+            memories = store.search("", tags=[tag])
+        else:
+            memories = store.list()
+        return {"memories": [m.to_dict() for m in memories]}
 
     # --- Knowledge Graph ---
 
@@ -672,6 +703,15 @@ def create_app(db_path: Optional[Path] = None) -> FastAPI:
             return {"status": "switched", "active": name, "db_path": str(new_path)}
         except KeyError as e:
             raise HTTPException(404, str(e))
+
+    @app.put("/api/profiles/{name}")
+    async def rename_profile(name: str, new_name: str = Query(...), description: str = Query("")):
+        pm = ProfileManager()
+        try:
+            pm.rename(name, new_name, description)
+            return {"status": "renamed", "old_name": name, "new_name": new_name}
+        except (KeyError, ValueError) as e:
+            raise HTTPException(400, str(e))
 
     @app.post("/api/profiles/{name}/duplicate")
     async def duplicate_profile(name: str, new_name: str = Query(...), description: str = Query("")):

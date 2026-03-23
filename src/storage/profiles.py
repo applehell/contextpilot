@@ -103,6 +103,26 @@ class ProfileManager:
             is_default=data.get("is_default", False),
         )
 
+    def rename(self, old_name: str, new_name: str, description: str = "") -> None:
+        if old_name not in self._config["profiles"]:
+            raise KeyError(f"Profile '{old_name}' not found.")
+        if self._config["profiles"][old_name].get("is_default"):
+            raise ValueError("Cannot rename the default profile.")
+        if new_name in self._config["profiles"]:
+            raise ValueError(f"Profile '{new_name}' already exists.")
+        if not new_name.replace("-", "").replace("_", "").isalnum():
+            raise ValueError("Profile name must be alphanumeric (with - and _ allowed).")
+
+        data = self._config["profiles"].pop(old_name)
+        data["name"] = new_name
+        if description:
+            data["description"] = description
+        self._config["profiles"][new_name] = data
+
+        if self._config["active"] == old_name:
+            self._config["active"] = new_name
+        self._save_config()
+
     def create(self, name: str, description: str = "") -> Profile:
         if name in self._config["profiles"]:
             raise ValueError(f"Profile '{name}' already exists.")

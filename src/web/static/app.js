@@ -222,6 +222,8 @@ async function filterByTag() {
     } catch (e) { console.error(e); }
 }
 
+let bulkMode = false;
+
 function renderMemories(data) {
     const list = document.getElementById('memory-list');
     const countEl = document.getElementById('memory-count');
@@ -255,18 +257,150 @@ function renderMemories(data) {
         }
 
         const borderStyle = isNew ? 'border-left:3px solid #a6e3a1;' : isModified ? 'border-left:3px solid #f9e2af;' : '';
+        const cbHtml = bulkMode ? `<input type="checkbox" class="bulk-cb" data-key="${escapeAttr(m.key)}">` : '';
+        const tagsHtml = m.tags.length
+            ? m.tags.map(t => `<span class="tag-link" onclick="clickTag('${escapeAttr(t)}')">#${escapeHtml(t)}</span>`).join(' ')
+            : '';
 
-        return `<div class="item-row" style="${borderStyle}">
+        return `<div class="item-row" style="${borderStyle}cursor:pointer;" onclick="viewMemory('${escapeAttr(m.key)}')">
+            ${cbHtml}
             <div class="item-main">
                 <div class="item-name">${badge}${escapeHtml(m.key)}</div>
-                <div class="item-desc">${escapeHtml(m.value)}</div>
-                <div class="item-tags">${m.tags.length ? m.tags.map(t => '#' + t).join(' ') : ''}${age ? ' <span style="color:var(--text-muted);font-size:11px;margin-left:8px;">' + age + '</span>' : ''}</div>
+                <div class="item-desc">${escapeHtml((m.value || '').substring(0, 150))}</div>
+                <div class="item-tags">${tagsHtml}${age ? ' <span style="color:var(--text-muted);font-size:11px;margin-left:8px;">' + age + '</span>' : ''}</div>
             </div>
-            <div class="item-actions">
+            <div class="item-actions" onclick="event.stopPropagation()">
+                <button class="btn-small" onclick="editMemory('${escapeAttr(m.key)}')">Edit</button>
                 <button class="btn-small btn-danger" onclick="deleteMemory('${escapeAttr(m.key)}')">Del</button>
             </div>
         </div>`;
     }).join('');
+}
+
+// --- Memory View/Edit Modal ---
+
+function openModal(title, bodyHtml) {
+    document.getElementById('modal-title').textContent = title;
+    document.getElementById('modal-body').innerHTML = bodyHtml;
+    document.getElementById('modal-overlay').classList.add('active');
+}
+
+function closeModal(e) {
+    if (e && e.target !== e.currentTarget) return;
+    document.getElementById('modal-overlay').classList.remove('active');
+}
+
+async function viewMemory(key) {
+    try {
+        const res = await fetch('/api/memories/' + encodeURIComponent(key));
+        const m = await res.json();
+        const tagsHtml = m.tags.length
+            ? m.tags.map(t => `<span class="tag-link" onclick="clickTag('${escapeAttr(t)}');closeModal();">#${escapeHtml(t)}</span>`).join(' ')
+            : '<span class="muted">keine</span>';
+        openModal(m.key, `
+            <div style="margin-bottom:12px;">
+                <label>Tags</label>
+                <div>${tagsHtml}</div>
+            </div>
+            <div style="margin-bottom:12px;">
+                <label>Inhalt</label>
+                <pre style="white-space:pre-wrap;font-size:12px;background:var(--bg);padding:12px;border-radius:var(--radius);max-height:400px;overflow-y:auto;">${escapeHtml(m.value)}</pre>
+            </div>
+            <div class="btn-row">
+                <button class="btn" onclick="editMemory('${escapeAttr(m.key)}')">Bearbeiten</button>
+                <button class="btn" onclick="closeModal()">Schliessen</button>
+            </div>
+        `);
+    } catch (e) { console.error(e); }
+}
+
+async function editMemory(key) {
+    try {
+        const res = await fetch('/api/memories/' + encodeURIComponent(key));
+        const m = await res.json();
+        openModal('Bearbeiten: ' + m.key, `
+            <label>Key</label>
+            <input type="text" id="edit-key" value="${escapeAttr(m.key)}" readonly style="background:var(--surface-hover);cursor:not-allowed;">
+            <label>Value</label>
+            <textarea id="edit-value" rows="12">${escapeHtml(m.value)}</textarea>
+            <label>Tags (kommagetrennt)</label>
+            <input type="text" id="edit-tags" value="${escapeAttr(m.tags.join(', '))}">
+            <div class="btn-row">
+                <button class="btn btn-primary" onclick="saveEditedMemory('${escapeAttr(m.key)}')">Speichern</button>
+                <button class="btn" onclick="closeModal()">Abbrechen</button>
+            </div>
+        `);
+    } catch (e) { console.error(e); }
+}
+
+async function saveEditedMemory(key) {
+    const value = document.getElementById('edit-value').value;
+    const tagsStr = document.getElementById('edit-tags').value;
+    const tags = tagsStr ? tagsStr.split(',').map(t => t.trim()).filter(Boolean) : [];
+    try {
+        await fetch('/api/memories/' + encodeURIComponent(key), {
+            method: 'PUT',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({key, value, tags})
+        });
+        closeModal();
+        loadMemories();
+    } catch (e) { console.error(e); }
+}
+
+// --- Tag Click Filter ---
+
+function clickTag(tag) {
+    const sel = document.getElementById('memory-tag-filter');
+    // Find option with this tag, or set search
+    for (let i = 0; i < sel.options.length; i++) {
+        if (sel.options[i].value === tag) {
+            sel.selectedIndex = i;
+            filterByTag();
+            // Switch to memories tab
+            showTab('memories');
+            document.querySelectorAll('.tab').forEach(b => b.classList.remove('active'));
+            document.querySelectorAll('.tab').forEach(b => { if (b.textContent === 'Memories') b.classList.add('active'); });
+            return;
+        }
+    }
+}
+
+// --- Bulk Operations ---
+
+function toggleBulkMode() {
+    bulkMode = !bulkMode;
+    document.getElementById('bulk-delete-btn').style.display = bulkMode ? '' : 'none';
+    loadMemories();
+}
+
+async function bulkDeleteSelected() {
+    const checked = document.querySelectorAll('.bulk-cb:checked');
+    if (checked.length === 0) { alert('Keine Memories ausgewaehlt.'); return; }
+    const keys = Array.from(checked).map(cb => cb.dataset.key);
+    if (!confirm(`${keys.length} Memories loeschen?`)) return;
+    try {
+        await fetch('/api/memories/bulk-delete', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify(keys)
+        });
+        loadMemories();
+    } catch (e) { console.error(e); }
+}
+
+async function exportMemories() {
+    const tag = document.getElementById('memory-tag-filter').value;
+    const url = tag ? `/api/export-memories?tag=${encodeURIComponent(tag)}` : '/api/export-memories';
+    try {
+        const res = await fetch(url);
+        const data = await res.json();
+        const blob = new Blob([JSON.stringify(data, null, 2)], {type: 'application/json'});
+        const a = document.createElement('a');
+        a.href = URL.createObjectURL(blob);
+        a.download = `context-pilot-export${tag ? '-' + tag : ''}.json`;
+        a.click();
+    } catch (e) { console.error(e); }
 }
 
 async function saveMemory() {
@@ -664,9 +798,10 @@ async function loadProfiles() {
             if (p.is_active) opt.selected = true;
             sel.appendChild(opt);
         });
-        const delBtn = document.getElementById('profile-delete-btn');
         const active = d.profiles.find(p => p.is_active);
-        delBtn.style.display = (active && !active.is_default) ? '' : 'none';
+        const notDefault = active && !active.is_default;
+        document.getElementById('profile-delete-btn').style.display = notDefault ? '' : 'none';
+        document.getElementById('profile-rename-btn').style.display = notDefault ? '' : 'none';
     } catch (e) { console.error(e); }
 }
 
@@ -707,6 +842,22 @@ async function createProfile(name, description) {
         } else {
             const d = await res.json();
             alert(d.detail || 'Fehler beim Erstellen');
+        }
+    } catch (e) { console.error(e); }
+}
+
+async function renameActiveProfile() {
+    const oldName = document.getElementById('profile-select').value;
+    const newName = prompt('Neuer Name:', oldName);
+    if (!newName || newName === oldName) return;
+    const desc = prompt('Beschreibung (optional):', '') || '';
+    try {
+        const res = await fetch(`/api/profiles/${encodeURIComponent(oldName)}?new_name=${encodeURIComponent(newName)}&description=${encodeURIComponent(desc)}`, { method: 'PUT' });
+        if (res.ok) {
+            loadProfiles();
+        } else {
+            const d = await res.json();
+            alert(d.detail || 'Fehler');
         }
     } catch (e) { console.error(e); }
 }

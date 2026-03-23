@@ -326,6 +326,45 @@ class TestKnowledgeGraph:
         assert len(d["groups"]) == 2
 
 
+class TestMemoryEdit:
+    def test_update_memory(self, client):
+        client.post("/api/memories", json={"key": "k", "value": "old", "tags": ["a"]})
+        r = client.put("/api/memories/k", json={"key": "k", "value": "new", "tags": ["b"]})
+        assert r.status_code == 200
+        assert r.json()["status"] == "updated"
+        r2 = client.get("/api/memories/k")
+        assert r2.json()["value"] == "new"
+        assert r2.json()["tags"] == ["b"]
+
+    def test_update_not_found(self, client):
+        r = client.put("/api/memories/nope", json={"key": "nope", "value": "x"})
+        assert r.status_code == 404
+
+    def test_bulk_delete(self, client):
+        client.post("/api/memories", json={"key": "a", "value": "1"})
+        client.post("/api/memories", json={"key": "b", "value": "2"})
+        client.post("/api/memories", json={"key": "c", "value": "3"})
+        r = client.post("/api/memories/bulk-delete", json=["a", "c"])
+        assert r.status_code == 200
+        assert r.json()["count"] == 2
+        r2 = client.get("/api/memories")
+        assert len(r2.json()) == 1
+        assert r2.json()[0]["key"] == "b"
+
+    def test_export_all(self, client):
+        client.post("/api/memories", json={"key": "x", "value": "val", "tags": ["t"]})
+        r = client.get("/api/export-memories")
+        assert r.status_code == 200
+        d = r.json()
+        assert len(d["memories"]) == 1
+
+    def test_export_by_tag(self, client):
+        client.post("/api/memories", json={"key": "a", "value": "v", "tags": ["alpha"]})
+        client.post("/api/memories", json={"key": "b", "value": "v", "tags": ["beta"]})
+        r = client.get("/api/export-memories?tag=alpha")
+        assert len(r.json()["memories"]) == 1
+
+
 class TestImport:
     def test_import_claude_md(self, client):
         content = b"# My Instructions\n\n## Section One\nDo this.\n\n## Section Two\nDo that."

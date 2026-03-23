@@ -19,6 +19,7 @@
             <select id="profile-select" onchange="switchProfile()" style="width:auto;min-width:140px;padding:4px 8px;font-size:12px;">
             </select>
             <button class="btn btn-small" onclick="showNewProfileDialog()">+</button>
+            <button class="btn btn-small" onclick="renameActiveProfile()" id="profile-rename-btn" style="display:none;">Rename</button>
             <button class="btn btn-small btn-danger" onclick="deleteActiveProfile()" id="profile-delete-btn" style="display:none;">Del</button>
         </div>
     </header>
@@ -128,7 +129,14 @@
                     <input type="text" id="memory-tags" placeholder="Tags (comma-separated)">
                     <button class="btn btn-primary" onclick="saveMemory()">Save</button>
                 </div>
-                <div id="memory-count" style="color:var(--text-muted);font-size:12px;margin:8px 0;"></div>
+                <div style="display:flex;justify-content:space-between;align-items:center;margin:8px 0;">
+                    <span id="memory-count" style="color:var(--text-muted);font-size:12px;"></span>
+                    <div style="display:flex;gap:6px;">
+                        <button class="btn btn-small" onclick="toggleBulkMode()">Auswahl</button>
+                        <button class="btn btn-small" id="bulk-delete-btn" style="display:none;" onclick="bulkDeleteSelected()">Ausgewaehlte loeschen</button>
+                        <button class="btn btn-small" onclick="exportMemories()">Export JSON</button>
+                    </div>
+                </div>
                 <div id="memory-list" class="item-list"></div>
             </div>
         </section>
@@ -283,6 +291,17 @@
             </div>
         </section>
     </main>
+
+    <!-- Memory Detail/Edit Modal -->
+    <div id="modal-overlay" class="modal-overlay" onclick="closeModal(event)">
+        <div class="modal" onclick="event.stopPropagation()">
+            <div class="modal-header">
+                <h3 id="modal-title">Memory</h3>
+                <button class="btn btn-small" onclick="closeModal()">X</button>
+            </div>
+            <div id="modal-body" class="modal-body"></div>
+        </div>
+    </div>
 
     <script src="/static/app.js"></script>
     <script>loadProfiles(); loadDashboard();</script>

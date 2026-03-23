@@ -109,6 +109,30 @@ class TestDuplicate:
             pm.duplicate("nope", "copy")
 
 
+class TestRename:
+    def test_rename_profile(self, pm):
+        pm.create("old-name")
+        pm.rename("old-name", "new-name")
+        assert pm.get("old-name") is None
+        assert pm.get("new-name") is not None
+
+    def test_rename_default_fails(self, pm):
+        with pytest.raises(ValueError, match="default"):
+            pm.rename("default", "other")
+
+    def test_rename_to_existing_fails(self, pm):
+        pm.create("a")
+        pm.create("b")
+        with pytest.raises(ValueError, match="already exists"):
+            pm.rename("a", "b")
+
+    def test_rename_updates_active(self, pm):
+        pm.create("active-one")
+        pm.switch("active-one")
+        pm.rename("active-one", "renamed")
+        assert pm.active_name == "renamed"
+
+
 class TestGet:
     def test_get_existing(self, pm):
         pm.create("findme")
