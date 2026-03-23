@@ -96,14 +96,14 @@ class TestSkillBudgetAllocation:
         usage_store.save_skill_budget("git", "", 3000, 0.85)
         budgets = usage_store.get_skill_budgets("")
         assert "git" in budgets
-        assert budgets["git"].tokens == 3000
-        assert abs(budgets["git"].efficiency - 0.85) < 0.01
+        assert budgets["git"]["tokens"] == 3000
+        assert abs(budgets["git"]["efficiency"] - 0.85) < 0.01
 
     def test_upsert(self, usage_store: UsageStore) -> None:
         usage_store.save_skill_budget("git", "", 3000, 0.85)
         usage_store.save_skill_budget("git", "", 4000, 0.92)
         budgets = usage_store.get_skill_budgets("")
-        assert budgets["git"].tokens == 4000
+        assert budgets["git"]["tokens"] == 4000
 
     def test_multiple_skills(self, usage_store: UsageStore) -> None:
         usage_store.save_skill_budget("git", "", 3000, 0.85)
@@ -116,5 +116,5 @@ class TestSkillBudgetAllocation:
         usage_store.save_skill_budget("git", "project_b", 5000, 0.70)
         a = usage_store.get_skill_budgets("project_a")
         b = usage_store.get_skill_budgets("project_b")
-        assert a["git"].tokens == 3000
-        assert b["git"].tokens == 5000
+        assert a["git"]["tokens"] == 3000
+        assert b["git"]["tokens"] == 5000

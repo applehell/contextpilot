@@ -386,18 +386,17 @@ class UsageStore:
         )
         self._db.conn.commit()
 
-    def get_skill_budgets(self, project_name: str = "") -> Dict[str, tuple]:
+    def get_skill_budgets(self, project_name: str = "") -> Dict[str, dict]:
         rows = self._db.conn.execute(
             """SELECT skill_name, token_budget, efficiency
                FROM skill_budget_allocation WHERE project_name = ?""",
             (project_name,),
         ).fetchall()
-        from ..core.skill_assembler import BudgetAllocation
         return {
-            r["skill_name"]: BudgetAllocation(
-                skill_name=r["skill_name"],
-                tokens=r["token_budget"],
-                efficiency=r["efficiency"],
-            )
+            r["skill_name"]: {
+                "skill_name": r["skill_name"],
+                "tokens": r["token_budget"],
+                "efficiency": r["efficiency"],
+            }
             for r in rows
         }

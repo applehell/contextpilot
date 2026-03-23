@@ -133,6 +133,57 @@ Claude Code ──→ MCP Server (SSE, Port 8400)
 Beide ──→ SQLite (~/.contextpilot/data.db)
 ```
 
+## Datenpfade
+
+```
+~/.contextpilot/
+  data.db                      ← Standard-Datenbank (default Profil)
+  profiles.json                ← Profil-Konfiguration (aktives Profil)
+  profiles/
+    <profilname>/
+      data.db                  ← Datenbank fuer dieses Profil
+
+# Im Docker-Container (CONTEXTPILOT_DATA_DIR=/data):
+/data/
+  data.db
+  profiles.json
+  profiles/<name>/data.db
+```
+
+## Projektstruktur
+
+```
+src/
+  core/                        ← Kernlogik (Assembler, Compressoren, Relevanz)
+    assembler.py               ← 3-Phasen Token-Budget Assembler
+    block.py                   ← Block Datenmodell
+    compressors/               ← 7 Kompressoren (bullet, mermaid, yaml, code, ...)
+    relevance.py               ← Relevance Scoring Engine
+    secrets.py                 ← Secrets Detector (OWASP Patterns)
+    token_budget.py            ← tiktoken Wrapper
+    claude_config.py           ← MCP Registration in ~/.claude.json
+    weight_adjuster.py         ← Usage-basierte Gewichtung
+  storage/                     ← SQLite Persistenz
+    db.py                      ← DB Engine + Migrationen (v1-v6)
+    memory.py                  ← MemoryStore (CRUD + FTS5)
+    memory_activity.py         ← Activity Log
+    profiles.py                ← Profil-Manager
+    usage.py                   ← Usage Tracking + Feedback
+  web/                         ← Web-App (FastAPI + HTMX)
+    app.py                     ← API Endpoints
+    templates/index.html       ← Single-Page Frontend
+    static/app.js              ← Frontend-Logik
+    static/style.css           ← Styling (Catppuccin Dark)
+  interfaces/                  ← Externe Schnittstellen
+    mcp_server.py              ← MCP Server (stdio + SSE)
+    cli.py                     ← Click CLI
+  importers/                   ← Memory-Import
+    claude.py                  ← CLAUDE.md Parser
+    copilot.py                 ← copilot-instructions.md Parser
+    sqlite.py                  ← memory-mcp SQLite Importer
+tests/                         ← 444 Tests
+```
+
 ## API
 
 | Endpoint | Methode | Beschreibung |
@@ -146,7 +197,7 @@ Beide ──→ SQLite (~/.contextpilot/data.db)
 | `/api/memory-tags` | GET | Alle Tags |
 | `/api/memory-activity` | GET | Aenderungs-Log |
 | `/api/sensitivity` | GET | Secrets Scan |
-| `/api/memories/{key}/redacted` | GET | Redacted View |
+| `/api/redacted?key=...` | GET | Redacted View |
 | `/api/knowledge-graph` | GET | Graph-Daten (vis.js) |
 | `/api/skills` | GET | Registrierte MCP Skills |
 | `/api/profiles` | GET/POST | Profile auflisten/erstellen |
@@ -167,7 +218,7 @@ Beide ──→ SQLite (~/.contextpilot/data.db)
 ```bash
 python3 -m venv .venv && source .venv/bin/activate
 pip install -e '.[dev]'
-pytest tests/ -v              # 530 Tests
+pytest tests/ -v              # 444 Tests
 python -m src.web --reload    # Hot-Reload
 docker build -t context-pilot .
 ```
