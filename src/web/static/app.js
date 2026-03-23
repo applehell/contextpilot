@@ -279,23 +279,35 @@ function renderMemories(data) {
 
 // --- Memory View/Edit Modal ---
 
+function memoryUrl(key) {
+    // {key:path} erwartet echte Slashes — nur Sonderzeichen enkodieren
+    return '/api/memories/' + key.split('/').map(encodeURIComponent).join('/');
+}
+
 function openModal(title, bodyHtml) {
     document.getElementById('modal-title').textContent = title;
     document.getElementById('modal-body').innerHTML = bodyHtml;
     document.getElementById('modal-overlay').classList.add('active');
+    document.body.style.overflow = 'hidden';
 }
 
-function closeModal(e) {
-    if (e && e.target !== e.currentTarget) return;
+function closeModal() {
     document.getElementById('modal-overlay').classList.remove('active');
+    document.body.style.overflow = '';
+}
+
+function onOverlayClick(e) {
+    if (e.target === e.currentTarget) closeModal();
 }
 
 async function viewMemory(key) {
+    event.stopPropagation();
     try {
-        const res = await fetch('/api/memories/' + encodeURIComponent(key));
+        const res = await fetch(memoryUrl(key));
+        if (!res.ok) { console.error('GET failed', res.status); return; }
         const m = await res.json();
         const tagsHtml = m.tags.length
-            ? m.tags.map(t => `<span class="tag-link" onclick="clickTag('${escapeAttr(t)}');closeModal();">#${escapeHtml(t)}</span>`).join(' ')
+            ? m.tags.map(t => `<span class="tag-link" onclick="event.stopPropagation();clickTag('${escapeAttr(t)}');closeModal();">#${escapeHtml(t)}</span>`).join(' ')
             : '<span class="muted">keine</span>';
         openModal(m.key, `
             <div style="margin-bottom:12px;">
@@ -304,32 +316,38 @@ async function viewMemory(key) {
             </div>
             <div style="margin-bottom:12px;">
                 <label>Inhalt</label>
-                <pre style="white-space:pre-wrap;font-size:12px;background:var(--bg);padding:12px;border-radius:var(--radius);max-height:400px;overflow-y:auto;">${escapeHtml(m.value)}</pre>
+                <pre style="white-space:pre-wrap;font-size:12px;background:var(--bg);padding:12px;border-radius:var(--radius);max-height:50vh;overflow-y:auto;">${escapeHtml(m.value)}</pre>
             </div>
             <div class="btn-row">
-                <button class="btn" onclick="editMemory('${escapeAttr(m.key)}')">Bearbeiten</button>
-                <button class="btn" onclick="closeModal()">Schliessen</button>
+                <button class="btn btn-primary" onclick="event.stopPropagation();editMemory('${escapeAttr(m.key)}')">Bearbeiten</button>
+                <button class="btn" onclick="event.stopPropagation();closeModal()">Schliessen</button>
             </div>
         `);
     } catch (e) { console.error(e); }
 }
 
 async function editMemory(key) {
+    event.stopPropagation();
     try {
-        const res = await fetch('/api/memories/' + encodeURIComponent(key));
+        const res = await fetch(memoryUrl(key));
+        if (!res.ok) { console.error('GET failed', res.status); return; }
         const m = await res.json();
+        // Key als data-Attribut speichern statt in onclick-String
         openModal('Bearbeiten: ' + m.key, `
             <label>Key</label>
-            <input type="text" id="edit-key" value="${escapeAttr(m.key)}" readonly style="background:var(--surface-hover);cursor:not-allowed;">
+            <input type="text" id="edit-key" value="${escapeHtml(m.key)}" readonly style="background:var(--surface-hover);cursor:not-allowed;">
             <label>Value</label>
-            <textarea id="edit-value" rows="12">${escapeHtml(m.value)}</textarea>
+            <textarea id="edit-value" rows="14" style="min-height:200px;">${escapeHtml(m.value)}</textarea>
             <label>Tags (kommagetrennt)</label>
-            <input type="text" id="edit-tags" value="${escapeAttr(m.tags.join(', '))}">
+            <input type="text" id="edit-tags" value="${escapeHtml(m.tags.join(', '))}">
             <div class="btn-row">
-                <button class="btn btn-primary" onclick="saveEditedMemory('${escapeAttr(m.key)}')">Speichern</button>
-                <button class="btn" onclick="closeModal()">Abbrechen</button>
+                <button class="btn btn-primary" id="save-memory-btn">Speichern</button>
+                <button class="btn" id="cancel-memory-btn">Abbrechen</button>
             </div>
         `);
+        // Event Listener statt inline onclick — zuverlaessiger
+        document.getElementById('save-memory-btn').addEventListener('click', () => saveEditedMemory(m.key));
+        document.getElementById('cancel-memory-btn').addEventListener('click', () => closeModal());
     } catch (e) { console.error(e); }
 }
 
@@ -338,14 +356,18 @@ async function saveEditedMemory(key) {
     const tagsStr = document.getElementById('edit-tags').value;
     const tags = tagsStr ? tagsStr.split(',').map(t => t.trim()).filter(Boolean) : [];
     try {
-        await fetch('/api/memories/' + encodeURIComponent(key), {
+        const res = await fetch(memoryUrl(key), {
             method: 'PUT',
             headers: {'Content-Type': 'application/json'},
             body: JSON.stringify({key, value, tags})
         });
-        closeModal();
-        loadMemories();
-    } catch (e) { console.error(e); }
+        if (res.ok) {
+            closeModal();
+            loadMemories();
+        } else {
+            alert('Fehler beim Speichern: ' + res.status);
+        }
+    } catch (e) { console.error(e); alert('Fehler: ' + e.message); }
 }
 
 // --- Tag Click Filter ---
@@ -425,7 +447,7 @@ async function saveMemory() {
 async function deleteMemory(key) {
     if (!confirm(`Delete "${key}"?`)) return;
     try {
-        await fetch('/api/memories/' + encodeURIComponent(key), {method: 'DELETE'});
+        await fetch(memoryUrl(key), {method: 'DELETE'});
         loadMemories();
     } catch (e) { console.error(e); }
 }
@@ -709,7 +731,7 @@ function renderGraph(data) {
 async function fetchMemoryDetail(key) {
     const el = document.getElementById('graph-memory-content');
     try {
-        const res = await fetch('/api/memories/' + encodeURIComponent(key));
+        const res = await fetch(memoryUrl(key));
         const m = await res.json();
         const preview = m.value.length > 500 ? m.value.substring(0, 500) + '...' : m.value;
         el.innerHTML = `<pre style="white-space:pre-wrap;font-size:11px;color:#a6adc8;max-height:200px;overflow-y:auto;background:#181825;padding:8px;border-radius:4px;">${escapeHtml(preview)}</pre>`;
