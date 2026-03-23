@@ -38,19 +38,36 @@ function init() {
 }
 
 function checkWelcome() {
+    const overlay = document.getElementById('welcome-overlay');
+    if (!overlay) return;
+
+    // Dismiss-Button per Event-Listener
+    const btn = document.getElementById('welcome-dismiss-btn');
+    if (btn) btn.addEventListener('click', dismissWelcome);
+
+    // Overlay-Klick ausserhalb der Card schliesst auch
+    overlay.addEventListener('click', e => {
+        if (e.target === overlay) dismissWelcome();
+    });
+
     const dismissed = localStorage.getItem('cp-welcome-dismissed');
     if (!dismissed) {
-        document.getElementById('welcome-overlay').classList.add('active');
+        // Kurz warten damit die CSS-Animation sichtbar wird
+        requestAnimationFrame(() => {
+            overlay.classList.add('active');
+        });
     }
 }
 
 function dismissWelcome() {
     localStorage.setItem('cp-welcome-dismissed', '1');
-    document.getElementById('welcome-overlay').classList.remove('active');
+    const overlay = document.getElementById('welcome-overlay');
+    if (overlay) overlay.classList.remove('active');
 }
 
 function showWelcomeForNewProfile(profileName) {
     const overlay = document.getElementById('welcome-overlay');
+    if (!overlay) return;
     const card = overlay.querySelector('.welcome-card');
     card.querySelector('h2').textContent = 'Profil "' + profileName + '" erstellt';
     card.querySelector('p').textContent = 'Dein neues Profil ist bereit. Starte mit dem Import von Wissen oder lege direkt Memories an.';
