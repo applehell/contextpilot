@@ -13,26 +13,20 @@ let secretsData = null;
 // ═══════════════════════════════════════════════════════════════
 
 function init() {
-    // Tab delegation
     document.querySelectorAll('.tab[data-tab]').forEach(btn => {
         btn.addEventListener('click', () => showTab(btn.dataset.tab, btn));
     });
 
-    // Modal close
     document.getElementById('modal-close-btn').addEventListener('click', closeModal);
     document.getElementById('modal-overlay').addEventListener('click', e => {
         if (e.target === e.currentTarget) closeModal();
     });
 
-    // Import handlers
     document.querySelectorAll('[data-import]').forEach(input => {
         input.addEventListener('change', () => importFile(input, input.dataset.import));
     });
 
-    // Welcome screen
     checkWelcome();
-
-    // Initial load
     loadProfiles();
     loadDashboard();
 }
@@ -41,21 +35,16 @@ function checkWelcome() {
     const overlay = document.getElementById('welcome-overlay');
     if (!overlay) return;
 
-    // Dismiss-Button per Event-Listener
     const btn = document.getElementById('welcome-dismiss-btn');
     if (btn) btn.addEventListener('click', dismissWelcome);
 
-    // Overlay-Klick ausserhalb der Card schliesst auch
     overlay.addEventListener('click', e => {
         if (e.target === overlay) dismissWelcome();
     });
 
     const dismissed = localStorage.getItem('cp-welcome-dismissed');
     if (!dismissed) {
-        // Kurz warten damit die CSS-Animation sichtbar wird
-        requestAnimationFrame(() => {
-            overlay.classList.add('active');
-        });
+        requestAnimationFrame(() => overlay.classList.add('active'));
     }
 }
 
@@ -69,8 +58,8 @@ function showWelcomeForNewProfile(profileName) {
     const overlay = document.getElementById('welcome-overlay');
     if (!overlay) return;
     const card = overlay.querySelector('.welcome-card');
-    card.querySelector('h2').textContent = 'Profil "' + profileName + '" erstellt';
-    card.querySelector('p').textContent = 'Dein neues Profil ist bereit. Starte mit dem Import von Wissen oder lege direkt Memories an.';
+    card.querySelector('h2').textContent = 'Profile "' + profileName + '" created';
+    card.querySelector('p').textContent = 'Your new profile is ready. Start by importing knowledge or creating memories.';
     overlay.classList.add('active');
 }
 
@@ -132,10 +121,9 @@ async function loadDashboard() {
         skillEl.className = 'card-value' + (d.skill_alive > 0 ? ' green' : '');
         document.getElementById('dash-skills-detail').textContent = 'connected';
 
-        // Activity
         const actEl = document.getElementById('dash-activity');
         if (!d.activity.length) {
-            actEl.innerHTML = '<p class="muted">Keine Aktivitaet</p>';
+            actEl.innerHTML = '<p class="muted">No activity yet</p>';
         } else {
             actEl.innerHTML = d.activity.map(e => {
                 const color = OP_COLORS[e.operation] || 'var(--text-muted)';
@@ -150,7 +138,6 @@ async function loadDashboard() {
         }
     } catch (e) { console.error('Dashboard load failed:', e); } finally { botIdle(); }
 
-    // MCP status
     try {
         const mcpRes = await fetch('/api/mcp-status');
         const mcp = await mcpRes.json();
@@ -163,7 +150,7 @@ async function loadDashboard() {
         } else {
             mcpEl.textContent = 'OFF';
             mcpEl.className = 'card-value red';
-            mcpDetail.textContent = 'Nicht in Claude registriert';
+            mcpDetail.textContent = 'Not registered in Claude';
         }
     } catch (e) {}
 }
@@ -175,7 +162,7 @@ async function loadDashboard() {
 async function previewContext() {
     const budget = parseInt(document.getElementById('preview-budget').value) || 8000;
     const el = document.getElementById('preview-result');
-    el.innerHTML = '<p class="muted">Assembliere...</p>';
+    el.innerHTML = '<p class="muted">Assembling...</p>';
 
     try {
         const res = await fetch('/api/preview-context?budget=' + budget, { method: 'POST' });
@@ -189,11 +176,11 @@ async function previewContext() {
                 <span class="preview-bar-label">${d.used_tokens.toLocaleString()} / ${d.budget.toLocaleString()} tokens (${pct.toFixed(1)}%)</span>
             </div>
             <div style="font-size:12px;color:var(--text-muted);margin-bottom:8px;">
-                ${d.block_count} Blocks eingeschlossen | ${d.dropped_count} gedroppt | ${d.input_count} total
+                ${d.block_count} blocks included | ${d.dropped_count} dropped | ${d.input_count} total
             </div>`;
 
         if (d.blocks.length > 0) {
-            html += '<div style="font-size:11px;font-weight:600;color:var(--text-muted);margin:8px 0 4px;">Eingeschlossen:</div>';
+            html += '<div style="font-size:11px;font-weight:600;color:var(--text-muted);margin:8px 0 4px;">Included:</div>';
             d.blocks.forEach(b => {
                 const hint = b.compress_hint ? ` | ${b.compress_hint}` : '';
                 html += `<div class="result-block priority-${b.priority}">
@@ -204,7 +191,7 @@ async function previewContext() {
         }
 
         if (d.dropped.length > 0) {
-            html += '<div style="font-size:11px;font-weight:600;color:var(--text-muted);margin:8px 0 4px;">Gedroppt:</div>';
+            html += '<div style="font-size:11px;font-weight:600;color:var(--text-muted);margin:8px 0 4px;">Dropped:</div>';
             d.dropped.forEach(b => {
                 html += `<div class="result-block dropped">
                     <div class="meta">${b.token_count} tokens (dropped)</div>
@@ -215,7 +202,7 @@ async function previewContext() {
 
         el.innerHTML = html;
     } catch (e) {
-        el.innerHTML = '<p style="color:var(--danger);">Fehler: ' + escapeHtml(e.message) + '</p>';
+        el.innerHTML = '<p style="color:var(--danger);">Error: ' + escapeHtml(e.message) + '</p>';
     }
 }
 
@@ -228,7 +215,7 @@ function renderSkillCard(s) {
     const hints = (s.context_hints || []).slice(0, 6);
     const hintsHtml = hints.length
         ? hints.map(h => `<span class="skill-hint">${escapeHtml(h)}</span>`).join('')
-        : '<span class="muted">keine hints</span>';
+        : '<span class="muted">no hints</span>';
     const blocks = s.blocks_served || 0;
     return `<div class="skill-card">
         <span class="skill-dot ${alive ? 'alive' : 'stale'}"></span>
@@ -247,7 +234,7 @@ async function loadSkills() {
         const skills = await res.json();
         const list = document.getElementById('skill-list');
         if (skills.length === 0) {
-            list.innerHTML = '<p class="muted">Keine Skills verbunden</p>';
+            list.innerHTML = '<p class="muted">No skills connected</p>';
         } else {
             list.innerHTML = skills.map(s => renderSkillCard(s)).join('');
         }
@@ -275,7 +262,7 @@ async function loadMemories() {
 function renderTagFilter(tags) {
     const sel = document.getElementById('memory-tag-filter');
     const current = sel.value;
-    sel.innerHTML = '<option value="">Alle Tags</option>';
+    sel.innerHTML = '<option value="">All Tags</option>';
     tags.forEach(t => {
         const opt = document.createElement('option');
         opt.value = t;
@@ -303,7 +290,7 @@ function renderMemories(data) {
     if (countEl) countEl.textContent = `${data.length} memories`;
 
     if (data.length === 0) {
-        list.innerHTML = '<div class="empty-state">Keine Memories gefunden.</div>';
+        list.innerHTML = '<div class="empty-state">No memories found.</div>';
         return;
     }
 
@@ -317,16 +304,16 @@ function renderMemories(data) {
             && (now - m.updated_at) < RECENT;
 
         let badge = '';
-        if (isNew) badge = '<span class="badge badge-new">NEU</span> ';
+        if (isNew) badge = '<span class="badge badge-new">NEW</span> ';
         else if (isModified) badge = '<span class="badge badge-upd">UPD</span> ';
 
         let age = '';
         const ts = m.updated_at || m.created_at;
         if (ts) {
             const delta = now - ts;
-            if (delta < 3600) age = `vor ${Math.floor(delta / 60)} Min`;
-            else if (delta < 86400) age = `vor ${Math.floor(delta / 3600)} Std`;
-            else age = `vor ${Math.floor(delta / 86400)} Tagen`;
+            if (delta < 3600) age = `${Math.floor(delta / 60)}m ago`;
+            else if (delta < 86400) age = `${Math.floor(delta / 3600)}h ago`;
+            else age = `${Math.floor(delta / 86400)}d ago`;
         }
 
         const stateClass = isNew ? ' new' : isModified ? ' updated' : '';
@@ -379,16 +366,16 @@ async function viewMemory(key) {
         const m = await res.json();
         const tagsHtml = m.tags.length
             ? m.tags.map(t => `<span class="tag" onclick="event.stopPropagation();clickTag('${escapeAttr(t)}');closeModal();">#${escapeHtml(t)}</span>`).join(' ')
-            : '<span class="muted">keine</span>';
+            : '<span class="muted">none</span>';
 
         openModal(m.key, `
             <label>Tags</label>
             <div style="margin-bottom:16px;">${tagsHtml}</div>
-            <label>Inhalt</label>
+            <label>Content</label>
             <pre>${escapeHtml(m.value)}</pre>
         `, `
-            <button class="btn btn-primary" onclick="editMemory('${escapeAttr(m.key)}')">Bearbeiten</button>
-            <button class="btn" onclick="closeModal()">Schliessen</button>
+            <button class="btn btn-primary" onclick="editMemory('${escapeAttr(m.key)}')">Edit</button>
+            <button class="btn" onclick="closeModal()">Close</button>
         `);
     } catch (e) { console.error(e); }
 }
@@ -399,16 +386,16 @@ async function editMemory(key) {
         if (!res.ok) return;
         const m = await res.json();
 
-        openModal('Bearbeiten: ' + m.key, `
+        openModal('Edit: ' + m.key, `
             <label>Key</label>
             <input type="text" id="edit-key" value="${escapeHtml(m.key)}" readonly style="background:var(--surface-alt);cursor:not-allowed;">
             <label>Value</label>
             <textarea id="edit-value" rows="14">${escapeHtml(m.value)}</textarea>
-            <label>Tags (kommagetrennt)</label>
+            <label>Tags (comma-separated)</label>
             <input type="text" id="edit-tags" value="${escapeHtml(m.tags.join(', '))}">
         `, `
-            <button class="btn btn-primary" id="save-memory-btn">Speichern</button>
-            <button class="btn" id="cancel-memory-btn">Abbrechen</button>
+            <button class="btn btn-primary" id="save-memory-btn">Save</button>
+            <button class="btn" id="cancel-memory-btn">Cancel</button>
         `);
 
         document.getElementById('save-memory-btn').addEventListener('click', () => saveEditedMemory(m.key));
@@ -430,9 +417,9 @@ async function saveEditedMemory(key) {
             closeModal();
             loadMemories();
         } else {
-            alert('Fehler beim Speichern: ' + res.status);
+            alert('Save failed: ' + res.status);
         }
-    } catch (e) { alert('Fehler: ' + e.message); }
+    } catch (e) { alert('Error: ' + e.message); }
 }
 
 async function saveNewMemory() {
@@ -455,7 +442,7 @@ async function saveNewMemory() {
 }
 
 async function deleteMemory(key) {
-    if (!confirm(`"${key}" loeschen?`)) return;
+    if (!confirm(`Delete "${key}"?`)) return;
     try {
         await fetch(memoryUrl(key), {method: 'DELETE'});
         loadMemories();
@@ -484,15 +471,15 @@ function clickTag(tag) {
 function toggleBulkMode() {
     bulkMode = !bulkMode;
     document.getElementById('bulk-delete-btn').style.display = bulkMode ? '' : 'none';
-    document.getElementById('bulk-toggle-btn').textContent = bulkMode ? 'Abbrechen' : 'Auswahl';
+    document.getElementById('bulk-toggle-btn').textContent = bulkMode ? 'Cancel' : 'Select';
     loadMemories();
 }
 
 async function bulkDeleteSelected() {
     const checked = document.querySelectorAll('.bulk-cb:checked');
-    if (checked.length === 0) { alert('Keine Memories ausgewaehlt.'); return; }
+    if (checked.length === 0) { alert('No memories selected.'); return; }
     const keys = Array.from(checked).map(cb => cb.dataset.key);
-    if (!confirm(`${keys.length} Memories loeschen?`)) return;
+    if (!confirm(`Delete ${keys.length} memories?`)) return;
     try {
         await fetch('/api/memories/bulk-delete', {
             method: 'POST',
@@ -561,7 +548,7 @@ function _blockTemplate(idx) {
         <button class="btn btn-small" onclick="duplicateBlock(this)">Dup</button>
         <button class="btn btn-small btn-danger" onclick="removeBlock(this)">Del</button>
     </div>
-    <textarea class="block-content" rows="4" placeholder="Block-Inhalt eingeben..."
+    <textarea class="block-content" rows="4" placeholder="Enter block content..."
               oninput="estimateTokens(this)"></textarea>`;
 }
 
@@ -607,7 +594,7 @@ async function testCompressBlock(btn) {
     const hint = entry.querySelector('.block-hint').value;
 
     if (!content) return;
-    if (!hint) { alert('Waehle zuerst einen Compress Hint aus.'); return; }
+    if (!hint) { alert('Select a compression hint first.'); return; }
 
     try {
         const res = await fetch('/api/test-compress', {
@@ -734,12 +721,12 @@ function renderGraph(data) {
                 detail.style.display = 'block';
                 const tagHtml = node.tags.length
                     ? node.tags.map(t => `<span class="badge" style="background:var(--surface-alt);color:var(--text-secondary);">${escapeHtml(t)}</span>`).join(' ')
-                    : '<span class="muted">keine</span>';
+                    : '<span class="muted">none</span>';
                 detail.innerHTML = `
                     <div style="font-weight:600;font-size:14px;margin-bottom:6px;">${escapeHtml(node.id)}</div>
-                    <div style="color:var(--text-secondary);margin-bottom:8px;">Gruppe: ${escapeHtml(node.group)}</div>
+                    <div style="color:var(--text-secondary);margin-bottom:8px;">Group: ${escapeHtml(node.group)}</div>
                     <div style="margin-bottom:8px;">Tags: ${tagHtml}</div>
-                    <button class="btn btn-small" onclick="fetchMemoryDetail('${escapeAttr(node.id)}')">Inhalt laden</button>
+                    <button class="btn btn-small" onclick="fetchMemoryDetail('${escapeAttr(node.id)}')">Load content</button>
                     <div id="graph-memory-content" style="margin-top:8px;"></div>`;
             }
         } else {
@@ -748,10 +735,10 @@ function renderGraph(data) {
     });
 
     document.getElementById('graph-stats').textContent =
-        `${data.stats.total_memories} Memories | ${data.stats.total_groups} Gruppen | ${data.stats.total_edges} Verbindungen`;
+        `${data.stats.total_memories} memories | ${data.stats.total_groups} groups | ${data.stats.total_edges} edges`;
 
     const legend = document.getElementById('graph-legend');
-    legend.innerHTML = '<div style="font-weight:600;margin-bottom:4px;">Gruppen</div>' +
+    legend.innerHTML = '<div style="font-weight:600;margin-bottom:4px;">Groups</div>' +
         Object.entries(data.groups).map(([name, cfg]) => {
             const count = data.nodes.filter(n => n.group === name).length;
             return `<div style="display:flex;align-items:center;gap:6px;margin:2px 0;">
@@ -768,7 +755,7 @@ async function fetchMemoryDetail(key) {
         const preview = m.value.length > 500 ? m.value.substring(0, 500) + '...' : m.value;
         el.innerHTML = `<pre style="white-space:pre-wrap;font-size:11px;max-height:200px;overflow-y:auto;background:var(--surface-alt);padding:8px;border-radius:6px;">${escapeHtml(preview)}</pre>`;
     } catch (e) {
-        el.innerHTML = '<span style="color:var(--danger);">Fehler</span>';
+        el.innerHTML = '<span style="color:var(--danger);">Error</span>';
     }
 }
 
@@ -792,7 +779,7 @@ function searchGraph() {
         if (isMatch) matchCount++;
         return { id: n.id, opacity: isMatch ? 1.0 : 0.15, font: { color: isMatch ? '#1a1a1a' : '#c4c4be', size: isMatch ? 13 : 9 } };
     }));
-    countEl.textContent = matchCount + ' Treffer';
+    countEl.textContent = matchCount + ' matches';
 
     const first = graphDataCache.nodes.find(n =>
         (n.id + ' ' + n.label + ' ' + (n.tags || []).join(' ')).toLowerCase().includes(q));
@@ -815,7 +802,7 @@ async function importFile(input, type) {
     const file = input.files[0];
     if (!file) return;
     const statusEl = document.getElementById('import-status');
-    statusEl.textContent = 'Importiere...';
+    statusEl.textContent = 'Importing...';
 
     const formData = new FormData();
     formData.append('file', file);
@@ -824,13 +811,13 @@ async function importFile(input, type) {
         const res = await fetch(`/api/import/${type}`, { method: 'POST', body: formData });
         const d = await res.json();
         if (d.status === 'imported') {
-            statusEl.textContent = `${d.count} memories importiert aus ${d.filename}`;
+            statusEl.textContent = `${d.count} memories imported from ${d.filename}`;
             loadDashboard();
         } else {
-            statusEl.textContent = d.message || 'Import fehlgeschlagen';
+            statusEl.textContent = d.message || 'Import failed';
         }
     } catch (e) {
-        statusEl.textContent = 'Fehler: ' + e.message;
+        statusEl.textContent = 'Error: ' + e.message;
     }
     input.value = '';
 }
@@ -870,7 +857,6 @@ async function switchProfile() {
 }
 
 async function showNewProfileDialog() {
-    // Lade Profile-Liste fuer "Wissen uebernehmen"-Dropdown
     let profiles = [];
     try {
         const res = await fetch('/api/profiles');
@@ -878,36 +864,29 @@ async function showNewProfileDialog() {
         profiles = d.profiles;
     } catch (e) { console.error(e); }
 
-    // Lade Tags des aktuell aktiven Profils
-    let allTags = [];
-    try {
-        const res = await fetch('/api/memory-tags');
-        allTags = await res.json();
-    } catch (e) {}
-
     const profileOpts = profiles.map(p =>
         `<option value="${escapeAttr(p.name)}">${escapeHtml(p.name)} (${p.memory_count})</option>`
     ).join('');
 
-    openModal('Neues Profil erstellen', `
+    openModal('Create New Profile', `
         <label>Name</label>
-        <input type="text" id="new-profile-name" placeholder="Alphanumerisch, -, _">
-        <label>Beschreibung</label>
+        <input type="text" id="new-profile-name" placeholder="Alphanumeric, -, _">
+        <label>Description</label>
         <input type="text" id="new-profile-desc" placeholder="Optional">
-        <label style="margin-top:12px;">Wissen uebernehmen von</label>
+        <label style="margin-top:12px;">Copy knowledge from</label>
         <select id="new-profile-source" onchange="toggleCopyTags()" style="width:100%;">
-            <option value="">— Leeres Profil —</option>
+            <option value="">— Empty profile —</option>
             ${profileOpts}
         </select>
         <div id="copy-tags-section" style="display:none;margin-top:12px;">
-            <label>Nur bestimmte Tags (leer = alle)</label>
-            <input type="text" id="new-profile-tags" placeholder="z.B. smarthome, netzwerk">
-            <div style="font-size:11px;color:var(--text-muted);margin-top:4px;">Kommagetrennt. Vorhandene Tags im Quellprofil werden nach Auswahl geladen.</div>
+            <label>Filter by tags (empty = all)</label>
+            <input type="text" id="new-profile-tags" placeholder="e.g. smarthome, network">
+            <div style="font-size:11px;color:var(--text-muted);margin-top:4px;">Comma-separated. Click tags below to add them.</div>
             <div id="available-tags" style="margin-top:6px;display:flex;flex-wrap:wrap;gap:4px;"></div>
         </div>
     `, `
-        <button class="btn btn-primary" id="create-profile-btn">Erstellen</button>
-        <button class="btn" onclick="closeModal()">Abbrechen</button>
+        <button class="btn btn-primary" id="create-profile-btn">Create</button>
+        <button class="btn" onclick="closeModal()">Cancel</button>
     `);
 
     document.getElementById('create-profile-btn').addEventListener('click', submitNewProfile);
@@ -917,28 +896,18 @@ function toggleCopyTags() {
     const source = document.getElementById('new-profile-source').value;
     const section = document.getElementById('copy-tags-section');
     section.style.display = source ? '' : 'none';
-
-    if (source) {
-        loadSourceTags(source);
-    }
+    if (source) loadSourceTags(source);
 }
 
 async function loadSourceTags(profileName) {
     const container = document.getElementById('available-tags');
     container.innerHTML = '';
 
-    // Tags aus dem Quellprofil laden — dazu kurz auf das Profil wechseln und zurueck
-    // Einfacher: Tags direkt aus der DB holen via neuen Endpoint oder den vorhandenen nutzen
-    // Wir nutzen den bestehenden /api/memory-tags, der aber nur das aktive Profil kennt.
-    // Deshalb: Profil-spezifische Tags ueber die Profile-Liste approximieren
-    // oder einfach die bekannten Tags des aktiven Profils anzeigen falls Quelle = aktiv
-
     try {
         const res = await fetch('/api/profiles');
         const d = await res.json();
-        const active = d.active;
 
-        if (profileName === active) {
+        if (profileName === d.active) {
             const tagRes = await fetch('/api/memory-tags');
             const tags = await tagRes.json();
             if (tags.length > 0) {
@@ -947,7 +916,7 @@ async function loadSourceTags(profileName) {
                 ).join(' ');
             }
         } else {
-            container.innerHTML = '<span class="muted">Tags werden nach Profilwechsel sichtbar</span>';
+            container.innerHTML = '<span class="muted">Tags available after switching to this profile</span>';
         }
     } catch (e) {}
 }
@@ -963,7 +932,7 @@ function addTagToInput(tag) {
 
 async function submitNewProfile() {
     const name = document.getElementById('new-profile-name').value.trim();
-    if (!name) { alert('Name ist erforderlich.'); return; }
+    if (!name) { alert('Name is required.'); return; }
 
     const description = document.getElementById('new-profile-desc').value.trim();
     const copyFrom = document.getElementById('new-profile-source').value;
@@ -987,36 +956,36 @@ async function submitNewProfile() {
             closeModal();
             loadProfiles();
             if (d.imported > 0) {
-                document.getElementById('import-status').textContent = `Profil "${name}" erstellt, ${d.imported} Memories uebernommen.`;
+                document.getElementById('import-status').textContent = `Profile "${name}" created, ${d.imported} memories imported.`;
             } else {
                 showWelcomeForNewProfile(name);
             }
         } else {
             const d = await res.json();
-            alert(d.detail || 'Fehler beim Erstellen');
+            alert(d.detail || 'Failed to create profile');
         }
-    } catch (e) { alert('Fehler: ' + e.message); }
+    } catch (e) { alert('Error: ' + e.message); }
 }
 
 async function renameActiveProfile() {
     const oldName = document.getElementById('profile-select').value;
-    const newName = prompt('Neuer Name:', oldName);
+    const newName = prompt('New name:', oldName);
     if (!newName || newName === oldName) return;
-    const desc = prompt('Beschreibung (optional):', '') || '';
+    const desc = prompt('Description (optional):', '') || '';
     try {
         const res = await fetch(`/api/profiles/${encodeURIComponent(oldName)}?new_name=${encodeURIComponent(newName)}&description=${encodeURIComponent(desc)}`, { method: 'PUT' });
         if (res.ok) {
             loadProfiles();
         } else {
             const d = await res.json();
-            alert(d.detail || 'Fehler');
+            alert(d.detail || 'Error');
         }
     } catch (e) { console.error(e); }
 }
 
 async function deleteActiveProfile() {
     const name = document.getElementById('profile-select').value;
-    if (!confirm(`Profil "${name}" wirklich loeschen? Alle Memories gehen verloren!`)) return;
+    if (!confirm(`Delete profile "${name}"? All memories will be lost!`)) return;
     try {
         await fetch(`/api/profiles/${encodeURIComponent(name)}`, { method: 'DELETE' });
         loadProfiles();
@@ -1064,7 +1033,7 @@ function filterSecrets() {
 function renderSecretsList(memories) {
     const el = document.getElementById('secrets-list');
     if (!memories.length) {
-        el.innerHTML = '<p class="muted">Keine Ergebnisse</p>';
+        el.innerHTML = '<p class="muted">No results</p>';
         return;
     }
     el.innerHTML = memories.map(m => {
@@ -1081,7 +1050,7 @@ function renderSecretsList(memories) {
                     <span class="badge ${badgeClass}">${label}</span>
                     ${escapeHtml(m.key)}
                 </div>
-                <div style="margin-top:4px;display:flex;flex-wrap:wrap;gap:4px;">${findingsHtml || '<span class="muted">keine Findings</span>'}</div>
+                <div style="margin-top:4px;display:flex;flex-wrap:wrap;gap:4px;">${findingsHtml || '<span class="muted">no findings</span>'}</div>
             </div>
             <div class="actions">
                 ${m.severity !== 'none' ? `<button class="btn btn-small" onclick="viewRedacted('${escapeAttr(m.key)}')">Redacted</button>` : ''}
@@ -1097,7 +1066,7 @@ async function viewRedacted(key) {
         openModal('Redacted: ' + d.key, `
             <div style="margin-bottom:8px;"><span class="badge ${SEV_BADGE_CLASS[d.severity] || ''}">${d.severity.toUpperCase()}</span></div>
             <pre>${escapeHtml(d.value)}</pre>
-        `, `<button class="btn" onclick="closeModal()">Schliessen</button>`);
+        `, `<button class="btn" onclick="closeModal()">Close</button>`);
     } catch (e) { console.error(e); }
 }
 
@@ -1115,7 +1084,7 @@ function escapeAttr(str) {
     return str.replace(/'/g, "\\'").replace(/"/g, '&quot;');
 }
 
-// Bot animation helper
+// Bot animation
 let botTimer = null;
 function botBusy() {
     const bot = document.getElementById('header-bot');

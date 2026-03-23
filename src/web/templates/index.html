@@ -1,38 +1,38 @@
 <!DOCTYPE html>
-<html lang="de">
+<html lang="en">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Context Pilot</title>
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="/static/style.css?v=3">
+    <link rel="stylesheet" href="/static/style.css?v=4">
     <script src="https://unpkg.com/vis-network@9.1.9/standalone/umd/vis-network.min.js"></script>
 </head>
 <body>
     <!-- Welcome Screen -->
     <div class="welcome-overlay" id="welcome-overlay">
         <div class="welcome-card">
-            <div class="bot-avatar speaking">
+            <div class="bot-orb-large speaking">
                 <div class="orb-ring"></div>
                 <div class="orb"></div>
             </div>
-            <h2>Willkommen bei Context Pilot</h2>
-            <p>Dein persoenlicher Wissens-Manager fuer AI-Workflows.</p>
+            <h2>Welcome to Context Pilot</h2>
+            <p>Your personal knowledge manager for AI workflows.</p>
             <ul class="welcome-features">
-                <li>Memories speichern, durchsuchen und organisieren</li>
-                <li>Skills verbinden und ueberwachen</li>
-                <li>Knowledge Graph visualisieren</li>
-                <li>Sensitive Daten erkennen und schuetzen</li>
-                <li>Context intelligent assemblieren</li>
+                <li>Store, search and organize memories</li>
+                <li>Connect and monitor skills</li>
+                <li>Visualize your knowledge graph</li>
+                <li>Detect and protect sensitive data</li>
+                <li>Intelligently assemble context</li>
             </ul>
-            <button class="btn btn-primary" id="welcome-dismiss-btn" style="padding:10px 32px;font-size:14px;">Los geht's</button>
+            <button class="btn btn-primary" id="welcome-dismiss-btn" style="padding:10px 32px;font-size:14px;">Get Started</button>
         </div>
     </div>
 
     <header>
         <div style="display:flex;align-items:center;gap:14px;">
-            <div class="bot-avatar" id="header-bot">
+            <div class="bot-orb" id="header-bot">
                 <div class="orb-ring"></div>
                 <div class="orb"></div>
             </div>
@@ -42,7 +42,7 @@
             </div>
         </div>
         <div id="profile-bar">
-            <span>Profil:</span>
+            <span>Profile:</span>
             <select id="profile-select" onchange="switchProfile()" style="width:auto;min-width:140px;"></select>
             <button class="btn btn-small" onclick="showNewProfileDialog()">+</button>
             <button class="btn btn-small" onclick="renameActiveProfile()" id="profile-rename-btn" style="display:none">Rename</button>
@@ -105,22 +105,22 @@
             <div class="panel">
                 <h2>Memories</h2>
                 <div class="form-row inline">
-                    <input type="text" id="memory-search" placeholder="Suche..." oninput="searchMemories()">
+                    <input type="text" id="memory-search" placeholder="Search..." oninput="searchMemories()">
                     <select id="memory-tag-filter" onchange="filterByTag()" style="width:auto;min-width:120px;">
-                        <option value="">Alle Tags</option>
+                        <option value="">All Tags</option>
                     </select>
                 </div>
                 <div class="form-row inline">
                     <input type="text" id="memory-key" placeholder="Key">
                     <input type="text" id="memory-value" placeholder="Value">
-                    <input type="text" id="memory-tags" placeholder="Tags (kommagetrennt)">
-                    <button class="btn btn-primary" onclick="saveNewMemory()">Speichern</button>
+                    <input type="text" id="memory-tags" placeholder="Tags (comma-separated)">
+                    <button class="btn btn-primary" onclick="saveNewMemory()">Save</button>
                 </div>
                 <div style="display:flex;justify-content:space-between;align-items:center;margin:8px 0;">
                     <span id="memory-count" style="font-size:12px;color:var(--text-muted);"></span>
                     <div style="display:flex;gap:6px;">
-                        <button class="btn btn-small" id="bulk-toggle-btn" onclick="toggleBulkMode()">Auswahl</button>
-                        <button class="btn btn-small btn-danger" id="bulk-delete-btn" style="display:none" onclick="bulkDeleteSelected()">Loeschen</button>
+                        <button class="btn btn-small" id="bulk-toggle-btn" onclick="toggleBulkMode()">Select</button>
+                        <button class="btn btn-small btn-danger" id="bulk-delete-btn" style="display:none" onclick="bulkDeleteSelected()">Delete</button>
                         <button class="btn btn-small" onclick="exportMemories()">Export</button>
                     </div>
                 </div>
@@ -132,7 +132,7 @@
         <section id="tab-skills" class="tab-content">
             <div class="panel">
                 <div style="display:flex;justify-content:space-between;align-items:center;"><h2>Connected Skills</h2><button class="btn btn-small" onclick="loadSkills()">Refresh</button></div>
-                <div id="skill-list"><p class="muted">Keine Skills verbunden</p></div>
+                <div id="skill-list"><p class="muted">No skills connected</p></div>
             </div>
         </section>
 
@@ -143,9 +143,9 @@
                     <strong style="font-size:14px;">Knowledge Graph</strong>
                     <span id="graph-stats" style="color:var(--text-muted);font-size:12px;"></span>
                     <div style="flex:1"></div>
-                    <input type="text" id="graph-search" placeholder="Suche..." oninput="searchGraph()" style="width:200px;padding:4px 10px;font-size:12px;">
+                    <input type="text" id="graph-search" placeholder="Search..." oninput="searchGraph()" style="width:200px;padding:4px 10px;font-size:12px;">
                     <span id="graph-search-count" style="color:var(--text-muted);font-size:11px;"></span>
-                    <label style="font-size:12px;cursor:pointer"><input type="checkbox" id="graph-physics" checked onchange="togglePhysics()"> Physik</label>
+                    <label style="font-size:12px;cursor:pointer"><input type="checkbox" id="graph-physics" checked onchange="togglePhysics()"> Physics</label>
                     <button class="btn btn-small" onclick="graphFitAll()">Fit</button>
                 </div>
                 <div id="graph-container" style="height:calc(100vh - 200px);background:#fafaf5;"></div>
@@ -157,23 +157,23 @@
         <!-- Secrets -->
         <section id="tab-secrets" class="tab-content">
             <div class="cards-grid">
-                <div class="status-card"><div class="card-title">Total</div><div class="card-value" id="sec-total">--</div><div class="card-detail">gescannt</div></div>
-                <div class="status-card"><div class="card-title">Sensitive</div><div class="card-value red" id="sec-sensitive">--</div><div class="card-detail">mit Findings</div></div>
-                <div class="status-card"><div class="card-title">Critical/High</div><div class="card-value red" id="sec-critical">--</div><div class="card-detail">kritisch</div></div>
-                <div class="status-card"><div class="card-title">Clean</div><div class="card-value green" id="sec-clean">--</div><div class="card-detail">sauber</div></div>
+                <div class="status-card"><div class="card-title">Total</div><div class="card-value" id="sec-total">--</div><div class="card-detail">scanned</div></div>
+                <div class="status-card"><div class="card-title">Sensitive</div><div class="card-value red" id="sec-sensitive">--</div><div class="card-detail">with findings</div></div>
+                <div class="status-card"><div class="card-title">Critical/High</div><div class="card-value red" id="sec-critical">--</div><div class="card-detail">critical</div></div>
+                <div class="status-card"><div class="card-title">Clean</div><div class="card-value green" id="sec-clean">--</div><div class="card-detail">clean</div></div>
             </div>
             <div class="panel" style="margin-top:16px;">
                 <div style="display:flex;justify-content:space-between;align-items:center;">
                     <h2>Scan</h2>
                     <div style="display:flex;gap:8px;align-items:center;">
                         <select id="sec-filter" onchange="filterSecrets()" style="width:auto;font-size:12px;">
-                            <option value="all">Alle</option><option value="sensitive">Sensitive</option><option value="critical">Critical</option>
+                            <option value="all">All</option><option value="sensitive">Sensitive</option><option value="critical">Critical</option>
                             <option value="high">High</option><option value="medium">Medium</option><option value="low">Low</option><option value="none">Clean</option>
                         </select>
                         <button class="btn btn-small" onclick="loadSecrets()">Scan</button>
                     </div>
                 </div>
-                <div id="secrets-list"><p class="muted">Klicke "Scan"</p></div>
+                <div id="secrets-list"><p class="muted">Click "Scan" to start</p></div>
             </div>
         </section>
 
@@ -215,7 +215,7 @@
         </div>
     </div>
 
-    <script src="/static/app.js?v=3"></script>
+    <script src="/static/app.js?v=4"></script>
     <script>init();</script>
 </body>
 </html>

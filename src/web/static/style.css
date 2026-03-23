@@ -482,50 +482,98 @@ label {
     font-size: 11px; font-weight: 600; color: var(--text);
 }
 
-/* Bot Avatar */
-.bot-avatar {
+/* Bot Orb — Header */
+.bot-orb {
     position: relative;
-    width: 36px;
-    height: 36px;
+    width: 40px;
+    height: 40px;
     flex-shrink: 0;
 }
 
-.bot-avatar .orb {
-    width: 36px;
-    height: 36px;
+.bot-orb .orb {
+    width: 40px;
+    height: 40px;
     border-radius: 50%;
-    background: radial-gradient(circle at 38% 38%, #e8a87c, #c4703f 50%, #a85d33 100%);
-    box-shadow: 0 0 16px rgba(196,112,63,0.35);
+    background: conic-gradient(from 160deg, #e8a87c, #c4703f, #d4915a, #c4703f, #e8a87c);
+    box-shadow: 0 0 20px rgba(196,112,63,0.4), 0 0 6px rgba(196,112,63,0.6) inset;
     animation: orbPulse 3s ease-in-out infinite;
 }
 
-.bot-avatar .orb-ring {
+.bot-orb .orb-ring {
     position: absolute;
-    inset: -4px;
+    inset: -5px;
     border-radius: 50%;
-    border: 2px solid rgba(196,112,63,0.2);
+    border: 2px solid rgba(196,112,63,0.3);
     animation: ringPulse 3s ease-in-out infinite;
 }
 
 @keyframes orbPulse {
-    0%, 100% { transform: scale(1); box-shadow: 0 0 16px rgba(196,112,63,0.35); }
-    50% { transform: scale(1.06); box-shadow: 0 0 24px rgba(196,112,63,0.5); }
+    0%, 100% { transform: scale(1); box-shadow: 0 0 20px rgba(196,112,63,0.4), 0 0 6px rgba(196,112,63,0.6) inset; }
+    50% { transform: scale(1.08); box-shadow: 0 0 32px rgba(196,112,63,0.6), 0 0 10px rgba(196,112,63,0.7) inset; }
 }
 
 @keyframes ringPulse {
-    0%, 100% { transform: scale(1); opacity: 0.4; }
-    50% { transform: scale(1.12); opacity: 0.8; }
+    0%, 100% { transform: scale(1); opacity: 0.3; }
+    50% { transform: scale(1.15); opacity: 0.7; }
 }
 
-.bot-avatar.speaking .orb {
-    animation: orbSpeak 0.6s ease-in-out infinite;
+.bot-orb.speaking .orb {
+    animation: orbSpeak 0.5s ease-in-out infinite;
+    box-shadow: 0 0 28px rgba(196,112,63,0.55), 0 0 8px rgba(196,112,63,0.7) inset;
 }
 
 @keyframes orbSpeak {
     0%, 100% { transform: scale(1); }
-    25% { transform: scale(1.08); }
-    50% { transform: scale(0.96); }
-    75% { transform: scale(1.04); }
+    20% { transform: scale(1.12); }
+    50% { transform: scale(0.94); }
+    80% { transform: scale(1.06); }
+}
+
+/* Bot Orb — Large (Welcome) */
+.bot-orb-large {
+    position: relative;
+    width: 72px;
+    height: 72px;
+    margin: 0 auto 28px;
+}
+
+.bot-orb-large .orb {
+    width: 72px;
+    height: 72px;
+    border-radius: 50%;
+    background: conic-gradient(from 160deg, #e8a87c, #c4703f, #d4915a, #c4703f, #e8a87c);
+    box-shadow: 0 0 36px rgba(196,112,63,0.5), 0 0 12px rgba(196,112,63,0.6) inset;
+    animation: orbPulseLarge 3s ease-in-out infinite;
+}
+
+.bot-orb-large .orb-ring {
+    position: absolute;
+    inset: -8px;
+    border-radius: 50%;
+    border: 2px solid rgba(196,112,63,0.25);
+    animation: ringPulseLarge 3s ease-in-out infinite;
+}
+
+@keyframes orbPulseLarge {
+    0%, 100% { transform: scale(1); box-shadow: 0 0 36px rgba(196,112,63,0.5), 0 0 12px rgba(196,112,63,0.6) inset; }
+    50% { transform: scale(1.1); box-shadow: 0 0 48px rgba(196,112,63,0.7), 0 0 16px rgba(196,112,63,0.8) inset; }
+}
+
+@keyframes ringPulseLarge {
+    0%, 100% { transform: scale(1); opacity: 0.3; }
+    50% { transform: scale(1.2); opacity: 0.8; }
+}
+
+.bot-orb-large.speaking .orb {
+    animation: orbSpeakLarge 0.5s ease-in-out infinite;
+    box-shadow: 0 0 40px rgba(196,112,63,0.6), 0 0 14px rgba(196,112,63,0.7) inset;
+}
+
+@keyframes orbSpeakLarge {
+    0%, 100% { transform: scale(1); }
+    20% { transform: scale(1.14); }
+    50% { transform: scale(0.92); }
+    80% { transform: scale(1.08); }
 }
 
 /* Welcome Screen */
@@ -534,6 +582,7 @@ label {
     position: fixed;
     inset: 0;
     background: rgba(0,0,0,0.5);
+    backdrop-filter: blur(4px);
     z-index: 10000;
     justify-content: center;
     align-items: center;
@@ -555,21 +604,6 @@ label {
 @keyframes welcomeIn {
     from { opacity: 0; transform: translateY(20px) scale(0.96); }
     to { opacity: 1; transform: translateY(0) scale(1); }
-}
-
-.welcome-card .bot-avatar {
-    width: 64px;
-    height: 64px;
-    margin: 0 auto 24px;
-}
-
-.welcome-card .bot-avatar .orb {
-    width: 64px;
-    height: 64px;
-}
-
-.welcome-card .bot-avatar .orb-ring {
-    inset: -6px;
 }
 
 .welcome-card h2 {
