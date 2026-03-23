@@ -1,12 +1,55 @@
 // Context Pilot — Frontend Logic
 
 let debounceTimers = {};
+let bulkMode = false;
+let blockIndex = 1;
+let graphNetwork = null;
+let graphDataCache = null;
+let graphNodesDataSet = null;
+let secretsData = null;
 
-function showTab(name) {
+// ═══════════════════════════════════════════════════════════════
+// INIT
+// ═══════════════════════════════════════════════════════════════
+
+function init() {
+    // Tab delegation
+    document.querySelectorAll('.tab[data-tab]').forEach(btn => {
+        btn.addEventListener('click', () => showTab(btn.dataset.tab, btn));
+    });
+
+    // Modal close
+    document.getElementById('modal-close-btn').addEventListener('click', closeModal);
+    document.getElementById('modal-overlay').addEventListener('click', e => {
+        if (e.target === e.currentTarget) closeModal();
+    });
+
+    // Import handlers
+    document.querySelectorAll('[data-import]').forEach(input => {
+        input.addEventListener('change', () => importFile(input, input.dataset.import));
+    });
+
+    // Initial load
+    loadProfiles();
+    loadDashboard();
+}
+
+// ═══════════════════════════════════════════════════════════════
+// TABS
+// ═══════════════════════════════════════════════════════════════
+
+function showTab(name, clickedBtn) {
     document.querySelectorAll('.tab-content').forEach(el => el.classList.remove('active'));
     document.querySelectorAll('.tab').forEach(el => el.classList.remove('active'));
     document.getElementById('tab-' + name).classList.add('active');
-    event.target.classList.add('active');
+
+    if (clickedBtn) {
+        clickedBtn.classList.add('active');
+    } else {
+        document.querySelectorAll('.tab').forEach(b => {
+            if (b.dataset.tab === name) b.classList.add('active');
+        });
+    }
 
     const main = document.querySelector('main');
     if (name === 'graph') {
@@ -29,8 +72,8 @@ function showTab(name) {
 // ═══════════════════════════════════════════════════════════════
 
 const OP_COLORS = {
-    created: '#a6e3a1', updated: '#f9e2af', deleted: '#f38ba8',
-    loaded: '#89b4fa', searched: '#cba6f7',
+    created: 'var(--success)', updated: 'var(--warning)', deleted: 'var(--danger)',
+    loaded: 'var(--info)', searched: 'var(--accent)',
 };
 
 async function loadDashboard() {
@@ -39,25 +82,14 @@ async function loadDashboard() {
         const d = await res.json();
 
         document.getElementById('dash-memories').textContent = d.memory_count;
-        document.getElementById('dash-memories-detail').textContent = 'memories stored';
+        document.getElementById('dash-memories-detail').textContent = d.memory_count === 1 ? '1 memory' : d.memory_count + ' memories';
 
         document.getElementById('dash-tokens').textContent = d.memory_tokens.toLocaleString();
-        document.getElementById('dash-tokens-detail').textContent = 'total tokens';
 
         const skillEl = document.getElementById('dash-skills');
         skillEl.textContent = `${d.skill_alive}/${d.skill_total}`;
-        skillEl.className = 'card-value ' + (d.skill_alive > 0 ? 'green' : '');
-        document.getElementById('dash-skills-detail').textContent = 'skills connected';
-
-        document.getElementById('dash-tags').textContent = d.tag_count;
-
-        // Skills list
-        const skillList = document.getElementById('dash-skill-list');
-        if (d.skills.length === 0) {
-            skillList.innerHTML = '<p class="muted">Keine Skills verbunden — starte den MCP Server und registriere Skills</p>';
-        } else {
-            skillList.innerHTML = d.skills.map(s => renderSkillCard(s)).join('');
-        }
+        skillEl.className = 'card-value' + (d.skill_alive > 0 ? ' green' : '');
+        document.getElementById('dash-skills-detail').textContent = 'connected';
 
         // Activity
         const actEl = document.getElementById('dash-activity');
@@ -65,12 +97,13 @@ async function loadDashboard() {
             actEl.innerHTML = '<p class="muted">Keine Aktivitaet</p>';
         } else {
             actEl.innerHTML = d.activity.map(e => {
-                const color = OP_COLORS[e.operation] || '#6c7086';
+                const color = OP_COLORS[e.operation] || 'var(--text-muted)';
                 const detail = e.detail ? ' — ' + escapeHtml(e.detail) : '';
-                return `<div class="item-row" style="padding:4px 8px;">
-                    <span style="color:${color};font-weight:bold;">[${e.operation.toUpperCase()}]</span>
-                    <strong>${escapeHtml(e.memory_key)}</strong>${detail}
-                    <span style="color:#585b70;font-size:12px;margin-left:8px;">${escapeHtml(e.age)}</span>
+                return `<div class="activity-item">
+                    <span class="activity-op" style="color:${color};">${e.operation.toUpperCase()}</span>
+                    <span class="activity-key">${escapeHtml(e.memory_key)}</span>
+                    <span class="activity-detail">${detail}</span>
+                    <span class="activity-age">${escapeHtml(e.age)}</span>
                 </div>`;
             }).join('');
         }
@@ -107,7 +140,7 @@ async function previewContext() {
         const res = await fetch('/api/preview-context?budget=' + budget, { method: 'POST' });
         const d = await res.json();
         const pct = Math.min(100, (d.used_tokens / d.budget) * 100);
-        const color = pct > 90 ? '#f38ba8' : pct > 70 ? '#f9e2af' : '#a6e3a1';
+        const color = pct > 90 ? 'var(--danger)' : pct > 70 ? 'var(--warning)' : 'var(--success)';
 
         let html = `
             <div class="preview-bar-container">
@@ -132,7 +165,7 @@ async function previewContext() {
         if (d.dropped.length > 0) {
             html += '<div style="font-size:11px;font-weight:600;color:var(--text-muted);margin:8px 0 4px;">Gedroppt:</div>';
             d.dropped.forEach(b => {
-                html += `<div class="result-block dropped" style="opacity:0.5;">
+                html += `<div class="result-block dropped">
                     <div class="meta">${b.token_count} tokens (dropped)</div>
                     <pre>${escapeHtml(b.content_preview)}</pre>
                 </div>`;
@@ -141,7 +174,7 @@ async function previewContext() {
 
         el.innerHTML = html;
     } catch (e) {
-        el.innerHTML = '<p style="color:#f38ba8;">Fehler: ' + escapeHtml(e.message) + '</p>';
+        el.innerHTML = '<p style="color:var(--danger);">Fehler: ' + escapeHtml(e.message) + '</p>';
     }
 }
 
@@ -173,7 +206,7 @@ async function loadSkills() {
         const skills = await res.json();
         const list = document.getElementById('skill-list');
         if (skills.length === 0) {
-            list.innerHTML = '<p class="muted">Keine Skills verbunden — starte den MCP Server und registriere Skills</p>';
+            list.innerHTML = '<p class="muted">Keine Skills verbunden</p>';
         } else {
             list.innerHTML = skills.map(s => renderSkillCard(s)).join('');
         }
@@ -222,15 +255,13 @@ async function filterByTag() {
     } catch (e) { console.error(e); }
 }
 
-let bulkMode = false;
-
 function renderMemories(data) {
     const list = document.getElementById('memory-list');
     const countEl = document.getElementById('memory-count');
     if (countEl) countEl.textContent = `${data.length} memories`;
 
     if (data.length === 0) {
-        list.innerHTML = '<div class="empty-state">No memories found.</div>';
+        list.innerHTML = '<div class="empty-state">Keine Memories gefunden.</div>';
         return;
     }
 
@@ -244,8 +275,8 @@ function renderMemories(data) {
             && (now - m.updated_at) < RECENT;
 
         let badge = '';
-        if (isNew) badge = '<span style="background:#a6e3a1;color:#1e1e2e;font-size:10px;font-weight:bold;padding:1px 6px;border-radius:4px;margin-right:6px;">NEU</span>';
-        else if (isModified) badge = '<span style="background:#f9e2af;color:#1e1e2e;font-size:10px;font-weight:bold;padding:1px 6px;border-radius:4px;margin-right:6px;">UPD</span>';
+        if (isNew) badge = '<span class="badge badge-new">NEU</span> ';
+        else if (isModified) badge = '<span class="badge badge-upd">UPD</span> ';
 
         let age = '';
         const ts = m.updated_at || m.created_at;
@@ -256,37 +287,40 @@ function renderMemories(data) {
             else age = `vor ${Math.floor(delta / 86400)} Tagen`;
         }
 
-        const borderStyle = isNew ? 'border-left:3px solid #a6e3a1;' : isModified ? 'border-left:3px solid #f9e2af;' : '';
+        const stateClass = isNew ? ' new' : isModified ? ' updated' : '';
         const cbHtml = bulkMode ? `<input type="checkbox" class="bulk-cb" data-key="${escapeAttr(m.key)}">` : '';
         const tagsHtml = m.tags.length
-            ? m.tags.map(t => `<span class="tag-link" onclick="clickTag('${escapeAttr(t)}')">#${escapeHtml(t)}</span>`).join(' ')
+            ? m.tags.map(t => `<span class="tag" onclick="event.stopPropagation();clickTag('${escapeAttr(t)}')">#${escapeHtml(t)}</span>`).join(' ')
             : '';
 
-        return `<div class="item-row" style="${borderStyle}cursor:pointer;" onclick="viewMemory('${escapeAttr(m.key)}')">
+        return `<div class="memory-item${stateClass}" onclick="viewMemory('${escapeAttr(m.key)}')">
             ${cbHtml}
-            <div class="item-main">
-                <div class="item-name">${badge}${escapeHtml(m.key)}</div>
-                <div class="item-desc">${escapeHtml((m.value || '').substring(0, 150))}</div>
-                <div class="item-tags">${tagsHtml}${age ? ' <span style="color:var(--text-muted);font-size:11px;margin-left:8px;">' + age + '</span>' : ''}</div>
+            <div class="main">
+                <div class="key">${badge}${escapeHtml(m.key)}</div>
+                <div class="preview">${escapeHtml((m.value || '').substring(0, 150))}</div>
+                <div class="meta">
+                    ${tagsHtml}
+                    ${age ? '<span class="age">' + age + '</span>' : ''}
+                </div>
             </div>
-            <div class="item-actions" onclick="event.stopPropagation()">
-                <button class="btn-small" onclick="editMemory('${escapeAttr(m.key)}')">Edit</button>
-                <button class="btn-small btn-danger" onclick="deleteMemory('${escapeAttr(m.key)}')">Del</button>
+            <div class="actions" onclick="event.stopPropagation()">
+                <button class="btn btn-small" onclick="editMemory('${escapeAttr(m.key)}')">Edit</button>
+                <button class="btn btn-small btn-danger" onclick="deleteMemory('${escapeAttr(m.key)}')">Del</button>
             </div>
         </div>`;
     }).join('');
 }
 
-// --- Memory View/Edit Modal ---
+// --- Memory CRUD ---
 
 function memoryUrl(key) {
-    // {key:path} erwartet echte Slashes — nur Sonderzeichen enkodieren
     return '/api/memories/' + key.split('/').map(encodeURIComponent).join('/');
 }
 
-function openModal(title, bodyHtml) {
+function openModal(title, bodyHtml, footerHtml) {
     document.getElementById('modal-title').textContent = title;
     document.getElementById('modal-body').innerHTML = bodyHtml;
+    document.getElementById('modal-footer').innerHTML = footerHtml || '';
     document.getElementById('modal-overlay').classList.add('active');
     document.body.style.overflow = 'hidden';
 }
@@ -296,58 +330,47 @@ function closeModal() {
     document.body.style.overflow = '';
 }
 
-function onOverlayClick(e) {
-    if (e.target === e.currentTarget) closeModal();
-}
-
 async function viewMemory(key) {
-    event.stopPropagation();
     try {
         const res = await fetch(memoryUrl(key));
-        if (!res.ok) { console.error('GET failed', res.status); return; }
+        if (!res.ok) return;
         const m = await res.json();
         const tagsHtml = m.tags.length
-            ? m.tags.map(t => `<span class="tag-link" onclick="event.stopPropagation();clickTag('${escapeAttr(t)}');closeModal();">#${escapeHtml(t)}</span>`).join(' ')
+            ? m.tags.map(t => `<span class="tag" onclick="event.stopPropagation();clickTag('${escapeAttr(t)}');closeModal();">#${escapeHtml(t)}</span>`).join(' ')
             : '<span class="muted">keine</span>';
+
         openModal(m.key, `
-            <div style="margin-bottom:12px;">
-                <label>Tags</label>
-                <div>${tagsHtml}</div>
-            </div>
-            <div style="margin-bottom:12px;">
-                <label>Inhalt</label>
-                <pre style="white-space:pre-wrap;font-size:12px;background:var(--bg);padding:12px;border-radius:var(--radius);max-height:50vh;overflow-y:auto;">${escapeHtml(m.value)}</pre>
-            </div>
-            <div class="btn-row">
-                <button class="btn btn-primary" onclick="event.stopPropagation();editMemory('${escapeAttr(m.key)}')">Bearbeiten</button>
-                <button class="btn" onclick="event.stopPropagation();closeModal()">Schliessen</button>
-            </div>
+            <label>Tags</label>
+            <div style="margin-bottom:16px;">${tagsHtml}</div>
+            <label>Inhalt</label>
+            <pre>${escapeHtml(m.value)}</pre>
+        `, `
+            <button class="btn btn-primary" onclick="editMemory('${escapeAttr(m.key)}')">Bearbeiten</button>
+            <button class="btn" onclick="closeModal()">Schliessen</button>
         `);
     } catch (e) { console.error(e); }
 }
 
 async function editMemory(key) {
-    event.stopPropagation();
     try {
         const res = await fetch(memoryUrl(key));
-        if (!res.ok) { console.error('GET failed', res.status); return; }
+        if (!res.ok) return;
         const m = await res.json();
-        // Key als data-Attribut speichern statt in onclick-String
+
         openModal('Bearbeiten: ' + m.key, `
             <label>Key</label>
-            <input type="text" id="edit-key" value="${escapeHtml(m.key)}" readonly style="background:var(--surface-hover);cursor:not-allowed;">
+            <input type="text" id="edit-key" value="${escapeHtml(m.key)}" readonly style="background:var(--surface-alt);cursor:not-allowed;">
             <label>Value</label>
-            <textarea id="edit-value" rows="14" style="min-height:200px;">${escapeHtml(m.value)}</textarea>
+            <textarea id="edit-value" rows="14">${escapeHtml(m.value)}</textarea>
             <label>Tags (kommagetrennt)</label>
             <input type="text" id="edit-tags" value="${escapeHtml(m.tags.join(', '))}">
-            <div class="btn-row">
-                <button class="btn btn-primary" id="save-memory-btn">Speichern</button>
-                <button class="btn" id="cancel-memory-btn">Abbrechen</button>
-            </div>
+        `, `
+            <button class="btn btn-primary" id="save-memory-btn">Speichern</button>
+            <button class="btn" id="cancel-memory-btn">Abbrechen</button>
         `);
-        // Event Listener statt inline onclick — zuverlaessiger
+
         document.getElementById('save-memory-btn').addEventListener('click', () => saveEditedMemory(m.key));
-        document.getElementById('cancel-memory-btn').addEventListener('click', () => closeModal());
+        document.getElementById('cancel-memory-btn').addEventListener('click', closeModal);
     } catch (e) { console.error(e); }
 }
 
@@ -367,22 +390,48 @@ async function saveEditedMemory(key) {
         } else {
             alert('Fehler beim Speichern: ' + res.status);
         }
-    } catch (e) { console.error(e); alert('Fehler: ' + e.message); }
+    } catch (e) { alert('Fehler: ' + e.message); }
 }
 
-// --- Tag Click Filter ---
+async function saveNewMemory() {
+    const key = document.getElementById('memory-key').value.trim();
+    const value = document.getElementById('memory-value').value.trim();
+    if (!key || !value) return;
+    const tagsStr = document.getElementById('memory-tags').value.trim();
+    const tags = tagsStr ? tagsStr.split(',').map(t => t.trim()).filter(Boolean) : [];
+    try {
+        await fetch('/api/memories', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({key, value, tags})
+        });
+        document.getElementById('memory-key').value = '';
+        document.getElementById('memory-value').value = '';
+        document.getElementById('memory-tags').value = '';
+        loadMemories();
+    } catch (e) { console.error(e); }
+}
+
+async function deleteMemory(key) {
+    if (!confirm(`"${key}" loeschen?`)) return;
+    try {
+        await fetch(memoryUrl(key), {method: 'DELETE'});
+        loadMemories();
+    } catch (e) { console.error(e); }
+}
+
+async function searchMemories() {
+    clearTimeout(debounceTimers['memSearch']);
+    debounceTimers['memSearch'] = setTimeout(() => filterByTag(), 300);
+}
 
 function clickTag(tag) {
     const sel = document.getElementById('memory-tag-filter');
-    // Find option with this tag, or set search
     for (let i = 0; i < sel.options.length; i++) {
         if (sel.options[i].value === tag) {
             sel.selectedIndex = i;
             filterByTag();
-            // Switch to memories tab
             showTab('memories');
-            document.querySelectorAll('.tab').forEach(b => b.classList.remove('active'));
-            document.querySelectorAll('.tab').forEach(b => { if (b.textContent === 'Memories') b.classList.add('active'); });
             return;
         }
     }
@@ -393,6 +442,7 @@ function clickTag(tag) {
 function toggleBulkMode() {
     bulkMode = !bulkMode;
     document.getElementById('bulk-delete-btn').style.display = bulkMode ? '' : 'none';
+    document.getElementById('bulk-toggle-btn').textContent = bulkMode ? 'Abbrechen' : 'Auswahl';
     loadMemories();
 }
 
@@ -425,40 +475,8 @@ async function exportMemories() {
     } catch (e) { console.error(e); }
 }
 
-async function saveMemory() {
-    const key = document.getElementById('memory-key').value.trim();
-    const value = document.getElementById('memory-value').value.trim();
-    if (!key || !value) return;
-    const tagsStr = document.getElementById('memory-tags').value.trim();
-    const tags = tagsStr ? tagsStr.split(',').map(t => t.trim()).filter(Boolean) : [];
-    try {
-        await fetch('/api/memories', {
-            method: 'POST',
-            headers: {'Content-Type': 'application/json'},
-            body: JSON.stringify({key, value, tags})
-        });
-        document.getElementById('memory-key').value = '';
-        document.getElementById('memory-value').value = '';
-        document.getElementById('memory-tags').value = '';
-        loadMemories();
-    } catch (e) { console.error(e); }
-}
-
-async function deleteMemory(key) {
-    if (!confirm(`Delete "${key}"?`)) return;
-    try {
-        await fetch(memoryUrl(key), {method: 'DELETE'});
-        loadMemories();
-    } catch (e) { console.error(e); }
-}
-
-async function searchMemories() {
-    clearTimeout(debounceTimers['memSearch']);
-    debounceTimers['memSearch'] = setTimeout(() => filterByTag(), 300);
-}
-
 // ═══════════════════════════════════════════════════════════════
-// TOKEN ESTIMATION
+// BLOCK MANAGEMENT + ASSEMBLY
 // ═══════════════════════════════════════════════════════════════
 
 function estimateTokens(textarea) {
@@ -480,30 +498,6 @@ function estimateTokens(textarea) {
     }, 300);
 }
 
-function estimateSingle() {
-    const text = document.getElementById('estimate-text').value;
-    const box = document.getElementById('estimate-result');
-    clearTimeout(debounceTimers['single']);
-    debounceTimers['single'] = setTimeout(async () => {
-        if (!text.trim()) { box.textContent = '0 tokens'; return; }
-        try {
-            const res = await fetch('/api/estimate', {
-                method: 'POST',
-                headers: {'Content-Type': 'application/json'},
-                body: JSON.stringify({text})
-            });
-            const data = await res.json();
-            box.textContent = data.tokens + ' tokens';
-        } catch (e) { box.textContent = 'Error'; }
-    }, 300);
-}
-
-// ═══════════════════════════════════════════════════════════════
-// BLOCK MANAGEMENT + ASSEMBLY
-// ═══════════════════════════════════════════════════════════════
-
-let blockIndex = 1;
-
 function _blockTemplate(idx) {
     return `<div class="block-header">
         <span class="block-label">Block ${idx}</span>
@@ -521,11 +515,11 @@ function _blockTemplate(idx) {
             <option value="code_compact">Code Compact</option>
         </select>
         <span class="token-badge">0 tokens</span>
-        <button class="btn-small" onclick="testCompressBlock(this)">Test</button>
-        <button class="btn-small" onclick="duplicateBlock(this)">Dup</button>
-        <button class="btn-small btn-danger" onclick="removeBlock(this)">Del</button>
+        <button class="btn btn-small" onclick="testCompressBlock(this)">Test</button>
+        <button class="btn btn-small" onclick="duplicateBlock(this)">Dup</button>
+        <button class="btn btn-small btn-danger" onclick="removeBlock(this)">Del</button>
     </div>
-    <textarea class="block-content" rows="4" placeholder="Enter block content..."
+    <textarea class="block-content" rows="4" placeholder="Block-Inhalt eingeben..."
               oninput="estimateTokens(this)"></textarea>`;
 }
 
@@ -586,7 +580,7 @@ async function testCompressBlock(btn) {
         panel.style.display = 'block';
         document.getElementById('compress-meta').innerHTML =
             `<strong>${hint}</strong>: ${d.original_tokens} → ${d.compressed_tokens} tokens ` +
-            `(<span style="color:#a6e3a1;">-${d.savings_pct}%</span>)`;
+            `(<span style="color:var(--success);">-${d.savings_pct}%</span>)`;
         document.getElementById('compress-preview').textContent = d.compressed_content;
         panel.scrollIntoView({ behavior: 'smooth' });
     } catch (e) { console.error(e); }
@@ -637,8 +631,8 @@ function showAssemblyResult(data) {
 
     let droppedHtml = '';
     if (data.dropped.length > 0) {
-        droppedHtml = '<h3>Dropped Blocks</h3>' + data.dropped.map(b =>
-            `<div class="result-block dropped priority-${b.priority}">
+        droppedHtml = '<h3 style="font-size:14px;margin:12px 0 8px;">Dropped Blocks</h3>' + data.dropped.map(b =>
+            `<div class="result-block dropped">
                 <div class="meta">${b.priority.toUpperCase()} | ${b.token_count} tokens (dropped)</div>
                 <pre>${escapeHtml(b.content)}</pre>
             </div>`
@@ -650,10 +644,6 @@ function showAssemblyResult(data) {
 // ═══════════════════════════════════════════════════════════════
 // KNOWLEDGE GRAPH
 // ═══════════════════════════════════════════════════════════════
-
-let graphNetwork = null;
-let graphDataCache = null;
-let graphNodesDataSet = null;
 
 async function loadGraph() {
     try {
@@ -670,7 +660,7 @@ function renderGraph(data) {
     const nodes = new vis.DataSet(data.nodes.map(n => ({
         id: n.id, label: n.label, group: n.group,
         title: n.title, value: n.value,
-        font: { color: '#cdd6f4', size: 11 }, shape: 'dot',
+        font: { color: 'var(--text)', size: 11 }, shape: 'dot',
     })));
     const edges = new vis.DataSet(data.edges);
 
@@ -686,8 +676,8 @@ function renderGraph(data) {
             stabilization: { iterations: 200, fit: true },
         },
         interaction: { hover: true, tooltipDelay: 100, keyboard: { enabled: true }, zoomView: true },
-        nodes: { scaling: { min: 8, max: 40 }, borderWidth: 2, shadow: { enabled: true, size: 6, color: 'rgba(0,0,0,0.3)' } },
-        edges: { smooth: { type: 'continuous' } },
+        nodes: { scaling: { min: 8, max: 40 }, borderWidth: 2, shadow: { enabled: true, size: 6, color: 'rgba(0,0,0,0.1)' } },
+        edges: { smooth: { type: 'continuous' }, color: { color: '#c4c4be', highlight: '#c4703f' } },
     };
 
     graphNodesDataSet = nodes;
@@ -701,11 +691,11 @@ function renderGraph(data) {
             if (node) {
                 detail.style.display = 'block';
                 const tagHtml = node.tags.length
-                    ? node.tags.map(t => `<span style="background:#45475a;padding:2px 6px;border-radius:4px;font-size:11px;">${escapeHtml(t)}</span>`).join(' ')
-                    : '<span style="color:#6c7086;">keine</span>';
+                    ? node.tags.map(t => `<span class="badge" style="background:var(--surface-alt);color:var(--text-secondary);">${escapeHtml(t)}</span>`).join(' ')
+                    : '<span class="muted">keine</span>';
                 detail.innerHTML = `
-                    <div style="font-weight:bold;font-size:14px;margin-bottom:6px;">${escapeHtml(node.id)}</div>
-                    <div style="color:#a6adc8;margin-bottom:8px;">Gruppe: ${escapeHtml(node.group)}</div>
+                    <div style="font-weight:600;font-size:14px;margin-bottom:6px;">${escapeHtml(node.id)}</div>
+                    <div style="color:var(--text-secondary);margin-bottom:8px;">Gruppe: ${escapeHtml(node.group)}</div>
                     <div style="margin-bottom:8px;">Tags: ${tagHtml}</div>
                     <button class="btn btn-small" onclick="fetchMemoryDetail('${escapeAttr(node.id)}')">Inhalt laden</button>
                     <div id="graph-memory-content" style="margin-top:8px;"></div>`;
@@ -719,7 +709,7 @@ function renderGraph(data) {
         `${data.stats.total_memories} Memories | ${data.stats.total_groups} Gruppen | ${data.stats.total_edges} Verbindungen`;
 
     const legend = document.getElementById('graph-legend');
-    legend.innerHTML = '<div style="font-weight:bold;margin-bottom:4px;">Gruppen</div>' +
+    legend.innerHTML = '<div style="font-weight:600;margin-bottom:4px;">Gruppen</div>' +
         Object.entries(data.groups).map(([name, cfg]) => {
             const count = data.nodes.filter(n => n.group === name).length;
             return `<div style="display:flex;align-items:center;gap:6px;margin:2px 0;">
@@ -734,9 +724,9 @@ async function fetchMemoryDetail(key) {
         const res = await fetch(memoryUrl(key));
         const m = await res.json();
         const preview = m.value.length > 500 ? m.value.substring(0, 500) + '...' : m.value;
-        el.innerHTML = `<pre style="white-space:pre-wrap;font-size:11px;color:#a6adc8;max-height:200px;overflow-y:auto;background:#181825;padding:8px;border-radius:4px;">${escapeHtml(preview)}</pre>`;
+        el.innerHTML = `<pre style="white-space:pre-wrap;font-size:11px;max-height:200px;overflow-y:auto;background:var(--surface-alt);padding:8px;border-radius:6px;">${escapeHtml(preview)}</pre>`;
     } catch (e) {
-        el.innerHTML = '<span style="color:#f38ba8;">Fehler</span>';
+        el.innerHTML = '<span style="color:var(--danger);">Fehler</span>';
     }
 }
 
@@ -747,7 +737,7 @@ function searchGraph() {
 
     if (!q) {
         graphNodesDataSet.update(graphDataCache.nodes.map(n => ({
-            id: n.id, opacity: 1.0, font: { color: '#cdd6f4', size: 11 },
+            id: n.id, opacity: 1.0, font: { color: '#1a1a1a', size: 11 },
         })));
         countEl.textContent = '';
         return;
@@ -758,7 +748,7 @@ function searchGraph() {
         const hay = (n.id + ' ' + n.label + ' ' + (n.tags || []).join(' ')).toLowerCase();
         const isMatch = hay.includes(q);
         if (isMatch) matchCount++;
-        return { id: n.id, opacity: isMatch ? 1.0 : 0.15, font: { color: isMatch ? '#cdd6f4' : '#313244', size: isMatch ? 13 : 9 } };
+        return { id: n.id, opacity: isMatch ? 1.0 : 0.15, font: { color: isMatch ? '#1a1a1a' : '#c4c4be', size: isMatch ? 13 : 9 } };
     }));
     countEl.textContent = matchCount + ' Treffer';
 
@@ -832,16 +822,8 @@ async function switchProfile() {
     try {
         await fetch(`/api/profiles/${encodeURIComponent(name)}/switch`, { method: 'POST' });
         loadProfiles();
-        // Reload current tab data
-        const activeTab = document.querySelector('.tab-content.active');
-        if (activeTab) {
-            const id = activeTab.id.replace('tab-', '');
-            showTab(id);
-            // Re-activate the button
-            document.querySelectorAll('.tab').forEach(b => {
-                b.classList.toggle('active', b.textContent.toLowerCase().includes(id) || b.onclick.toString().includes(id));
-            });
-        }
+        const activeTab = document.querySelector('.tab.active');
+        if (activeTab) showTab(activeTab.dataset.tab, activeTab);
     } catch (e) { console.error(e); }
 }
 
@@ -898,14 +880,12 @@ async function deleteActiveProfile() {
 // SECRETS / SENSITIVITY
 // ═══════════════════════════════════════════════════════════════
 
+const SEV_BADGE_CLASS = {
+    critical: 'badge-critical', high: 'badge-high', medium: 'badge-medium', low: 'badge-low',
+};
 const SEV_COLORS = {
-    critical: '#f38ba8', high: '#fab387', medium: '#f9e2af', low: '#89b4fa', none: '#6c7086',
+    critical: 'var(--danger)', high: '#c27a1a', medium: 'var(--warning)', low: 'var(--info)', none: 'var(--text-muted)',
 };
-const SEV_LABELS = {
-    critical: 'CRITICAL', high: 'HIGH', medium: 'MEDIUM', low: 'LOW', none: 'CLEAN',
-};
-
-let secretsData = null;
 
 async function loadSecrets() {
     try {
@@ -940,22 +920,23 @@ function renderSecretsList(memories) {
         return;
     }
     el.innerHTML = memories.map(m => {
-        const color = SEV_COLORS[m.severity] || '#6c7086';
-        const label = SEV_LABELS[m.severity] || m.severity;
+        const color = SEV_COLORS[m.severity] || 'var(--text-muted)';
+        const label = m.severity.toUpperCase();
+        const badgeClass = SEV_BADGE_CLASS[m.severity] || '';
         const findingsHtml = m.findings.map(f =>
-            `<span style="font-size:10px;background:var(--surface-hover);padding:1px 6px;border-radius:4px;color:${SEV_COLORS[f.severity]};">${f.pattern}: ${escapeHtml(f.preview)}</span>`
+            `<span class="badge ${SEV_BADGE_CLASS[f.severity] || ''}">${f.pattern}: ${escapeHtml(f.preview)}</span>`
         ).join(' ');
 
-        return `<div class="item-row" style="border-left:3px solid ${color};">
-            <div class="item-main">
-                <div class="item-name">
-                    <span style="background:${color};color:#1e1e2e;font-size:10px;font-weight:bold;padding:1px 6px;border-radius:4px;margin-right:6px;">${label}</span>
+        return `<div class="memory-item" style="border-left:3px solid ${color};cursor:default;">
+            <div class="main">
+                <div class="key">
+                    <span class="badge ${badgeClass}">${label}</span>
                     ${escapeHtml(m.key)}
                 </div>
-                <div style="margin-top:4px;">${findingsHtml || '<span class="muted">keine Findings</span>'}</div>
+                <div style="margin-top:4px;display:flex;flex-wrap:wrap;gap:4px;">${findingsHtml || '<span class="muted">keine Findings</span>'}</div>
             </div>
-            <div class="item-actions">
-                ${m.severity !== 'none' ? `<button class="btn-small" onclick="viewRedacted('${escapeAttr(m.key)}')">Redacted</button>` : ''}
+            <div class="actions">
+                ${m.severity !== 'none' ? `<button class="btn btn-small" onclick="viewRedacted('${escapeAttr(m.key)}')">Redacted</button>` : ''}
             </div>
         </div>`;
     }).join('');
@@ -965,8 +946,10 @@ async function viewRedacted(key) {
     try {
         const res = await fetch('/api/redacted?key=' + encodeURIComponent(key));
         const d = await res.json();
-        const preview = d.value.length > 600 ? d.value.substring(0, 600) + '...' : d.value;
-        alert(`[${d.severity.toUpperCase()}] ${d.key}\n\n${preview}`);
+        openModal('Redacted: ' + d.key, `
+            <div style="margin-bottom:8px;"><span class="badge ${SEV_BADGE_CLASS[d.severity] || ''}">${d.severity.toUpperCase()}</span></div>
+            <pre>${escapeHtml(d.value)}</pre>
+        `, `<button class="btn" onclick="closeModal()">Schliessen</button>`);
     } catch (e) { console.error(e); }
 }
 
