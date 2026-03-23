@@ -1,226 +1,234 @@
 # Context Pilot
 
-Smart context and memory management for AI models. Assembles blocks of content within a token budget, compressing or dropping lower-priority blocks as needed.
+Smart context and memory management for AI models. Web-App + MCP Server fuer die Verwaltung von Wissensdatenbanken, die Claude Code und andere MCP-Clients on-demand nutzen koennen.
 
 ## Features
 
-- **Token-Budget Assembler** — 3-phase strategy: drop low, compress medium, truncate high
-- **7 Compressors** — bullet_extract, yaml_struct, mermaid, table, code_compact, dedup_cross
-- **SQLite Storage** — Projects, contexts, memories with FTS5 full-text search
-- **Usage Tracking** — Block weights, feedback scoring, skill adaptation profiles
-- **Weight Adjuster** — Automatic priority adjustment based on usage patterns and feedback
-- **Skill Connector** — Pluggable skill system with built-in `GitStatusSkill`
-- **Simulation Engine** — Budget sweep, clustering, compression analysis
-- **4 Interfaces** — CLI, MCP Server, PySide6 GUI, FastAPI Web App
+- **Web UI** — Dashboard, Memory-Verwaltung, Knowledge Graph, Assembler, Secrets Scanner
+- **MCP Server (SSE)** — Stellt Wissen nur bereit wenn die App laeuft
+- **Token-Budget Assembler** — 3-Phasen-Strategie: Drop LOW, Compress MEDIUM, Truncate HIGH
+- **7 Compressoren** — bullet_extract, yaml_struct, mermaid, table, code_compact, dedup_cross
+- **Knowledge Graph** — Interaktive vis.js Visualisierung der Memory-Zusammenhaenge
+- **Profile** — Mehrere Wissensdatenbanken (z.B. "Arbeit", "Smarthome", "Privat")
+- **Secrets Scanner** — Erkennt Passwoerter, API Keys, Tokens, IPs (OWASP patterns)
+- **Auto-Compress** — Memories bekommen automatisch den besten Compressor zugewiesen
+- **Import** — CLAUDE.md, copilot-instructions.md, memory-mcp SQLite
+- **Activity Tracking** — Zeigt welche Memories geladen, erstellt, geaendert wurden
+- **Docker** — Laeuft als Container auf NAS, Pi, oder jedem Docker-Host
 
-## Setup
+## Schnellstart
+
+### Lokal (Python)
 
 ```bash
-pip install -e .
-```
-
-Or install from requirements:
-```bash
+# Venv erstellen und Dependencies installieren
+python3 -m venv .venv
+source .venv/bin/activate
 pip install -r requirements.txt
+
+# Starten (Web UI + MCP Server)
+python -m src.web
+
+# Nur Web UI (ohne MCP)
+python -m src.web --no-mcp
+
+# Nur MCP Server
+python -m src.interfaces.mcp_server --transport sse --port 8400
 ```
 
-Raspberry Pi OS (system packages):
-```bash
-sudo apt install python3-tiktoken python3-click python3-pytest python3-pyside6
-pip install mcp --break-system-packages  # or use a venv
-```
+Web UI: http://localhost:8080
+MCP SSE: http://localhost:8400/sse
 
-## Architecture
-
-```
-src/
-├── core/
-│   ├── assembler.py        # Token-budget assembler (3-phase reduction)
-│   ├── block.py            # Block data model (content, priority, compress_hint)
-│   ├── token_budget.py     # tiktoken-based token estimation (cl100k_base)
-│   ├── context.py          # Context container
-│   ├── weight_adjuster.py  # Usage/feedback-based priority adjustment
-│   ├── skill_connector.py  # Pluggable skill interface + GitStatusSkill
-│   ├── simulator.py        # Budget sweep simulation engine
-│   ├── clustering.py       # Jaccard-based block clustering
-│   ├── skill_graph.py      # Skill dependency DAG
-│   └── compressors/
-│       ├── base.py
-│       ├── bullet_extract.py
-│       ├── yaml_struct.py
-│       ├── mermaid.py
-│       ├── table.py
-│       ├── code_compact.py
-│       └── dedup_cross.py
-├── gui/
-│   ├── __main__.py         # GUI entry point
-│   ├── main_window.py      # PySide6 main window (tabs: Blocks, Memories, Simulation)
-│   ├── block_editor.py     # Block editor with drag-drop reordering
-│   ├── memory_editor.py    # Memory editor with FTS search + tag filtering
-│   └── widgets/
-│       ├── block_card.py   # Block display card
-│       ├── budget_bar.py   # Token usage progress bar
-│       └── simulation_panel.py  # Cluster map + budget impact chart
-├── interfaces/
-│   ├── cli.py              # Click CLI (assemble, blocks, projects, memories, usage, feedback, web)
-│   └── mcp_server.py       # MCP server (stdio transport)
-├── web/
-│   ├── app.py              # FastAPI REST API + HTMX frontend
-│   ├── templates/          # Jinja2 templates
-│   └── static/             # JS + CSS assets
-└── storage/
-    ├── db.py               # SQLite engine + schema migrations (WAL mode)
-    ├── memory.py           # Memory store (KV + FTS5 search)
-    ├── project.py          # Project + context store
-    └── usage.py            # Usage tracking, feedback, block weights, skill profiles
-```
-
-## CLI
+### Docker
 
 ```bash
-# Assemble context within a token budget
-context-pilot assemble --budget 4000 --context project.json
-context-pilot assemble --budget 4000 --context project.json --format json
-
-# Manage blocks
-context-pilot blocks list --context project.json
-context-pilot blocks add --context project.json --content "Text" --priority high
-context-pilot blocks add --context project.json --content "Text" --priority medium --compress-hint bullet_extract
-context-pilot blocks remove --context project.json --index 2
-
-# Projects
-context-pilot projects list
-context-pilot projects create --name myproject --description "Description"
-context-pilot projects show --name myproject
-context-pilot projects delete --name myproject
-
-# Memories (SQLite + FTS5)
-context-pilot memories list
-context-pilot memories get --key mykey
-context-pilot memories set --key mykey --value "value" --tags tag1,tag2
-context-pilot memories search --query "search term" --tags tag1
-context-pilot memories export --output memories.json
-context-pilot memories import --input memories.json
-
-# Usage & feedback
-context-pilot usage weights
-context-pilot usage skills
-context-pilot feedback add --assembly-id ID --block-content "text" --helpful
-context-pilot feedback show --assembly-id ID
-
-# Start web server
-context-pilot web --host 0.0.0.0 --port 8080
+docker compose up -d
 ```
 
-### Context file format
-
-```json
-{
-  "blocks": [
-    { "content": "System instructions.", "priority": "high" },
-    { "content": "Background context.", "priority": "medium", "compress_hint": "bullet_extract" },
-    { "content": "Nice-to-have info.", "priority": "low" }
-  ]
-}
-```
-
-Priority values: `high`, `medium`, `low`.
-Compressor hints: `bullet_extract`, `yaml_struct`, `mermaid`, `table`, `code_compact`, `dedup_cross`.
-
-## MCP Server
-
-Start the MCP server (stdio transport, for use with AI tools):
+Oder manuell:
 
 ```bash
-python -m src.interfaces.mcp_server
+docker build -t context-pilot .
+docker run -d -p 8080:8080 -p 8400:8400 -v context-pilot-data:/data context-pilot
 ```
 
-### Tools
+### NAS / NAS
 
-| Tool | Description |
-|------|-------------|
-| `assemble_context(budget, blocks)` | Assemble blocks within a token budget |
-| `list_blocks(blocks)` | Return block summaries with token counts |
-| `submit_feedback(assembly_id, block_content, helpful)` | Record assembly feedback |
-| `get_block_weight(block_content, project_name?)` | Get block weight and suggested priority |
+1. Docker-Image bauen oder `docker compose` per SSH
+2. Ports: 8080 (Web UI), 8400 (MCP)
+3. Volume fuer persistente Daten anlegen
 
-## Assembler Logic
+## Architektur
 
-When total tokens exceed the budget:
+```
+Browser ──→ Web UI (FastAPI + HTMX, Port 8080)
+               │
+               ├── Dashboard (Stats, Skills, Activity, Import)
+               ├── Memories (CRUD, Suche, Tags, NEU/UPD Badges)
+               ├── Skills (Live MCP Skill Monitor)
+               ├── Knowledge Graph (vis.js, Suche)
+               ├── Secrets Scanner (Sensitivity Scan, Redacted View)
+               └── Assembler (Token Budget, Compression Test)
 
-1. **Drop** LOW-priority blocks (cheapest loss)
-2. **Compress** MEDIUM-priority blocks with a registered `compress_hint`
-3. **Truncate** HIGH-priority blocks as last resort (binary search for longest prefix)
+Claude Code ──→ MCP Server (SSE, Port 8400)
+                   │
+                   ├── get_skill_context (relevante Memories + Auto-Compress)
+                   ├── memory_set / memory_get / memory_delete
+                   ├── memory_search (FTS5)
+                   ├── register_skill / heartbeat
+                   └── assemble_context / submit_feedback
 
-## GUI
+Beide nutzen ──→ SQLite DB (~/.contextpilot/data.db)
+                   ├── memories (+ FTS5 Volltextsuche)
+                   ├── memory_activity (Aenderungs-Log)
+                   ├── skill_registry (verbundene Skills)
+                   ├── block_usage + feedback (Relevance Learning)
+                   └── skill_block_relevance (Score pro Skill)
+```
+
+## Memory-Import
+
+### Ueber die Web UI (Dashboard)
+
+Im Dashboard gibt es Import-Buttons fuer:
+
+| Format | Button | Was wird importiert |
+|---|---|---|
+| **CLAUDE.md** | `CLAUDE.md` | Sektionen aus Claude Code Instruktionsdateien |
+| **copilot-instructions.md** | `Copilot.md` | GitHub Copilot Instruktionsdateien |
+| **memory-mcp SQLite** | `SQLite .db` | Datenbank vom memory-mcp MCP Server |
+
+### Ueber CLI
 
 ```bash
-python -m src.gui
-# or via entry point:
-context-pilot-gui
+# CLAUDE.md importieren
+context-pilot memories import-claude --in-path ~/.claude/CLAUDE.md
+
+# Copilot Instructions importieren
+context-pilot memories import-copilot --in-path .github/copilot-instructions.md
+
+# memory-mcp SQLite importieren
+context-pilot memories import-mcp --in-path ~/.local/share/claude-memories/memory.db
+
+# Memories exportieren / importieren (JSON)
+context-pilot memories export --out export.json
+context-pilot memories import --in-path export.json
 ```
 
-Features:
-- **Block Editor** — Add, edit, duplicate, delete blocks with drag-drop reordering
-- **Memory Editor** — Full-text search, tag filtering, CRUD, context preview
-- **Simulation Panel** — Cluster treemap visualization, budget impact chart
-- **Budget Bar** — Real-time token usage with colour coding (green/orange/red)
-- **Project Management** — Create, open, save projects with multiple contexts
+## Profile (Wissensdatenbanken)
 
-## Web App
+Profile erlauben mehrere isolierte Wissensdatenbanken:
+
+- **default** — Standard-Datenbank (`~/.contextpilot/data.db`)
+- Weitere Profile liegen in `~/.contextpilot/profiles/<name>/data.db`
+
+### Web UI
+
+Im Header oben rechts:
+- Dropdown zum Wechseln zwischen Profilen
+- `+` Button fuer neues Profil
+- `Del` Button zum Loeschen (nicht fuer "default")
+
+### API
+
+```
+GET    /api/profiles              — Liste aller Profile
+POST   /api/profiles              — Neues Profil erstellen
+POST   /api/profiles/{name}/switch — Profil wechseln
+DELETE /api/profiles/{name}       — Profil loeschen
+POST   /api/profiles/{name}/duplicate — Profil duplizieren
+```
+
+## MCP Server — On-Demand
+
+Der MCP Server laeuft **nur wenn Context Pilot gestartet ist**:
+
+1. App starten → MCP Server startet auf Port 8400 (SSE)
+2. Registriert sich automatisch in `~/.claude.json`
+3. Claude Code kann sich verbinden und Memories nutzen
+4. App beenden → MCP deregistriert sich → Claude hat keinen Zugriff mehr
+
+### Ohne MCP (nur Web UI)
 
 ```bash
-context-pilot web --port 8080
+python -m src.web --no-mcp
 ```
 
-HTMX frontend with REST API. Endpoints for token estimation, assembly, projects, memories, and feedback.
+## Secrets Scanner
 
-## Compressors
+Der Secrets Scanner erkennt sensitive Inhalte in Memories:
 
-| Name | Input | Output |
-|------|-------|--------|
-| `bullet_extract` | Prose / long sentences | Bullet list (<=12 words/bullet) |
-| `yaml_struct` | Key-value text / structured | Compact YAML |
-| `mermaid` | Numbered/bulleted steps, process text | `flowchart TD` diagram |
-| `table` | Tabular / CSV-like data | Compact key-value rows |
-| `code_compact` | Source code | Minified (comments/whitespace removed) |
-| `dedup_cross` | Multiple blocks | Cross-block deduplication |
+| Severity | Erkennt |
+|---|---|
+| **Critical** | Private Keys, Passwoerter (`password=`), Connection Strings |
+| **High** | API Keys, Bearer Tokens, GitHub/AWS Tokens |
+| **Medium** | WiFi-Passwoerter, Inline-Credentials, env Secrets |
+| **Low** | Private IPs, E-Mail-Adressen, Telefonnummern |
 
-## Building Portable Installers
+- **Secrets Tab** in der Web UI: Scan aller Memories, Filter nach Severity
+- **Redacted View**: Critical/High Secrets werden durch `[REDACTED]` ersetzt
+- **API**: `GET /api/sensitivity`, `GET /api/memories/{key}/redacted`
+
+## Assembler — Wie Wissen komprimiert wird
+
+Wenn ein Skill (`get_skill_context`) Wissen anfragt:
+
+1. **Auto-Detect**: Jede Memory bekommt einen Compress-Hint (code_compact, mermaid, bullet_extract, yaml_struct)
+2. **Relevance Scoring**: 40% Content-Match + 60% History
+3. **Assembly** (wenn Budget knapp):
+   - Phase 1: LOW-Prio Blocks droppen
+   - Phase 2: MEDIUM-Prio Blocks **komprimieren** (Mermaid-Diagramme, Bullet-Points, etc.)
+   - Phase 3: HIGH-Prio Blocks abschneiden
+
+## Entwicklung
 
 ```bash
-# Install build dependencies
-pip install -r requirements-dev.txt
-sudo apt-get install binutils  # Linux
+# Venv einrichten
+python3 -m venv .venv && source .venv/bin/activate
+pip install -e '.[dev]'
 
-# Build CLI
-python scripts/build_installer.py
+# Tests
+pytest tests/ -v
 
-# Build GUI
-python scripts/build_installer.py --gui
-
-# Build all
-python scripts/build_installer.py --all --clean
+# Web App mit Hot-Reload
+python -m src.web --reload --no-mcp
 ```
 
-| Platform | Status | Notes |
-|----------|--------|-------|
-| Linux (aarch64/Raspberry Pi) | Primary target | Tested, single binary |
-| Linux (x86_64) | Supported | Build on target architecture |
-| macOS | Planned | Produces `.app` bundle |
-| Windows | Planned | Produces `.exe` |
+### VS Code
 
-Cross-compilation is not supported — build on the target platform.
+- **F5**: Launch-Configs fuer Web App, MCP Server, Tests
+- **Ctrl+Shift+B**: Tasks fuer Docker Build/Run/Stop
 
-## Tests
+## API-Uebersicht
 
-```bash
-PYTHONPATH=. python -m pytest tests/ -v
-PYTHONPATH=. python -m pytest tests/ -v --cov=src/core --cov-report=term-missing
-```
+| Endpoint | Methode | Beschreibung |
+|---|---|---|
+| `/api/dashboard` | GET | Aggregierte Stats |
+| `/api/memories` | GET/POST | Memory CRUD |
+| `/api/memories/{key}` | GET/DELETE | Einzelne Memory |
+| `/api/memories/search` | GET | Volltextsuche + Tags |
+| `/api/memory-tags` | GET | Alle Tags |
+| `/api/memory-activity` | GET | Aenderungs-Log |
+| `/api/sensitivity` | GET | Secrets Scan |
+| `/api/memories/{key}/redacted` | GET | Redacted View |
+| `/api/knowledge-graph` | GET | Graph-Daten (vis.js) |
+| `/api/skills` | GET | Registrierte MCP Skills |
+| `/api/profiles` | GET/POST | Profil-Verwaltung |
+| `/api/profiles/{name}/switch` | POST | Profil wechseln |
+| `/api/import/claude-md` | POST | CLAUDE.md Upload |
+| `/api/import/copilot-md` | POST | Copilot.md Upload |
+| `/api/import/sqlite` | POST | SQLite DB Upload |
+| `/api/preview-context` | POST | Assembly Preview |
+| `/api/test-compress` | POST | Compressor testen |
+| `/api/estimate` | POST | Token-Schaetzung |
+| `/api/assemble` | POST | Block Assembly |
+| `/api/mcp-status` | GET | MCP Server Status |
 
-Target: >80% coverage on `src/core/`.
+## Technologie
 
-## License
-
-MIT
+- **Backend**: Python 3.11+, FastAPI, uvicorn
+- **Frontend**: HTMX, vis.js (Knowledge Graph)
+- **Storage**: SQLite (WAL-Mode) + FTS5 Volltextsuche
+- **MCP**: FastMCP mit SSE Transport
+- **Token Counting**: tiktoken (cl100k_base)
+- **Container**: Docker (python:3.11-slim, ~557MB)

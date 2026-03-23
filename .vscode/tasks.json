@@ -2,14 +2,39 @@
     "version": "2.0.0",
     "tasks": [
         {
-            "label": "Setup venv & install deps",
+            "label": "Setup venv",
             "type": "shell",
-            "command": "test -d .venv || python3 -m venv .venv && .venv/bin/pip install -e '.[dev]'",
+            "command": "test -d .venv || python3 -m venv .venv && .venv/bin/pip install -q -e '.[dev]'",
             "group": "build",
-            "presentation": {
-                "reveal": "silent",
-                "panel": "shared"
-            }
+            "presentation": { "reveal": "silent", "panel": "shared" }
+        },
+        {
+            "label": "Tests ausfuehren",
+            "type": "shell",
+            "command": ".venv/bin/python -m pytest tests/ -v --tb=short",
+            "group": { "kind": "test", "isDefault": true },
+            "presentation": { "reveal": "always", "panel": "dedicated" }
+        },
+        {
+            "label": "Docker Build",
+            "type": "shell",
+            "command": "docker build -t context-pilot .",
+            "group": "build",
+            "presentation": { "reveal": "always", "panel": "dedicated" }
+        },
+        {
+            "label": "Docker Run",
+            "type": "shell",
+            "command": "docker compose up -d && echo 'Web UI: http://localhost:8080'",
+            "group": "build",
+            "presentation": { "reveal": "always", "panel": "dedicated" }
+        },
+        {
+            "label": "Docker Stop",
+            "type": "shell",
+            "command": "docker compose down",
+            "group": "build",
+            "presentation": { "reveal": "always", "panel": "dedicated" }
         }
     ]
 }

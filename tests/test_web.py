@@ -326,6 +326,28 @@ class TestKnowledgeGraph:
         assert len(d["groups"]) == 2
 
 
+class TestImport:
+    def test_import_claude_md(self, client):
+        content = b"# My Instructions\n\n## Section One\nDo this.\n\n## Section Two\nDo that."
+        r = client.post("/api/import/claude-md", files={"file": ("CLAUDE.md", content, "text/markdown")})
+        assert r.status_code == 200
+        d = r.json()
+        assert d["status"] == "imported"
+        assert d["count"] >= 1
+
+        # Memories should exist now
+        r2 = client.get("/api/memories")
+        assert len(r2.json()) >= 1
+
+    def test_import_copilot_md(self, client):
+        content = b"# Copilot Instructions\n\n## Coding Style\nUse TypeScript.\n\n## Testing\nWrite tests."
+        r = client.post("/api/import/copilot-md", files={"file": ("copilot-instructions.md", content, "text/markdown")})
+        assert r.status_code == 200
+        d = r.json()
+        assert d["status"] == "imported"
+        assert d["count"] >= 1
+
+
 class TestSensitivity:
     def test_sensitivity_empty(self, client):
         r = client.get("/api/sensitivity")

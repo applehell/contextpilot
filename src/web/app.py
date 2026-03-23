@@ -491,19 +491,34 @@ def create_app(db_path: Optional[Path] = None) -> FastAPI:
             hint = _detect_hint(m.value)
             blocks.append(Block(content=content, priority=Priority.MEDIUM, compress_hint=hint))
 
+        # Select blocks that fit within budget (by token count, greedy)
+        selected = []
+        dropped = []
+        remaining = budget
+        for b in blocks:
+            if b.token_count <= remaining:
+                selected.append(b)
+                remaining -= b.token_count
+            else:
+                dropped.append(b)
+
+        # Assemble selected (may compress further)
         assembler = _make_assembler()
-        result = assembler.assemble_tracked(blocks, budget)
+        if selected:
+            assembled = assembler.assemble(selected, budget)
+        else:
+            assembled = []
 
         return {
             "budget": budget,
-            "used_tokens": result.used_tokens,
+            "used_tokens": sum(b.token_count for b in assembled),
             "input_count": len(blocks),
-            "block_count": len(result.blocks),
-            "dropped_count": len(result.dropped_blocks),
-            "blocks": [_block_to_dict(b) for b in result.blocks],
+            "block_count": len(assembled),
+            "dropped_count": len(dropped),
+            "blocks": [_block_to_dict(b) for b in assembled],
             "dropped": [
                 {"content_preview": b.content[:80], "token_count": b.token_count}
-                for b in result.dropped_blocks
+                for b in dropped[:20]
             ],
         }
 
@@ -569,6 +584,25 @@ def create_app(db_path: Optional[Path] = None) -> FastAPI:
             tmp_path = Path(f.name)
         try:
             memories = import_claude_file(tmp_path)
+            count = 0
+            for m in memories:
+                store.set(m)
+                count += 1
+            return {"status": "imported", "count": count, "filename": file.filename}
+        finally:
+            tmp_path.unlink(missing_ok=True)
+
+    @app.post("/api/import/copilot-md")
+    async def import_copilot_md(file: UploadFile = File(...)):
+        from src.importers.copilot import import_copilot_file
+        import tempfile
+        store = _get_memory_store()
+        content = await file.read()
+        with tempfile.NamedTemporaryFile(suffix=".md", delete=False) as f:
+            f.write(content)
+            tmp_path = Path(f.name)
+        try:
+            memories = import_copilot_file(tmp_path)
             count = 0
             for m in memories:
                 store.set(m)

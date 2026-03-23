@@ -2,24 +2,76 @@
     "version": "0.2.0",
     "configurations": [
         {
-            "name": "Context Pilot GUI",
+            "name": "Web App (Port 8080)",
             "type": "debugpy",
             "request": "launch",
-            "module": "src.gui",
+            "module": "src.web",
+            "args": ["--port", "8080", "--mcp-port", "8400"],
             "python": "${workspaceFolder}/.venv/bin/python",
             "cwd": "${workspaceFolder}",
             "justMyCode": false,
-            "preLaunchTask": "Setup venv & install deps"
+            "preLaunchTask": "Setup venv"
         },
         {
-            "name": "Context Pilot CLI",
+            "name": "Web App (ohne MCP)",
+            "type": "debugpy",
+            "request": "launch",
+            "module": "src.web",
+            "args": ["--port", "8080", "--no-mcp"],
+            "python": "${workspaceFolder}/.venv/bin/python",
+            "cwd": "${workspaceFolder}",
+            "justMyCode": false,
+            "preLaunchTask": "Setup venv"
+        },
+        {
+            "name": "Web App (Reload)",
+            "type": "debugpy",
+            "request": "launch",
+            "module": "src.web",
+            "args": ["--port", "8080", "--no-mcp", "--reload"],
+            "python": "${workspaceFolder}/.venv/bin/python",
+            "cwd": "${workspaceFolder}",
+            "justMyCode": false,
+            "preLaunchTask": "Setup venv"
+        },
+        {
+            "name": "MCP Server (SSE)",
+            "type": "debugpy",
+            "request": "launch",
+            "module": "src.interfaces.mcp_server",
+            "args": ["--transport", "sse", "--port", "8400"],
+            "python": "${workspaceFolder}/.venv/bin/python",
+            "cwd": "${workspaceFolder}",
+            "justMyCode": false
+        },
+        {
+            "name": "Tests",
+            "type": "debugpy",
+            "request": "launch",
+            "module": "pytest",
+            "args": ["tests/", "-v", "--tb=short"],
+            "python": "${workspaceFolder}/.venv/bin/python",
+            "cwd": "${workspaceFolder}",
+            "justMyCode": false
+        },
+        {
+            "name": "Tests (aktuelle Datei)",
+            "type": "debugpy",
+            "request": "launch",
+            "module": "pytest",
+            "args": ["${file}", "-v", "--tb=short"],
+            "python": "${workspaceFolder}/.venv/bin/python",
+            "cwd": "${workspaceFolder}",
+            "justMyCode": false
+        },
+        {
+            "name": "CLI",
             "type": "debugpy",
             "request": "launch",
             "module": "src.interfaces.cli",
             "python": "${workspaceFolder}/.venv/bin/python",
             "cwd": "${workspaceFolder}",
-            "justMyCode": false,
-            "preLaunchTask": "Setup venv & install deps"
+            "justMyCode": false
         }
     ]
 }
