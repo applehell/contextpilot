@@ -1,0 +1,267 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Context Pilot</title>
+    <link rel="stylesheet" href="/static/style.css">
+    <script src="https://unpkg.com/htmx.org@2.0.4"></script>
+    <script src="https://unpkg.com/vis-network@9.1.9/standalone/umd/vis-network.min.js"></script>
+</head>
+<body>
+    <header style="display:flex;justify-content:space-between;align-items:center;">
+        <div>
+            <h1>Context Pilot</h1>
+            <p class="subtitle">Smart context management for AI models</p>
+        </div>
+        <div id="profile-bar" style="display:flex;align-items:center;gap:8px;">
+            <span style="color:var(--text-muted);font-size:11px;">Profil:</span>
+            <select id="profile-select" onchange="switchProfile()" style="width:auto;min-width:140px;padding:4px 8px;font-size:12px;">
+            </select>
+            <button class="btn btn-small" onclick="showNewProfileDialog()">+</button>
+            <button class="btn btn-small btn-danger" onclick="deleteActiveProfile()" id="profile-delete-btn" style="display:none;">Del</button>
+        </div>
+    </header>
+
+    <nav>
+        <button class="tab active" onclick="showTab('dashboard')">Dashboard</button>
+        <button class="tab" onclick="showTab('memories')">Memories</button>
+        <button class="tab" onclick="showTab('skills')">Skills</button>
+        <button class="tab" onclick="showTab('graph')">Knowledge Graph</button>
+        <button class="tab" onclick="showTab('secrets')">Secrets</button>
+        <button class="tab" onclick="showTab('assembler')">Assembler</button>
+        <button class="tab" onclick="showTab('blocks')">Token Estimator</button>
+    </nav>
+
+    <main>
+        <!-- Dashboard Tab -->
+        <section id="tab-dashboard" class="tab-content active">
+            <div class="cards-grid">
+                <div class="status-card">
+                    <div class="card-title">MEMORIES</div>
+                    <div class="card-value" id="dash-memories">--</div>
+                    <div class="card-detail" id="dash-memories-detail"></div>
+                </div>
+                <div class="status-card">
+                    <div class="card-title">TOKENS</div>
+                    <div class="card-value" id="dash-tokens">--</div>
+                    <div class="card-detail" id="dash-tokens-detail"></div>
+                </div>
+                <div class="status-card">
+                    <div class="card-title">SKILLS</div>
+                    <div class="card-value" id="dash-skills">--</div>
+                    <div class="card-detail" id="dash-skills-detail"></div>
+                </div>
+                <div class="status-card">
+                    <div class="card-title">TAGS</div>
+                    <div class="card-value" id="dash-tags">--</div>
+                    <div class="card-detail">unique tags</div>
+                </div>
+            </div>
+
+            <div class="panel" style="margin-top:16px;">
+                <h2>Connected Skills</h2>
+                <div id="dash-skill-list" class="item-list">
+                    <p class="muted">Keine Skills verbunden</p>
+                </div>
+            </div>
+
+            <div class="panel" style="margin-top:16px;">
+                <div style="display:flex;justify-content:space-between;align-items:center;">
+                    <h2>Memory Activity</h2>
+                    <button class="btn btn-small" onclick="loadDashboard()">Refresh</button>
+                </div>
+                <div id="dash-activity" class="item-list">
+                    <p class="muted">Keine Aktivitaet</p>
+                </div>
+            </div>
+
+            <div class="panel" style="margin-top:16px;">
+                <div style="display:flex;justify-content:space-between;align-items:center;">
+                    <h2>Context Preview</h2>
+                    <div style="display:flex;gap:8px;align-items:center;">
+                        <label style="font-size:12px;text-transform:none;">Budget:</label>
+                        <input type="number" id="preview-budget" value="8000" min="100" style="width:100px;padding:4px 8px;font-size:12px;">
+                        <button class="btn btn-small btn-primary" onclick="previewContext()">Preview</button>
+                    </div>
+                </div>
+                <div id="preview-result"></div>
+            </div>
+        </section>
+
+        <!-- Memories Tab -->
+        <section id="tab-memories" class="tab-content">
+            <div class="panel">
+                <h2>Memories</h2>
+                <div class="form-row inline">
+                    <input type="text" id="memory-search" placeholder="Search..." oninput="searchMemories()">
+                    <select id="memory-tag-filter" onchange="filterByTag()" style="width:auto;min-width:120px;">
+                        <option value="">Alle Tags</option>
+                    </select>
+                </div>
+                <div class="form-row inline">
+                    <input type="text" id="memory-key" placeholder="Key">
+                    <input type="text" id="memory-value" placeholder="Value">
+                    <input type="text" id="memory-tags" placeholder="Tags (comma-separated)">
+                    <button class="btn btn-primary" onclick="saveMemory()">Save</button>
+                </div>
+                <div id="memory-count" style="color:var(--text-muted);font-size:12px;margin:8px 0;"></div>
+                <div id="memory-list" class="item-list"></div>
+            </div>
+        </section>
+
+        <!-- Skills Tab -->
+        <section id="tab-skills" class="tab-content">
+            <div class="panel">
+                <div style="display:flex;justify-content:space-between;align-items:center;">
+                    <h2>Connected Skills (MCP)</h2>
+                    <button class="btn btn-small" onclick="loadSkills()">Refresh</button>
+                </div>
+                <div id="skill-list" class="item-list">
+                    <p class="muted">Keine Skills verbunden — starte den MCP Server und registriere Skills</p>
+                </div>
+            </div>
+        </section>
+
+        <!-- Knowledge Graph Tab -->
+        <section id="tab-graph" class="tab-content">
+            <div class="panel" style="padding: 0; position: relative;">
+                <div id="graph-toolbar" style="display:flex; align-items:center; gap:12px; padding:12px 16px; border-bottom:1px solid #45475a; background:#1e1e2e;">
+                    <h2 style="margin:0; font-size:16px; color:#cdd6f4;">Knowledge Graph</h2>
+                    <span id="graph-stats" style="color:#6c7086; font-size:12px;"></span>
+                    <div style="flex:1;"></div>
+                    <input type="text" id="graph-search" placeholder="Suche in Memories..." oninput="searchGraph()" style="width:220px; padding:4px 10px; font-size:12px; background:#181825; border:1px solid #45475a; color:#cdd6f4; border-radius:6px;">
+                    <span id="graph-search-count" style="color:#6c7086; font-size:11px; min-width:60px;"></span>
+                    <label style="color:#a6adc8; font-size:12px;">
+                        <input type="checkbox" id="graph-physics" checked onchange="togglePhysics()"> Physik
+                    </label>
+                    <button class="btn btn-small" onclick="graphFitAll()">Alles zeigen</button>
+                    <button class="btn btn-small" onclick="loadGraph()">Neu laden</button>
+                </div>
+                <div id="graph-container" style="height:calc(100vh - 180px); background:#181825;"></div>
+                <div id="graph-legend" style="position:absolute; bottom:16px; left:16px; background:rgba(30,30,46,0.9); border:1px solid #45475a; border-radius:8px; padding:10px 14px; font-size:11px; color:#a6adc8; max-height:200px; overflow-y:auto;"></div>
+                <div id="graph-detail" style="position:absolute; top:60px; right:16px; background:rgba(30,30,46,0.95); border:1px solid #45475a; border-radius:8px; padding:14px; font-size:12px; color:#cdd6f4; max-width:360px; max-height:400px; overflow-y:auto; display:none;"></div>
+            </div>
+        </section>
+
+        <!-- Secrets Tab -->
+        <section id="tab-secrets" class="tab-content">
+            <div class="cards-grid">
+                <div class="status-card">
+                    <div class="card-title">TOTAL</div>
+                    <div class="card-value" id="sec-total">--</div>
+                    <div class="card-detail">memories gescannt</div>
+                </div>
+                <div class="status-card">
+                    <div class="card-title">SENSITIVE</div>
+                    <div class="card-value red" id="sec-sensitive">--</div>
+                    <div class="card-detail">mit Findings</div>
+                </div>
+                <div class="status-card">
+                    <div class="card-title">CRITICAL/HIGH</div>
+                    <div class="card-value red" id="sec-critical">--</div>
+                    <div class="card-detail">kritische Funde</div>
+                </div>
+                <div class="status-card">
+                    <div class="card-title">CLEAN</div>
+                    <div class="card-value green" id="sec-clean">--</div>
+                    <div class="card-detail">keine Secrets</div>
+                </div>
+            </div>
+            <div class="panel" style="margin-top:16px;">
+                <div style="display:flex;justify-content:space-between;align-items:center;">
+                    <h2>Sensitivity Scan</h2>
+                    <div style="display:flex;gap:8px;align-items:center;">
+                        <select id="sec-filter" onchange="filterSecrets()" style="width:auto;padding:4px 8px;font-size:12px;">
+                            <option value="all">Alle</option>
+                            <option value="sensitive">Nur sensitive</option>
+                            <option value="critical">Critical</option>
+                            <option value="high">High</option>
+                            <option value="medium">Medium</option>
+                            <option value="low">Low</option>
+                            <option value="none">Clean</option>
+                        </select>
+                        <button class="btn btn-small" onclick="loadSecrets()">Scan</button>
+                    </div>
+                </div>
+                <div id="secrets-list" class="item-list" style="margin-top:8px;">
+                    <p class="muted">Klicke "Scan" um alle Memories auf Secrets zu pruefen</p>
+                </div>
+            </div>
+        </section>
+
+        <!-- Assembler Tab -->
+        <section id="tab-assembler" class="tab-content">
+            <div class="panel">
+                <h2>Assemble Context</h2>
+                <div class="form-row">
+                    <label for="budget">Token Budget</label>
+                    <input type="number" id="budget" value="4000" min="100">
+                </div>
+
+                <div id="block-list">
+                    <div class="block-entry" data-index="0">
+                        <div class="block-header">
+                            <span class="block-label">Block 1</span>
+                            <select class="block-priority">
+                                <option value="high">High</option>
+                                <option value="medium" selected>Medium</option>
+                                <option value="low">Low</option>
+                            </select>
+                            <select class="block-hint">
+                                <option value="">No compression</option>
+                                <option value="bullet_extract">Bullet Extract</option>
+                                <option value="yaml_struct">YAML Struct</option>
+                                <option value="mermaid">Mermaid</option>
+                                <option value="table">Table</option>
+                                <option value="code_compact">Code Compact</option>
+                            </select>
+                            <span class="token-badge">0 tokens</span>
+                            <button class="btn-small" onclick="testCompressBlock(this)">Test</button>
+                            <button class="btn-small" onclick="duplicateBlock(this)">Dup</button>
+                            <button class="btn-small btn-danger" onclick="removeBlock(this)">Del</button>
+                        </div>
+                        <textarea class="block-content" rows="4" placeholder="Enter block content..."
+                                  oninput="estimateTokens(this)"></textarea>
+                    </div>
+                </div>
+
+                <div class="button-row">
+                    <button class="btn" onclick="addBlock()">+ Add Block</button>
+                    <button class="btn btn-primary" onclick="runAssemble()">Assemble</button>
+                </div>
+
+                <div id="assembly-result" class="result-panel" style="display:none">
+                    <h3>Assembly Result</h3>
+                    <div class="budget-bar-container">
+                        <div id="budget-bar" class="budget-bar"></div>
+                        <span id="budget-label"></span>
+                    </div>
+                    <div id="assembly-meta"></div>
+                    <div id="assembly-blocks"></div>
+                    <div id="assembly-dropped"></div>
+                </div>
+            </div>
+
+            <div id="compress-result" class="panel" style="margin-top:16px;display:none;">
+                <h3>Compression Test</h3>
+                <div id="compress-meta"></div>
+                <pre id="compress-preview" style="white-space:pre-wrap;font-size:12px;max-height:300px;overflow-y:auto;background:var(--bg);padding:12px;border-radius:var(--radius);margin-top:8px;"></pre>
+            </div>
+        </section>
+
+        <!-- Token Estimator Tab -->
+        <section id="tab-blocks" class="tab-content">
+            <div class="panel">
+                <h2>Token Estimator</h2>
+                <textarea id="estimate-text" rows="6" placeholder="Paste text to estimate tokens..."
+                          oninput="estimateSingle()"></textarea>
+                <div id="estimate-result" class="info-box">0 tokens</div>
+            </div>
+        </section>
+    </main>
+
+    <script src="/static/app.js"></script>
+    <script>loadProfiles(); loadDashboard();</script>
+</body>
+</html>

@@ -1,0 +1,169 @@
+"""Memory persistence — SQLite-backed key-value store with metadata, tagging, and FTS5 search."""
+from __future__ import annotations
+
+import json
+import time
+from dataclasses import dataclass, field
+from typing import Any, Dict, List, Optional, Set
+
+from .db import Database
+
+
+@dataclass
+class Memory:
+    key: str
+    value: str
+    tags: List[str] = field(default_factory=list)
+    metadata: Dict[str, Any] = field(default_factory=dict)
+    created_at: float = field(default_factory=time.time)
+    updated_at: float = field(default_factory=time.time)
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "key": self.key,
+            "value": self.value,
+            "tags": self.tags,
+            "metadata": self.metadata,
+            "created_at": self.created_at,
+            "updated_at": self.updated_at,
+        }
+
+    @classmethod
+    def from_dict(cls, d: Dict[str, Any]) -> Memory:
+        return cls(
+            key=d["key"],
+            value=d["value"],
+            tags=d.get("tags", []),
+            metadata=d.get("metadata", {}),
+            created_at=d.get("created_at", time.time()),
+            updated_at=d.get("updated_at", time.time()),
+        )
+
+
+def _row_to_memory(row) -> Memory:
+    return Memory(
+        key=row["key"],
+        value=row["value"],
+        tags=json.loads(row["tags"]),
+        metadata=json.loads(row["metadata"]),
+        created_at=row["created_at"],
+        updated_at=row["updated_at"],
+    )
+
+
+class MemoryStore:
+    """SQLite-backed memory storage with FTS5 full-text search."""
+
+    def __init__(self, db: Database) -> None:
+        self._db = db
+
+    def list(self) -> List[Memory]:
+        rows = self._db.conn.execute(
+            "SELECT key, value, tags, metadata, created_at, updated_at FROM memories ORDER BY key"
+        ).fetchall()
+        return [_row_to_memory(r) for r in rows]
+
+    def get(self, key: str) -> Memory:
+        row = self._db.conn.execute(
+            "SELECT key, value, tags, metadata, created_at, updated_at FROM memories WHERE key = ?",
+            (key,),
+        ).fetchone()
+        if not row:
+            raise KeyError(f"Memory '{key}' not found.")
+        return _row_to_memory(row)
+
+    def set(self, memory: Memory) -> None:
+        existing = self._db.conn.execute(
+            "SELECT created_at FROM memories WHERE key = ?", (memory.key,)
+        ).fetchone()
+        if existing:
+            memory.created_at = existing["created_at"]
+            memory.updated_at = time.time()
+            self._db.conn.execute(
+                """UPDATE memories SET value = ?, tags = ?, metadata = ?,
+                   created_at = ?, updated_at = ? WHERE key = ?""",
+                (memory.value, json.dumps(memory.tags), json.dumps(memory.metadata),
+                 memory.created_at, memory.updated_at, memory.key),
+            )
+        else:
+            self._db.conn.execute(
+                """INSERT INTO memories (key, value, tags, metadata, created_at, updated_at)
+                   VALUES (?, ?, ?, ?, ?, ?)""",
+                (memory.key, memory.value, json.dumps(memory.tags),
+                 json.dumps(memory.metadata), memory.created_at, memory.updated_at),
+            )
+        self._db.conn.commit()
+
+    def delete(self, key: str) -> None:
+        row = self._db.conn.execute(
+            "SELECT 1 FROM memories WHERE key = ?", (key,)
+        ).fetchone()
+        if not row:
+            raise KeyError(f"Memory '{key}' not found.")
+        self._db.conn.execute("DELETE FROM memories WHERE key = ?", (key,))
+        self._db.conn.commit()
+
+    def search(self, query: str, tags: Optional[List[str]] = None) -> List[Memory]:
+        q = query.strip()
+        tag_set: Optional[Set[str]] = set(tags) if tags else None
+
+        if q:
+            # Use FTS5 for text search, then filter by tags in Python
+            fts_query = '"' + q.replace('"', '""') + '"'
+            rows = self._db.conn.execute(
+                """SELECT m.key, m.value, m.tags, m.metadata, m.created_at, m.updated_at
+                   FROM memories m
+                   JOIN memories_fts fts ON m.rowid = fts.rowid
+                   WHERE memories_fts MATCH ?
+                   ORDER BY rank""",
+                (fts_query,),
+            ).fetchall()
+            # FTS may miss substring matches — fall back to LIKE for simple queries
+            fts_keys = {r["key"] for r in rows}
+            like_pattern = f"%{q}%"
+            like_rows = self._db.conn.execute(
+                """SELECT key, value, tags, metadata, created_at, updated_at
+                   FROM memories
+                   WHERE (key LIKE ? OR value LIKE ?) AND key NOT IN (
+                     SELECT key FROM memories WHERE key IN ({})
+                   )""".format(",".join("?" * len(fts_keys))) if fts_keys else
+                """SELECT key, value, tags, metadata, created_at, updated_at
+                   FROM memories
+                   WHERE key LIKE ? OR value LIKE ?""",
+                (like_pattern, like_pattern, *fts_keys) if fts_keys else
+                (like_pattern, like_pattern),
+            ).fetchall()
+            all_rows = list(rows) + list(like_rows)
+        else:
+            all_rows = self._db.conn.execute(
+                "SELECT key, value, tags, metadata, created_at, updated_at FROM memories"
+            ).fetchall()
+
+        results = []
+        for r in all_rows:
+            mem = _row_to_memory(r)
+            if tag_set and not tag_set.issubset(set(mem.tags)):
+                continue
+            results.append(mem)
+        return results
+
+    def tags(self) -> List[str]:
+        all_tags: Set[str] = set()
+        rows = self._db.conn.execute("SELECT tags FROM memories").fetchall()
+        for r in rows:
+            all_tags.update(json.loads(r["tags"]))
+        return sorted(all_tags)
+
+    def export_json(self) -> str:
+        memories = self.list()
+        return json.dumps({"memories": [m.to_dict() for m in memories]}, indent=2)
+
+    def import_json(self, data: str, merge: bool = True) -> int:
+        incoming = json.loads(data)
+        imported = [Memory.from_dict(d) for d in incoming.get("memories", [])]
+        if not merge:
+            self._db.conn.execute("DELETE FROM memories")
+            self._db.conn.commit()
+        for m in imported:
+            self.set(m)
+        return len(imported)

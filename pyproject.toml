@@ -1,0 +1,30 @@
+[build-system]
+requires = ["setuptools>=68.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "context-pilot"
+version = "1.0.0"
+description = "Smart context and memory management for AI models"
+requires-python = ">=3.11"
+dependencies = [
+    "tiktoken>=0.6.0",
+    "click>=8.1.0",
+    "mcp>=1.0.0",
+    "PySide6>=6.6.0",
+    "fastapi>=0.115.0",
+    "uvicorn[standard]>=0.30.0",
+    "jinja2>=3.1.0",
+]
+
+[project.scripts]
+context-pilot = "src.interfaces.cli:cli"
+
+[project.gui-scripts]
+context-pilot-gui = "src.gui.__main__:main"
+
+[project.optional-dependencies]
+dev = ["pytest>=7.0", "pytest-cov>=4.0", "pyinstaller>=6.0", "httpx>=0.27.0"]
+
+[tool.setuptools.packages.find]
+include = ["src*"]

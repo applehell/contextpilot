@@ -1,0 +1,10 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(.venv/bin/python3:*)",
+      "Bash(.venv/bin/python -m pytest tests/ -q --tb=line)",
+      "Bash(.venv/bin/python -m pytest tests/test_gui_widgets.py -v --tb=short)",
+      "Bash(.venv/bin/python -m pytest tests/test_gui_widgets.py::TestMainWindow::test_creates_without_crash -v --tb=short)"
+    ]
+  }
+}

@@ -1,0 +1,25 @@
+{
+    "version": "0.2.0",
+    "configurations": [
+        {
+            "name": "Context Pilot GUI",
+            "type": "debugpy",
+            "request": "launch",
+            "module": "src.gui",
+            "python": "${workspaceFolder}/.venv/bin/python",
+            "cwd": "${workspaceFolder}",
+            "justMyCode": false,
+            "preLaunchTask": "Setup venv & install deps"
+        },
+        {
+            "name": "Context Pilot CLI",
+            "type": "debugpy",
+            "request": "launch",
+            "module": "src.interfaces.cli",
+            "python": "${workspaceFolder}/.venv/bin/python",
+            "cwd": "${workspaceFolder}",
+            "justMyCode": false,
+            "preLaunchTask": "Setup venv & install deps"
+        }
+    ]
+}
