@@ -941,7 +941,7 @@ function renderSecretsList(memories) {
 
 async function viewRedacted(key) {
     try {
-        const res = await fetch('/api/memories/' + encodeURIComponent(key) + '/redacted');
+        const res = await fetch('/api/redacted?key=' + encodeURIComponent(key));
         const d = await res.json();
         const preview = d.value.length > 600 ? d.value.substring(0, 600) + '...' : d.value;
         alert(`[${d.severity.toUpperCase()}] ${d.key}\n\n${preview}`);

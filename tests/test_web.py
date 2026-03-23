@@ -407,15 +407,21 @@ class TestSensitivity:
 
     def test_redacted_view(self, client):
         client.post("/api/memories", json={"key": "secret", "value": 'api_key: ABCDEF1234567890ABCDEF'})
-        r = client.get("/api/memories/secret/redacted")
+        r = client.get("/api/redacted?key=secret")
         assert r.status_code == 200
         d = r.json()
         assert "ABCDEF1234567890ABCDEF" not in d["value"]
         assert d["severity"] in ("high", "critical")
 
     def test_redacted_not_found(self, client):
-        r = client.get("/api/memories/nope/redacted")
+        r = client.get("/api/redacted?key=nope")
         assert r.status_code == 404
+
+    def test_redacted_slash_key(self, client):
+        client.post("/api/memories", json={"key": "skill/test/creds", "value": 'password = "abc123"'})
+        r = client.get("/api/redacted?key=skill/test/creds")
+        assert r.status_code == 200
+        assert "abc123" not in r.json()["value"]
 
 
 class TestFrontend:

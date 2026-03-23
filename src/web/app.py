@@ -280,7 +280,7 @@ def create_app(db_path: Optional[Path] = None) -> FastAPI:
         results = store.search(q, tag_list)
         return [m.to_dict() for m in results]
 
-    @app.get("/api/memories/{key}")
+    @app.get("/api/memories/{key:path}")
     async def get_memory(key: str):
         store = _get_memory_store()
         try:
@@ -294,7 +294,7 @@ def create_app(db_path: Optional[Path] = None) -> FastAPI:
         store.set(Memory(key=req.key, value=req.value, tags=req.tags))
         return {"status": "saved", "key": req.key}
 
-    @app.put("/api/memories/{key}")
+    @app.put("/api/memories/{key:path}")
     async def update_memory(key: str, req: MemoryIn):
         store = _get_memory_store()
         try:
@@ -304,7 +304,7 @@ def create_app(db_path: Optional[Path] = None) -> FastAPI:
         store.set(Memory(key=key, value=req.value, tags=req.tags))
         return {"status": "updated", "key": key}
 
-    @app.delete("/api/memories/{key}")
+    @app.delete("/api/memories/{key:path}")
     async def delete_memory(key: str):
         store = _get_memory_store()
         try:
@@ -765,8 +765,8 @@ def create_app(db_path: Optional[Path] = None) -> FastAPI:
             "memories": results,
         }
 
-    @app.get("/api/memories/{key}/redacted")
-    async def get_memory_redacted(key: str):
+    @app.get("/api/redacted")
+    async def get_memory_redacted(key: str = Query(...)):
         store = _get_memory_store()
         try:
             m = store.get(key)
