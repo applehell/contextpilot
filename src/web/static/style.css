@@ -481,3 +481,132 @@ label {
     position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%);
     font-size: 11px; font-weight: 600; color: var(--text);
 }
+
+/* Bot Avatar */
+.bot-avatar {
+    position: relative;
+    width: 36px;
+    height: 36px;
+    flex-shrink: 0;
+}
+
+.bot-avatar .orb {
+    width: 36px;
+    height: 36px;
+    border-radius: 50%;
+    background: radial-gradient(circle at 38% 38%, #e8a87c, #c4703f 50%, #a85d33 100%);
+    box-shadow: 0 0 16px rgba(196,112,63,0.35);
+    animation: orbPulse 3s ease-in-out infinite;
+}
+
+.bot-avatar .orb-ring {
+    position: absolute;
+    inset: -4px;
+    border-radius: 50%;
+    border: 2px solid rgba(196,112,63,0.2);
+    animation: ringPulse 3s ease-in-out infinite;
+}
+
+@keyframes orbPulse {
+    0%, 100% { transform: scale(1); box-shadow: 0 0 16px rgba(196,112,63,0.35); }
+    50% { transform: scale(1.06); box-shadow: 0 0 24px rgba(196,112,63,0.5); }
+}
+
+@keyframes ringPulse {
+    0%, 100% { transform: scale(1); opacity: 0.4; }
+    50% { transform: scale(1.12); opacity: 0.8; }
+}
+
+.bot-avatar.speaking .orb {
+    animation: orbSpeak 0.6s ease-in-out infinite;
+}
+
+@keyframes orbSpeak {
+    0%, 100% { transform: scale(1); }
+    25% { transform: scale(1.08); }
+    50% { transform: scale(0.96); }
+    75% { transform: scale(1.04); }
+}
+
+/* Welcome Screen */
+.welcome-overlay {
+    display: none;
+    position: fixed;
+    inset: 0;
+    background: rgba(0,0,0,0.5);
+    z-index: 10000;
+    justify-content: center;
+    align-items: center;
+}
+
+.welcome-overlay.active { display: flex; }
+
+.welcome-card {
+    background: var(--surface);
+    border-radius: 16px;
+    padding: 48px 40px;
+    max-width: 480px;
+    width: 100%;
+    text-align: center;
+    box-shadow: var(--shadow-lg);
+    animation: welcomeIn 0.4s ease;
+}
+
+@keyframes welcomeIn {
+    from { opacity: 0; transform: translateY(20px) scale(0.96); }
+    to { opacity: 1; transform: translateY(0) scale(1); }
+}
+
+.welcome-card .bot-avatar {
+    width: 64px;
+    height: 64px;
+    margin: 0 auto 24px;
+}
+
+.welcome-card .bot-avatar .orb {
+    width: 64px;
+    height: 64px;
+}
+
+.welcome-card .bot-avatar .orb-ring {
+    inset: -6px;
+}
+
+.welcome-card h2 {
+    font-size: 22px;
+    font-weight: 600;
+    margin-bottom: 8px;
+    letter-spacing: -0.3px;
+}
+
+.welcome-card p {
+    color: var(--text-secondary);
+    font-size: 14px;
+    line-height: 1.6;
+    margin-bottom: 6px;
+}
+
+.welcome-card .welcome-features {
+    text-align: left;
+    margin: 20px 0 24px;
+    padding: 0;
+    list-style: none;
+}
+
+.welcome-card .welcome-features li {
+    padding: 6px 0;
+    font-size: 13px;
+    color: var(--text-secondary);
+    display: flex;
+    align-items: center;
+    gap: 10px;
+}
+
+.welcome-card .welcome-features li::before {
+    content: '';
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background: var(--accent);
+    flex-shrink: 0;
+}

@@ -186,3 +186,52 @@ class ProfileManager:
             shutil.copy2(str(source_path), str(dest_path))
 
         return new_profile
+
+    def import_memories_from(self, target_name: str, source_name: str, tags: Optional[List[str]] = None) -> int:
+        """Copy memories from source profile into target profile. Optionally filter by tags."""
+        source = self._config["profiles"].get(source_name)
+        target = self._config["profiles"].get(target_name)
+        if not source:
+            raise KeyError(f"Profile '{source_name}' not found.")
+        if not target:
+            raise KeyError(f"Profile '{target_name}' not found.")
+
+        source_path = Path(source["db_path"])
+        target_path = Path(target["db_path"])
+        if not source_path.exists():
+            return 0
+
+        import json as _json
+
+        src_db = Database(source_path, check_same_thread=False)
+        tgt_db = Database(target_path, check_same_thread=False)
+        count = 0
+
+        try:
+            rows = src_db.conn.execute(
+                "SELECT key, value, tags, metadata, created_at, updated_at FROM memories"
+            ).fetchall()
+
+            for row in rows:
+                row_tags = _json.loads(row["tags"]) if row["tags"] else []
+                if tags and not any(t in row_tags for t in tags):
+                    continue
+
+                existing = tgt_db.conn.execute(
+                    "SELECT key FROM memories WHERE key = ?", (row["key"],)
+                ).fetchone()
+                if existing:
+                    continue
+
+                tgt_db.conn.execute(
+                    "INSERT INTO memories (key, value, tags, metadata, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)",
+                    (row["key"], row["value"], row["tags"], row["metadata"], row["created_at"], row["updated_at"]),
+                )
+                count += 1
+
+            tgt_db.conn.commit()
+        finally:
+            src_db.close()
+            tgt_db.close()
+
+        return count

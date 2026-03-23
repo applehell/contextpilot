@@ -11,9 +11,15 @@
 </head>
 <body>
     <header>
-        <div>
-            <h1>Context Pilot</h1>
-            <p class="subtitle">Knowledge management for AI</p>
+        <div style="display:flex;align-items:center;gap:14px;">
+            <div class="bot-avatar" id="header-bot">
+                <div class="orb-ring"></div>
+                <div class="orb"></div>
+            </div>
+            <div>
+                <h1>Context Pilot</h1>
+                <p class="subtitle">Knowledge management for AI</p>
+            </div>
         </div>
         <div id="profile-bar">
             <span>Profil:</span>
@@ -186,6 +192,26 @@
             </div>
             <div id="modal-body" class="modal-body"></div>
             <div id="modal-footer" class="modal-footer"></div>
+        </div>
+    </div>
+
+    <!-- Welcome Screen -->
+    <div class="welcome-overlay" id="welcome-overlay">
+        <div class="welcome-card">
+            <div class="bot-avatar speaking">
+                <div class="orb-ring"></div>
+                <div class="orb"></div>
+            </div>
+            <h2>Willkommen bei Context Pilot</h2>
+            <p>Dein persoenlicher Wissens-Manager fuer AI-Workflows.</p>
+            <ul class="welcome-features">
+                <li>Memories speichern, durchsuchen und organisieren</li>
+                <li>Skills verbinden und ueberwachen</li>
+                <li>Knowledge Graph visualisieren</li>
+                <li>Sensitive Daten erkennen und schuetzen</li>
+                <li>Context intelligent assemblieren</li>
+            </ul>
+            <button class="btn btn-primary" onclick="dismissWelcome()" style="padding:10px 32px;font-size:14px;">Los geht's</button>
         </div>
     </div>
 

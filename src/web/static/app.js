@@ -29,9 +29,32 @@ function init() {
         input.addEventListener('change', () => importFile(input, input.dataset.import));
     });
 
+    // Welcome screen
+    checkWelcome();
+
     // Initial load
     loadProfiles();
     loadDashboard();
+}
+
+function checkWelcome() {
+    const dismissed = localStorage.getItem('cp-welcome-dismissed');
+    if (!dismissed) {
+        document.getElementById('welcome-overlay').classList.add('active');
+    }
+}
+
+function dismissWelcome() {
+    localStorage.setItem('cp-welcome-dismissed', '1');
+    document.getElementById('welcome-overlay').classList.remove('active');
+}
+
+function showWelcomeForNewProfile(profileName) {
+    const overlay = document.getElementById('welcome-overlay');
+    const card = overlay.querySelector('.welcome-card');
+    card.querySelector('h2').textContent = 'Profil "' + profileName + '" erstellt';
+    card.querySelector('p').textContent = 'Dein neues Profil ist bereit. Starte mit dem Import von Wissen oder lege direkt Memories an.';
+    overlay.classList.add('active');
 }
 
 // ═══════════════════════════════════════════════════════════════
@@ -77,6 +100,7 @@ const OP_COLORS = {
 };
 
 async function loadDashboard() {
+    botBusy();
     try {
         const res = await fetch('/api/dashboard');
         const d = await res.json();
@@ -107,7 +131,7 @@ async function loadDashboard() {
                 </div>`;
             }).join('');
         }
-    } catch (e) { console.error('Dashboard load failed:', e); }
+    } catch (e) { console.error('Dashboard load failed:', e); } finally { botIdle(); }
 
     // MCP status
     try {
@@ -218,6 +242,7 @@ async function loadSkills() {
 // ═══════════════════════════════════════════════════════════════
 
 async function loadMemories() {
+    botBusy();
     try {
         const [memRes, tagRes] = await Promise.all([
             fetch('/api/memories'),
@@ -227,7 +252,7 @@ async function loadMemories() {
         const tags = await tagRes.json();
         renderMemories(data);
         renderTagFilter(tags);
-    } catch (e) { console.error(e); }
+    } catch (e) { console.error(e); } finally { botIdle(); }
 }
 
 function renderTagFilter(tags) {
@@ -827,27 +852,133 @@ async function switchProfile() {
     } catch (e) { console.error(e); }
 }
 
-function showNewProfileDialog() {
-    const name = prompt('Profilname (alphanumerisch, -, _):');
-    if (!name) return;
-    const desc = prompt('Beschreibung (optional):', '') || '';
-    createProfile(name.trim(), desc.trim());
+async function showNewProfileDialog() {
+    // Lade Profile-Liste fuer "Wissen uebernehmen"-Dropdown
+    let profiles = [];
+    try {
+        const res = await fetch('/api/profiles');
+        const d = await res.json();
+        profiles = d.profiles;
+    } catch (e) { console.error(e); }
+
+    // Lade Tags des aktuell aktiven Profils
+    let allTags = [];
+    try {
+        const res = await fetch('/api/memory-tags');
+        allTags = await res.json();
+    } catch (e) {}
+
+    const profileOpts = profiles.map(p =>
+        `<option value="${escapeAttr(p.name)}">${escapeHtml(p.name)} (${p.memory_count})</option>`
+    ).join('');
+
+    openModal('Neues Profil erstellen', `
+        <label>Name</label>
+        <input type="text" id="new-profile-name" placeholder="Alphanumerisch, -, _">
+        <label>Beschreibung</label>
+        <input type="text" id="new-profile-desc" placeholder="Optional">
+        <label style="margin-top:12px;">Wissen uebernehmen von</label>
+        <select id="new-profile-source" onchange="toggleCopyTags()" style="width:100%;">
+            <option value="">— Leeres Profil —</option>
+            ${profileOpts}
+        </select>
+        <div id="copy-tags-section" style="display:none;margin-top:12px;">
+            <label>Nur bestimmte Tags (leer = alle)</label>
+            <input type="text" id="new-profile-tags" placeholder="z.B. smarthome, netzwerk">
+            <div style="font-size:11px;color:var(--text-muted);margin-top:4px;">Kommagetrennt. Vorhandene Tags im Quellprofil werden nach Auswahl geladen.</div>
+            <div id="available-tags" style="margin-top:6px;display:flex;flex-wrap:wrap;gap:4px;"></div>
+        </div>
+    `, `
+        <button class="btn btn-primary" id="create-profile-btn">Erstellen</button>
+        <button class="btn" onclick="closeModal()">Abbrechen</button>
+    `);
+
+    document.getElementById('create-profile-btn').addEventListener('click', submitNewProfile);
 }
 
-async function createProfile(name, description) {
+function toggleCopyTags() {
+    const source = document.getElementById('new-profile-source').value;
+    const section = document.getElementById('copy-tags-section');
+    section.style.display = source ? '' : 'none';
+
+    if (source) {
+        loadSourceTags(source);
+    }
+}
+
+async function loadSourceTags(profileName) {
+    const container = document.getElementById('available-tags');
+    container.innerHTML = '';
+
+    // Tags aus dem Quellprofil laden — dazu kurz auf das Profil wechseln und zurueck
+    // Einfacher: Tags direkt aus der DB holen via neuen Endpoint oder den vorhandenen nutzen
+    // Wir nutzen den bestehenden /api/memory-tags, der aber nur das aktive Profil kennt.
+    // Deshalb: Profil-spezifische Tags ueber die Profile-Liste approximieren
+    // oder einfach die bekannten Tags des aktiven Profils anzeigen falls Quelle = aktiv
+
+    try {
+        const res = await fetch('/api/profiles');
+        const d = await res.json();
+        const active = d.active;
+
+        if (profileName === active) {
+            const tagRes = await fetch('/api/memory-tags');
+            const tags = await tagRes.json();
+            if (tags.length > 0) {
+                container.innerHTML = tags.map(t =>
+                    `<span class="tag" onclick="addTagToInput('${escapeAttr(t)}')" style="cursor:pointer;">#${escapeHtml(t)}</span>`
+                ).join(' ');
+            }
+        } else {
+            container.innerHTML = '<span class="muted">Tags werden nach Profilwechsel sichtbar</span>';
+        }
+    } catch (e) {}
+}
+
+function addTagToInput(tag) {
+    const input = document.getElementById('new-profile-tags');
+    const current = input.value.split(',').map(t => t.trim()).filter(Boolean);
+    if (!current.includes(tag)) {
+        current.push(tag);
+        input.value = current.join(', ');
+    }
+}
+
+async function submitNewProfile() {
+    const name = document.getElementById('new-profile-name').value.trim();
+    if (!name) { alert('Name ist erforderlich.'); return; }
+
+    const description = document.getElementById('new-profile-desc').value.trim();
+    const copyFrom = document.getElementById('new-profile-source').value;
+    const tagsStr = document.getElementById('new-profile-tags')?.value || '';
+    const copyTags = tagsStr ? tagsStr.split(',').map(t => t.trim()).filter(Boolean) : [];
+
+    const body = { name, description };
+    if (copyFrom) {
+        body.copy_from = copyFrom;
+        if (copyTags.length > 0) body.copy_tags = copyTags;
+    }
+
     try {
         const res = await fetch('/api/profiles', {
             method: 'POST',
             headers: {'Content-Type': 'application/json'},
-            body: JSON.stringify({ name, description })
+            body: JSON.stringify(body)
         });
         if (res.ok) {
+            const d = await res.json();
+            closeModal();
             loadProfiles();
+            if (d.imported > 0) {
+                document.getElementById('import-status').textContent = `Profil "${name}" erstellt, ${d.imported} Memories uebernommen.`;
+            } else {
+                showWelcomeForNewProfile(name);
+            }
         } else {
             const d = await res.json();
             alert(d.detail || 'Fehler beim Erstellen');
         }
-    } catch (e) { console.error(e); }
+    } catch (e) { alert('Fehler: ' + e.message); }
 }
 
 async function renameActiveProfile() {
@@ -965,4 +1096,19 @@ function escapeHtml(str) {
 
 function escapeAttr(str) {
     return str.replace(/'/g, "\\'").replace(/"/g, '&quot;');
+}
+
+// Bot animation helper
+let botTimer = null;
+function botBusy() {
+    const bot = document.getElementById('header-bot');
+    if (bot) bot.classList.add('speaking');
+    clearTimeout(botTimer);
+}
+function botIdle() {
+    clearTimeout(botTimer);
+    botTimer = setTimeout(() => {
+        const bot = document.getElementById('header-bot');
+        if (bot) bot.classList.remove('speaking');
+    }, 400);
 }

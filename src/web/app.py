@@ -129,6 +129,8 @@ class CompressRequest(BaseModel):
 class ProfileCreate(BaseModel):
     name: str
     description: str = ""
+    copy_from: str = ""
+    copy_tags: List[str] = []
 
 
 class EstimateRequest(BaseModel):
@@ -690,7 +692,11 @@ def create_app(db_path: Optional[Path] = None) -> FastAPI:
         pm = ProfileManager()
         try:
             p = pm.create(req.name, req.description)
-            return {"status": "created", "name": p.name}
+            imported = 0
+            if req.copy_from:
+                tags = req.copy_tags if req.copy_tags else None
+                imported = pm.import_memories_from(req.name, req.copy_from, tags)
+            return {"status": "created", "name": p.name, "imported": imported}
         except ValueError as e:
             raise HTTPException(409, str(e))
 
