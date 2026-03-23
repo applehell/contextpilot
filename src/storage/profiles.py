@@ -11,9 +11,12 @@ from typing import Dict, List, Optional
 from .db import Database
 
 
-PROFILES_DIR = Path.home() / ".contextpilot" / "profiles"
-CONFIG_FILE = Path.home() / ".contextpilot" / "profiles.json"
-DEFAULT_DB = Path.home() / ".contextpilot" / "data.db"
+import os
+
+_DATA_DIR = Path(os.environ.get("CONTEXTPILOT_DATA_DIR", str(Path.home() / ".contextpilot")))
+PROFILES_DIR = _DATA_DIR / "profiles"
+CONFIG_FILE = _DATA_DIR / "profiles.json"
+DEFAULT_DB = _DATA_DIR / "data.db"
 
 
 @dataclass

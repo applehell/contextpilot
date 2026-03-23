@@ -1,0 +1,15 @@
+services:
+  context-pilot:
+    build: .
+    container_name: context-pilot
+    restart: unless-stopped
+    ports:
+      - "8080:8080"   # Web UI
+      - "8400:8400"   # MCP SSE Server
+    volumes:
+      - context-pilot-data:/data
+    environment:
+      - CONTEXTPILOT_DATA_DIR=/data
+
+volumes:
+  context-pilot-data:

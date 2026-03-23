@@ -75,6 +75,23 @@ async function loadDashboard() {
             }).join('');
         }
     } catch (e) { console.error('Dashboard load failed:', e); }
+
+    // MCP status
+    try {
+        const mcpRes = await fetch('/api/mcp-status');
+        const mcp = await mcpRes.json();
+        const mcpEl = document.getElementById('dash-mcp-status');
+        const mcpDetail = document.getElementById('dash-mcp-detail');
+        if (mcp.registered) {
+            mcpEl.textContent = 'ON';
+            mcpEl.className = 'card-value green';
+            mcpDetail.textContent = mcp.config?.url || 'SSE registered';
+        } else {
+            mcpEl.textContent = 'OFF';
+            mcpEl.className = 'card-value red';
+            mcpDetail.textContent = 'Nicht in Claude registriert';
+        }
+    } catch (e) {}
 }
 
 // ═══════════════════════════════════════════════════════════════
@@ -600,6 +617,34 @@ function togglePhysics() {
 
 function graphFitAll() {
     if (graphNetwork) graphNetwork.fit({ animation: true });
+}
+
+// ═══════════════════════════════════════════════════════════════
+// IMPORT
+// ═══════════════════════════════════════════════════════════════
+
+async function importFile(input, type) {
+    const file = input.files[0];
+    if (!file) return;
+    const statusEl = document.getElementById('import-status');
+    statusEl.textContent = 'Importiere...';
+
+    const formData = new FormData();
+    formData.append('file', file);
+
+    try {
+        const res = await fetch(`/api/import/${type}`, { method: 'POST', body: formData });
+        const d = await res.json();
+        if (d.status === 'imported') {
+            statusEl.textContent = `${d.count} memories importiert aus ${d.filename}`;
+            loadDashboard();
+        } else {
+            statusEl.textContent = d.message || 'Import fehlgeschlagen';
+        }
+    } catch (e) {
+        statusEl.textContent = 'Fehler: ' + e.message;
+    }
+    input.value = '';
 }
 
 // ═══════════════════════════════════════════════════════════════

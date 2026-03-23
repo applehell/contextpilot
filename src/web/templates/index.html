@@ -59,6 +59,26 @@
                 </div>
             </div>
 
+            <div class="cards-grid" style="margin-top:12px;">
+                <div class="status-card">
+                    <div class="card-title">MCP SERVER</div>
+                    <div class="card-value" id="dash-mcp-status">--</div>
+                    <div class="card-detail" id="dash-mcp-detail"></div>
+                </div>
+                <div class="status-card">
+                    <div class="card-title">IMPORT</div>
+                    <div class="card-value" style="font-size:14px;">
+                        <label class="btn btn-small" style="cursor:pointer;margin-right:4px;">
+                            CLAUDE.md <input type="file" accept=".md" onchange="importFile(this, 'claude-md')" style="display:none;">
+                        </label>
+                        <label class="btn btn-small" style="cursor:pointer;">
+                            SQLite .db <input type="file" accept=".db,.sqlite" onchange="importFile(this, 'sqlite')" style="display:none;">
+                        </label>
+                    </div>
+                    <div class="card-detail" id="import-status"></div>
+                </div>
+            </div>
+
             <div class="panel" style="margin-top:16px;">
                 <h2>Connected Skills</h2>
                 <div id="dash-skill-list" class="item-list">

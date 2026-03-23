@@ -5,7 +5,7 @@ import json
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
-from fastapi import FastAPI, HTTPException, Query, Request
+from fastapi import FastAPI, File, HTTPException, Query, Request, UploadFile
 from fastapi.responses import HTMLResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
@@ -29,8 +29,11 @@ from src.storage.memory_activity import MemoryActivityLog
 from src.storage.profiles import ProfileManager
 from src.storage.usage import UsageStore, FeedbackRecord, block_hash
 
+import os
+
 WEB_DIR = Path(__file__).parent
-DEFAULT_DB_PATH = Path.home() / ".contextpilot" / "data.db"
+_DATA_DIR = Path(os.environ.get("CONTEXTPILOT_DATA_DIR", str(Path.home() / ".contextpilot")))
+DEFAULT_DB_PATH = _DATA_DIR / "data.db"
 
 _db: Optional[Database] = None
 _project_store: Optional[ProjectStore] = None
@@ -541,6 +544,60 @@ def create_app(db_path: Optional[Path] = None) -> FastAPI:
             helpful=req.helpful,
         ))
         return {"status": "recorded", "block_hash": bh}
+
+    # --- MCP Server Status ---
+
+    @app.get("/api/mcp-status")
+    async def mcp_status():
+        from src.core.claude_config import is_registered, get_current_config
+        config = get_current_config()
+        return {
+            "registered": is_registered(),
+            "config": config,
+        }
+
+    # --- Import ---
+
+    @app.post("/api/import/claude-md")
+    async def import_claude_md(file: UploadFile = File(...)):
+        from src.importers.claude import import_claude_file
+        import tempfile
+        store = _get_memory_store()
+        content = await file.read()
+        with tempfile.NamedTemporaryFile(suffix=".md", delete=False) as f:
+            f.write(content)
+            tmp_path = Path(f.name)
+        try:
+            memories = import_claude_file(tmp_path)
+            count = 0
+            for m in memories:
+                store.set(m)
+                count += 1
+            return {"status": "imported", "count": count, "filename": file.filename}
+        finally:
+            tmp_path.unlink(missing_ok=True)
+
+    @app.post("/api/import/sqlite")
+    async def import_sqlite_db(file: UploadFile = File(...)):
+        from src.importers.sqlite import detect_sqlite_type, import_memory_mcp
+        import tempfile
+        store = _get_memory_store()
+        content = await file.read()
+        with tempfile.NamedTemporaryFile(suffix=".db", delete=False) as f:
+            f.write(content)
+            tmp_path = Path(f.name)
+        try:
+            db_type = detect_sqlite_type(tmp_path)
+            if db_type != "memory-mcp":
+                return {"status": "error", "message": "Unknown SQLite format"}
+            memories = import_memory_mcp(tmp_path)
+            count = 0
+            for m in memories:
+                store.set(m)
+                count += 1
+            return {"status": "imported", "count": count, "filename": file.filename}
+        finally:
+            tmp_path.unlink(missing_ok=True)
 
     # --- Profiles ---
 
