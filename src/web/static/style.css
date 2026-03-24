@@ -352,7 +352,7 @@ label {
     background: var(--surface);
     border-radius: 12px;
     width: 100%;
-    max-width: 680px;
+    max-width: 800px;
     box-shadow: var(--shadow-lg);
     animation: modalIn 0.15s ease;
 }
@@ -400,6 +400,43 @@ label {
     min-height: 200px;
     line-height: 1.5;
 }
+
+/* Markdown preview */
+.md-preview {
+    background: var(--surface-alt);
+    padding: 16px;
+    border-radius: 6px;
+    font-size: 13px;
+    line-height: 1.7;
+    max-height: 50vh;
+    overflow-y: auto;
+}
+.md-preview h1, .md-preview h2, .md-preview h3 { margin: 12px 0 6px; }
+.md-preview h1 { font-size: 18px; }
+.md-preview h2 { font-size: 16px; }
+.md-preview h3 { font-size: 14px; }
+.md-preview p { margin: 6px 0; }
+.md-preview code { background: var(--border); padding: 1px 4px; border-radius: 3px; font-family: var(--mono); font-size: 12px; }
+.md-preview pre { background: var(--bg); padding: 12px; border-radius: 6px; overflow-x: auto; }
+.md-preview pre code { background: none; padding: 0; }
+.md-preview ul, .md-preview ol { padding-left: 20px; }
+.md-preview table { border-collapse: collapse; width: 100%; margin: 8px 0; font-size: 12px; }
+.md-preview th, .md-preview td { border: 1px solid var(--border); padding: 4px 8px; text-align: left; }
+.md-preview th { background: var(--surface-alt); font-weight: 600; }
+.md-preview blockquote { border-left: 3px solid var(--accent); padding-left: 12px; color: var(--text-secondary); margin: 8px 0; }
+.md-preview a { color: var(--accent); }
+
+/* EasyMDE overrides for modal */
+.modal-body .EasyMDEContainer { margin-bottom: 16px; }
+.modal-body .EasyMDEContainer .CodeMirror { border-color: var(--border); border-radius: 6px; font-family: var(--mono); font-size: 13px; min-height: 250px; }
+.modal-body .EasyMDEContainer .CodeMirror-focused { border-color: var(--border-focus); box-shadow: 0 0 0 3px rgba(196,168,130,0.15); }
+.modal-body .editor-toolbar { border-color: var(--border); border-radius: 6px 6px 0 0; background: var(--surface-alt); }
+.modal-body .editor-toolbar button { color: var(--text-secondary) !important; }
+.modal-body .editor-toolbar button:hover { background: var(--border) !important; }
+.modal-body .editor-toolbar button.active { background: var(--border) !important; color: var(--accent) !important; }
+.modal-body .editor-statusbar { border-color: var(--border); color: var(--text-muted); font-size: 11px; }
+.modal-body .editor-preview { background: var(--surface); padding: 16px; }
+.modal-body .editor-preview-side { border-color: var(--border); background: var(--surface); }
 
 .modal-body pre {
     background: var(--surface-alt);

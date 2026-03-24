@@ -461,9 +461,12 @@ function openModal(title, bodyHtml, footerHtml) {
 }
 
 function closeModal() {
+    destroyEditor();
     document.getElementById('modal-overlay').classList.remove('active');
     document.body.style.overflow = '';
 }
+
+let activeEditor = null;
 
 async function viewMemory(key) {
     try {
@@ -474,11 +477,16 @@ async function viewMemory(key) {
             ? m.tags.map(t => `<span class="tag" onclick="event.stopPropagation();clickTag('${escapeAttr(t)}');closeModal();">#${escapeHtml(t)}</span>`).join(' ')
             : '<span class="muted">none</span>';
 
+        // Render markdown to HTML for preview
+        const rendered = typeof EasyMDE !== 'undefined'
+            ? EasyMDE.prototype.markdown(m.value)
+            : '<pre>' + escapeHtml(m.value) + '</pre>';
+
         openModal(m.key, `
             <label>Tags</label>
             <div style="margin-bottom:16px;">${tagsHtml}</div>
             <label>Content</label>
-            <pre>${escapeHtml(m.value)}</pre>
+            <div class="md-preview">${rendered}</div>
         `, `
             <button class="btn btn-primary" onclick="editMemory('${escapeAttr(m.key)}')">Edit</button>
             <button class="btn" onclick="closeModal()">Close</button>
@@ -487,6 +495,7 @@ async function viewMemory(key) {
 }
 
 async function editMemory(key) {
+    destroyEditor();
     try {
         const res = await fetch(memoryUrl(key));
         if (!res.ok) return;
@@ -496,7 +505,7 @@ async function editMemory(key) {
             <label>Key</label>
             <input type="text" id="edit-key" value="${escapeHtml(m.key)}" readonly style="background:var(--surface-alt);cursor:not-allowed;">
             <label>Value</label>
-            <textarea id="edit-value" rows="14">${escapeHtml(m.value)}</textarea>
+            <textarea id="edit-value">${escapeHtml(m.value)}</textarea>
             <label>Tags (comma-separated)</label>
             <input type="text" id="edit-tags" value="${escapeHtml(m.tags.join(', '))}">
         `, `
@@ -504,15 +513,47 @@ async function editMemory(key) {
             <button class="btn" id="cancel-memory-btn">Cancel</button>
         `);
 
+        // Initialize EasyMDE on the textarea
+        initEditor('edit-value');
+
         document.getElementById('save-memory-btn').addEventListener('click', () => saveEditedMemory(m.key));
-        document.getElementById('cancel-memory-btn').addEventListener('click', closeModal);
+        document.getElementById('cancel-memory-btn').addEventListener('click', () => { destroyEditor(); closeModal(); });
     } catch (e) { console.error(e); }
 }
 
+function initEditor(textareaId) {
+    destroyEditor();
+    const el = document.getElementById(textareaId);
+    if (!el || typeof EasyMDE === 'undefined') return;
+
+    activeEditor = new EasyMDE({
+        element: el,
+        spellChecker: false,
+        autofocus: true,
+        status: ['lines', 'words'],
+        minHeight: '250px',
+        toolbar: [
+            'bold', 'italic', 'heading', '|',
+            'code', 'quote', 'unordered-list', 'ordered-list', '|',
+            'link', 'table', 'horizontal-rule', '|',
+            'preview', 'side-by-side', 'fullscreen', '|',
+            'guide',
+        ],
+    });
+}
+
+function destroyEditor() {
+    if (activeEditor) {
+        activeEditor.toTextArea();
+        activeEditor = null;
+    }
+}
+
 async function saveEditedMemory(key) {
-    const value = document.getElementById('edit-value').value;
+    const value = activeEditor ? activeEditor.value() : document.getElementById('edit-value').value;
     const tagsStr = document.getElementById('edit-tags').value;
     const tags = tagsStr ? tagsStr.split(',').map(t => t.trim()).filter(Boolean) : [];
+    destroyEditor();
     try {
         const res = await fetch(memoryUrl(key), {
             method: 'PUT',
