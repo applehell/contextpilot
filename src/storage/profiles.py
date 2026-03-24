@@ -4,6 +4,7 @@ from __future__ import annotations
 import json
 import shutil
 import time
+import uuid
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Dict, List, Optional
@@ -18,9 +19,12 @@ PROFILES_DIR = _DATA_DIR / "profiles"
 CONFIG_FILE = _DATA_DIR / "profiles.json"
 DEFAULT_DB = _DATA_DIR / "data.db"
 
+DEFAULT_ID = "default"
+
 
 @dataclass
 class Profile:
+    id: str
     name: str
     description: str = ""
     db_path: str = ""
@@ -35,48 +39,82 @@ class ProfileManager:
     def __init__(self) -> None:
         PROFILES_DIR.mkdir(parents=True, exist_ok=True)
         self._config = self._load_config()
+        self._migrate_legacy()
         self._ensure_default()
 
     def _load_config(self) -> Dict:
         if CONFIG_FILE.exists():
             return json.loads(CONFIG_FILE.read_text())
-        return {"active": "default", "profiles": {}}
+        return {"active": DEFAULT_ID, "profiles": {}}
 
     def _save_config(self) -> None:
         CONFIG_FILE.write_text(json.dumps(self._config, indent=2))
 
+    def _migrate_legacy(self) -> None:
+        """Migrate old name-keyed profiles to UUID-keyed."""
+        changed = False
+        new_profiles = {}
+        for key, data in list(self._config["profiles"].items()):
+            if "id" not in data:
+                # Legacy profile — key was the name
+                pid = DEFAULT_ID if data.get("is_default") else str(uuid.uuid4())[:8]
+                data["id"] = pid
+                data.setdefault("name", key)
+                new_profiles[pid] = data
+                # Update active reference
+                if self._config.get("active") == key:
+                    self._config["active"] = pid
+                changed = True
+            else:
+                new_profiles[key] = data
+        if changed:
+            self._config["profiles"] = new_profiles
+            self._save_config()
+
     def _ensure_default(self) -> None:
-        if "default" not in self._config["profiles"]:
-            self._config["profiles"]["default"] = {
+        if DEFAULT_ID not in self._config["profiles"]:
+            self._config["profiles"][DEFAULT_ID] = {
+                "id": DEFAULT_ID,
                 "name": "default",
-                "description": "Standard-Wissensdatenbank",
+                "description": "Default knowledge base",
                 "db_path": str(DEFAULT_DB),
                 "created_at": time.time(),
                 "is_default": True,
             }
-            if "active" not in self._config or not self._config["active"]:
-                self._config["active"] = "default"
+            if not self._config.get("active"):
+                self._config["active"] = DEFAULT_ID
             self._save_config()
 
     @property
+    def active_id(self) -> str:
+        return self._config.get("active", DEFAULT_ID)
+
+    @property
     def active_name(self) -> str:
-        return self._config.get("active", "default")
+        data = self._config["profiles"].get(self.active_id, {})
+        return data.get("name", "default")
 
     @property
     def active_db_path(self) -> Path:
-        p = self._config["profiles"].get(self.active_name, {})
+        p = self._config["profiles"].get(self.active_id, {})
         return Path(p.get("db_path", str(DEFAULT_DB)))
 
     @property
     def active_data_dir(self) -> Path:
-        """Return the data directory for the active profile's configs."""
-        if self.active_name == "default":
+        if self.active_id == DEFAULT_ID:
             return _DATA_DIR
-        return PROFILES_DIR / self.active_name
+        return PROFILES_DIR / self.active_id
+
+    def _find_by_name(self, name: str) -> Optional[str]:
+        """Find profile ID by name."""
+        for pid, data in self._config["profiles"].items():
+            if data.get("name") == name:
+                return pid
+        return None
 
     def list(self) -> List[Profile]:
         result = []
-        for name, data in self._config["profiles"].items():
+        for pid, data in self._config["profiles"].items():
             db_path = Path(data.get("db_path", ""))
             count = 0
             if db_path.exists():
@@ -88,7 +126,8 @@ class ProfileManager:
                 except Exception:
                     pass
             result.append(Profile(
-                name=name,
+                id=pid,
+                name=data.get("name", pid),
                 description=data.get("description", ""),
                 db_path=data.get("db_path", ""),
                 created_at=data.get("created_at", 0),
@@ -98,94 +137,89 @@ class ProfileManager:
         result.sort(key=lambda p: (not p.is_default, p.name))
         return result
 
-    def get(self, name: str) -> Optional[Profile]:
-        data = self._config["profiles"].get(name)
+    def get(self, pid: str) -> Optional[Profile]:
+        data = self._config["profiles"].get(pid)
         if not data:
             return None
         return Profile(
-            name=name,
+            id=pid,
+            name=data.get("name", pid),
             description=data.get("description", ""),
             db_path=data.get("db_path", ""),
             created_at=data.get("created_at", 0),
             is_default=data.get("is_default", False),
         )
 
-    def rename(self, old_name: str, new_name: str, description: str = "") -> None:
-        if old_name not in self._config["profiles"]:
-            raise KeyError(f"Profile '{old_name}' not found.")
-        if self._config["profiles"][old_name].get("is_default"):
+    def rename(self, pid: str, new_name: str, description: str = "") -> None:
+        if pid not in self._config["profiles"]:
+            raise KeyError(f"Profile '{pid}' not found.")
+        if self._config["profiles"][pid].get("is_default"):
             raise ValueError("Cannot rename the default profile.")
-        if new_name in self._config["profiles"]:
-            raise ValueError(f"Profile '{new_name}' already exists.")
-        if not new_name.replace("-", "").replace("_", "").isalnum():
-            raise ValueError("Profile name must be alphanumeric (with - and _ allowed).")
+        # Check name uniqueness
+        existing = self._find_by_name(new_name)
+        if existing and existing != pid:
+            raise ValueError(f"Profile name '{new_name}' already in use.")
 
-        data = self._config["profiles"].pop(old_name)
-        data["name"] = new_name
+        self._config["profiles"][pid]["name"] = new_name
         if description:
-            data["description"] = description
-        self._config["profiles"][new_name] = data
-
-        if self._config["active"] == old_name:
-            self._config["active"] = new_name
+            self._config["profiles"][pid]["description"] = description
         self._save_config()
 
     def create(self, name: str, description: str = "") -> Profile:
-        if name in self._config["profiles"]:
+        # Check name uniqueness
+        if self._find_by_name(name):
             raise ValueError(f"Profile '{name}' already exists.")
-        if not name.replace("-", "").replace("_", "").isalnum():
-            raise ValueError("Profile name must be alphanumeric (with - and _ allowed).")
 
-        db_path = PROFILES_DIR / name / "data.db"
+        pid = str(uuid.uuid4())[:8]
+        db_path = PROFILES_DIR / pid / "data.db"
         db_path.parent.mkdir(parents=True, exist_ok=True)
-        # Create the DB (triggers migrations)
         db = Database(db_path)
         db.close()
 
         profile_data = {
+            "id": pid,
             "name": name,
             "description": description,
             "db_path": str(db_path),
             "created_at": time.time(),
             "is_default": False,
         }
-        self._config["profiles"][name] = profile_data
+        self._config["profiles"][pid] = profile_data
         self._save_config()
         return Profile(**profile_data, memory_count=0)
 
-    def switch(self, name: str) -> Path:
-        if name not in self._config["profiles"]:
-            raise KeyError(f"Profile '{name}' not found.")
-        self._config["active"] = name
+    def switch(self, pid: str) -> Path:
+        if pid not in self._config["profiles"]:
+            raise KeyError(f"Profile '{pid}' not found.")
+        self._config["active"] = pid
         self._save_config()
         return self.active_db_path
 
-    def delete(self, name: str) -> None:
-        if name not in self._config["profiles"]:
-            raise KeyError(f"Profile '{name}' not found.")
-        if self._config["profiles"][name].get("is_default"):
+    def delete(self, pid: str) -> None:
+        if pid not in self._config["profiles"]:
+            raise KeyError(f"Profile '{pid}' not found.")
+        if self._config["profiles"][pid].get("is_default"):
             raise ValueError("Cannot delete the default profile.")
 
-        db_path = Path(self._config["profiles"][name].get("db_path", ""))
-        del self._config["profiles"][name]
+        db_path = Path(self._config["profiles"][pid].get("db_path", ""))
+        del self._config["profiles"][pid]
 
-        if self._config["active"] == name:
-            self._config["active"] = "default"
+        if self._config["active"] == pid:
+            self._config["active"] = DEFAULT_ID
 
         self._save_config()
 
-        # Remove profile directory
         if db_path.exists() and str(PROFILES_DIR) in str(db_path):
             profile_dir = db_path.parent
             if profile_dir.exists() and profile_dir != PROFILES_DIR:
                 shutil.rmtree(profile_dir, ignore_errors=True)
 
-    def duplicate(self, source_name: str, new_name: str, description: str = "") -> Profile:
-        source = self._config["profiles"].get(source_name)
+    def duplicate(self, source_pid: str, new_name: str, description: str = "") -> Profile:
+        source = self._config["profiles"].get(source_pid)
         if not source:
-            raise KeyError(f"Profile '{source_name}' not found.")
+            raise KeyError(f"Profile '{source_pid}' not found.")
 
-        new_profile = self.create(new_name, description or f"Kopie von {source_name}")
+        new_profile = self.create(new_name, description or f"Copy of {source.get('name', source_pid)}")
         source_path = Path(source["db_path"])
         dest_path = Path(new_profile.db_path)
 
@@ -194,14 +228,13 @@ class ProfileManager:
 
         return new_profile
 
-    def import_memories_from(self, target_name: str, source_name: str, tags: Optional[List[str]] = None) -> int:
-        """Copy memories from source profile into target profile. Optionally filter by tags."""
-        source = self._config["profiles"].get(source_name)
-        target = self._config["profiles"].get(target_name)
+    def import_memories_from(self, target_pid: str, source_pid: str, tags: Optional[List[str]] = None) -> int:
+        source = self._config["profiles"].get(source_pid)
+        target = self._config["profiles"].get(target_pid)
         if not source:
-            raise KeyError(f"Profile '{source_name}' not found.")
+            raise KeyError(f"Profile '{source_pid}' not found.")
         if not target:
-            raise KeyError(f"Profile '{target_name}' not found.")
+            raise KeyError(f"Profile '{target_pid}' not found.")
 
         source_path = Path(source["db_path"])
         target_path = Path(target["db_path"])

@@ -30,7 +30,7 @@ from src.storage.memory_activity import MemoryActivityLog
 from src.connectors.registry import ConnectorRegistry
 from src.core.events import EventBus
 from src.storage.folders import FolderManager
-from src.storage.profiles import ProfileManager
+from src.storage.profiles import ProfileManager, DEFAULT_ID
 from src.storage.usage import UsageStore, FeedbackRecord, block_hash
 
 import os
@@ -856,15 +856,17 @@ def create_app(db_path: Optional[Path] = None) -> FastAPI:
         pm = ProfileManager()
         profiles = pm.list()
         return {
-            "active": pm.active_name,
+            "active": pm.active_id,
+            "active_name": pm.active_name,
             "profiles": [
                 {
+                    "id": p.id,
                     "name": p.name,
                     "description": p.description,
                     "memory_count": p.memory_count,
                     "created_at": p.created_at,
                     "is_default": p.is_default,
-                    "is_active": p.name == pm.active_name,
+                    "is_active": p.id == pm.active_id,
                 }
                 for p in profiles
             ],
@@ -878,14 +880,13 @@ def create_app(db_path: Optional[Path] = None) -> FastAPI:
             imported = 0
             if req.copy_from:
                 tags = req.copy_tags if req.copy_tags else None
-                imported = pm.import_memories_from(req.name, req.copy_from, tags)
+                imported = pm.import_memories_from(p.id, req.copy_from, tags)
             _events.emit("profile", "create", p.name, f"imported {imported} memories" if imported else "")
-            return {"status": "created", "name": p.name, "imported": imported}
+            return {"status": "created", "id": p.id, "name": p.name, "imported": imported}
         except ValueError as e:
             raise HTTPException(409, str(e))
 
     def _reload_profile_deps():
-        """Reload all profile-dependent singletons after profile switch."""
         profile_dir = _get_profile_dir()
         ConnectorRegistry.reload(profile_dir)
         from src.core.embeddings import set_data_dir
@@ -895,44 +896,44 @@ def create_app(db_path: Optional[Path] = None) -> FastAPI:
         if s.running:
             s.stop()
 
-    @app.post("/api/profiles/{name}/switch")
-    async def switch_profile(name: str):
+    @app.post("/api/profiles/{pid}/switch")
+    async def switch_profile(pid: str):
         pm = ProfileManager()
         try:
-            new_path = pm.switch(name)
+            new_path = pm.switch(pid)
             _init_db(new_path)
             _reload_profile_deps()
-            _events.emit("profile", "switch", name)
-            return {"status": "switched", "active": name, "db_path": str(new_path)}
+            _events.emit("profile", "switch", pm.active_name)
+            return {"status": "switched", "active": pid, "name": pm.active_name}
         except KeyError as e:
             raise HTTPException(404, str(e))
 
-    @app.put("/api/profiles/{name}")
-    async def rename_profile(name: str, new_name: str = Query(...), description: str = Query("")):
+    @app.put("/api/profiles/{pid}")
+    async def rename_profile(pid: str, new_name: str = Query(...), description: str = Query("")):
         pm = ProfileManager()
         try:
-            pm.rename(name, new_name, description)
-            return {"status": "renamed", "old_name": name, "new_name": new_name}
+            pm.rename(pid, new_name, description)
+            return {"status": "renamed", "id": pid, "new_name": new_name}
         except (KeyError, ValueError) as e:
             raise HTTPException(400, str(e))
 
-    @app.post("/api/profiles/{name}/duplicate")
-    async def duplicate_profile(name: str, new_name: str = Query(...), description: str = Query("")):
+    @app.post("/api/profiles/{pid}/duplicate")
+    async def duplicate_profile(pid: str, new_name: str = Query(...), description: str = Query("")):
         pm = ProfileManager()
         try:
-            p = pm.duplicate(name, new_name, description)
-            return {"status": "duplicated", "name": p.name}
+            p = pm.duplicate(pid, new_name, description)
+            return {"status": "duplicated", "id": p.id, "name": p.name}
         except (KeyError, ValueError) as e:
             raise HTTPException(400, str(e))
 
-    @app.delete("/api/profiles/{name}")
-    async def delete_profile(name: str):
+    @app.delete("/api/profiles/{pid}")
+    async def delete_profile(pid: str):
         pm = ProfileManager()
         try:
-            pm.delete(name)
-            if pm.active_name == "default":
+            pm.delete(pid)
+            if pm.active_id == DEFAULT_ID:
                 _init_db(pm.active_db_path)
-            return {"status": "deleted", "name": name}
+            return {"status": "deleted", "id": pid}
         except (KeyError, ValueError) as e:
             raise HTTPException(400, str(e))
 

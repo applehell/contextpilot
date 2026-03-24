@@ -1118,7 +1118,7 @@ async function loadProfiles() {
         sel.innerHTML = '';
         d.profiles.forEach(p => {
             const opt = document.createElement('option');
-            opt.value = p.name;
+            opt.value = p.id;
             opt.textContent = `${p.name} (${p.memory_count})`;
             if (p.is_active) opt.selected = true;
             sel.appendChild(opt);
@@ -1131,13 +1131,15 @@ async function loadProfiles() {
 }
 
 async function switchProfile() {
-    const name = document.getElementById('profile-select').value;
+    const pid = document.getElementById('profile-select').value;
+    const tid = showToast('Switching profile', 'Loading...');
     try {
-        await fetch(`/api/profiles/${encodeURIComponent(name)}/switch`, { method: 'POST' });
+        await fetch(`/api/profiles/${encodeURIComponent(pid)}/switch`, { method: 'POST' });
+        completeToast(tid, 'Switched', false);
         loadProfiles();
         const activeTab = document.querySelector('.tab.active');
         if (activeTab) showTab(activeTab.dataset.tab, activeTab);
-    } catch (e) { console.error(e); }
+    } catch (e) { completeToast(tid, 'Failed', true); }
 }
 
 async function showNewProfileDialog() {
@@ -1149,7 +1151,7 @@ async function showNewProfileDialog() {
     } catch (e) { console.error(e); }
 
     const profileOpts = profiles.map(p =>
-        `<option value="${escapeAttr(p.name)}">${escapeHtml(p.name)} (${p.memory_count})</option>`
+        `<option value="${escapeAttr(p.id)}">${escapeHtml(p.name)} (${p.memory_count})</option>`
     ).join('');
 
     openModal('Create New Profile', `
@@ -1252,12 +1254,14 @@ async function submitNewProfile() {
 }
 
 async function renameActiveProfile() {
-    const oldName = document.getElementById('profile-select').value;
-    const newName = prompt('New name:', oldName);
-    if (!newName || newName === oldName) return;
+    const pid = document.getElementById('profile-select').value;
+    const sel = document.getElementById('profile-select');
+    const currentName = sel.options[sel.selectedIndex]?.textContent.replace(/\s*\(\d+\)$/, '') || '';
+    const newName = prompt('New name:', currentName);
+    if (!newName || newName === currentName) return;
     const desc = prompt('Description (optional):', '') || '';
     try {
-        const res = await fetch(`/api/profiles/${encodeURIComponent(oldName)}?new_name=${encodeURIComponent(newName)}&description=${encodeURIComponent(desc)}`, { method: 'PUT' });
+        const res = await fetch(`/api/profiles/${encodeURIComponent(pid)}?new_name=${encodeURIComponent(newName)}&description=${encodeURIComponent(desc)}`, { method: 'PUT' });
         if (res.ok) {
             loadProfiles();
         } else {
@@ -1268,10 +1272,12 @@ async function renameActiveProfile() {
 }
 
 async function deleteActiveProfile() {
-    const name = document.getElementById('profile-select').value;
+    const pid = document.getElementById('profile-select').value;
+    const sel = document.getElementById('profile-select');
+    const name = sel.options[sel.selectedIndex]?.textContent.replace(/\s*\(\d+\)$/, '') || pid;
     if (!confirm(`Delete profile "${name}"? All memories will be lost!`)) return;
     try {
-        await fetch(`/api/profiles/${encodeURIComponent(name)}`, { method: 'DELETE' });
+        await fetch(`/api/profiles/${encodeURIComponent(pid)}`, { method: 'DELETE' });
         loadProfiles();
         loadDashboard();
     } catch (e) { console.error(e); }

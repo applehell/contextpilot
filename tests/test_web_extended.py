@@ -272,24 +272,18 @@ class TestProfilesAPI:
         assert r.status_code == 200
         d = r.json()
         assert "profiles" in d
-        assert any(p["name"] == "default" for p in d["profiles"])
+        assert any(p["id"] == "default" for p in d["profiles"])
 
-    def test_create_profile(self, client):
+    def test_create_returns_id(self, client):
         r = client.post("/api/profiles", json={"name": "test-profile", "description": "Test"})
         assert r.status_code == 201
+        assert "id" in r.json()
         assert r.json()["name"] == "test-profile"
 
     def test_create_with_copy(self, client):
-        # Add a memory to default
         client.post("/api/memories", json={"key": "src-mem", "value": "data", "tags": ["copy-tag"]})
-        r = client.post("/api/profiles", json={
-            "name": "copy-test",
-            "copy_from": "default",
-        })
+        r = client.post("/api/profiles", json={"name": "copy-test", "copy_from": "default"})
         assert r.status_code == 201
-        # import_memories_from reads directly from source DB file
-        # In test context with tmp_path, the default DB may be in-memory
-        # so we just verify the endpoint accepts the parameter
         assert "imported" in r.json()
 
     def test_create_duplicate_fails(self, client):
@@ -297,24 +291,27 @@ class TestProfilesAPI:
         r = client.post("/api/profiles", json={"name": "dup"})
         assert r.status_code == 409
 
-    def test_switch_profile(self, client):
-        client.post("/api/profiles", json={"name": "switch-test"})
-        r = client.post("/api/profiles/switch-test/switch")
+    def test_switch_by_id(self, client):
+        r = client.post("/api/profiles", json={"name": "switch-test"})
+        pid = r.json()["id"]
+        r = client.post(f"/api/profiles/{pid}/switch")
         assert r.status_code == 200
-        assert r.json()["active"] == "switch-test"
+        assert r.json()["active"] == pid
 
     def test_switch_nonexistent(self, client):
         r = client.post("/api/profiles/nonexistent/switch")
         assert r.status_code == 404
 
-    def test_rename_profile(self, client):
-        client.post("/api/profiles", json={"name": "old-name"})
-        r = client.put("/api/profiles/old-name?new_name=new-name")
+    def test_rename_by_id(self, client):
+        r = client.post("/api/profiles", json={"name": "old-name"})
+        pid = r.json()["id"]
+        r = client.put(f"/api/profiles/{pid}?new_name=new-name")
         assert r.status_code == 200
 
-    def test_delete_profile(self, client):
-        client.post("/api/profiles", json={"name": "to-delete"})
-        r = client.delete("/api/profiles/to-delete")
+    def test_delete_by_id(self, client):
+        r = client.post("/api/profiles", json={"name": "to-delete"})
+        pid = r.json()["id"]
+        r = client.delete(f"/api/profiles/{pid}")
         assert r.status_code == 200
 
     def test_delete_default_fails(self, client):
