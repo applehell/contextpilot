@@ -6,7 +6,7 @@
     <title>Context Pilot</title>
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="/static/style.css?v=6">
+    <link rel="stylesheet" href="/static/style.css?v=7">
     <script src="https://unpkg.com/vis-network@9.1.9/standalone/umd/vis-network.min.js"></script>
 </head>
 <body>
@@ -82,10 +82,23 @@
 
             <div class="panel">
                 <div style="display:flex;justify-content:space-between;align-items:center;">
-                    <h2>Activity</h2>
-                    <button class="btn btn-small" onclick="loadDashboard()">Refresh</button>
+                    <h2>Live Activity</h2>
+                    <div style="display:flex;gap:8px;align-items:center;">
+                        <span id="sse-status" style="font-size:11px;color:var(--text-muted);"></span>
+                        <select id="activity-filter" onchange="filterActivity()" style="width:auto;font-size:12px;padding:2px 8px;">
+                            <option value="">All</option>
+                            <option value="memory">Memory</option>
+                            <option value="api">API</option>
+                            <option value="import">Import</option>
+                            <option value="folder">Folder</option>
+                            <option value="paperless">Paperless</option>
+                            <option value="profile">Profile</option>
+                            <option value="system">System</option>
+                        </select>
+                        <button class="btn btn-small" onclick="clearActivityFeed()">Clear</button>
+                    </div>
                 </div>
-                <div id="dash-activity"></div>
+                <div id="activity-feed" style="max-height:400px;overflow-y:auto;"></div>
             </div>
 
             <div class="panel">
@@ -239,7 +252,7 @@
         </div>
     </div>
 
-    <script src="/static/app.js?v=6"></script>
+    <script src="/static/app.js?v=7"></script>
     <script>init();</script>
 </body>
 </html>

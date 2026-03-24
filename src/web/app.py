@@ -28,6 +28,7 @@ from src.core.secrets import SecretDetector
 from src.core.skill_registry import SkillRegistry
 from src.storage.memory_activity import MemoryActivityLog
 from src.connectors.paperless import PaperlessConnector
+from src.core.events import EventBus
 from src.storage.folders import FolderManager
 from src.storage.profiles import ProfileManager
 from src.storage.usage import UsageStore, FeedbackRecord, block_hash
@@ -205,6 +206,7 @@ def create_app(db_path: Optional[Path] = None) -> FastAPI:
 
     _start_time = time.time()
     _request_count = {"total": 0, "errors": 0}
+    _events = EventBus.instance()
 
     @app.middleware("http")
     async def _count_requests(request: Request, call_next):
@@ -212,6 +214,9 @@ def create_app(db_path: Optional[Path] = None) -> FastAPI:
         response = await call_next(request)
         if response.status_code >= 500:
             _request_count["errors"] += 1
+        path = request.url.path
+        if path.startswith("/api/") and path not in ("/api/events/stream", "/api/events"):
+            _events.emit("api", request.method.lower(), path)
         return response
 
     @app.get("/health")
@@ -276,6 +281,41 @@ def create_app(db_path: Optional[Path] = None) -> FastAPI:
                 "disk_total_gb": round(disk.total / (1024**3), 2) if disk else None,
             },
         }
+
+    # --- Events (SSE + REST) ---
+
+    from fastapi.responses import StreamingResponse
+
+    @app.get("/api/events")
+    async def get_events(limit: int = Query(50, ge=1, le=200), category: str = Query("")):
+        cat = category if category else None
+        return [e.to_dict() for e in _events.recent(limit, cat)]
+
+    @app.get("/api/events/stats")
+    async def event_stats():
+        return _events.stats()
+
+    @app.get("/api/events/stream")
+    async def event_stream():
+        q = _events.subscribe()
+
+        async def generate():
+            try:
+                while True:
+                    try:
+                        event = await asyncio.wait_for(q.get(), timeout=30)
+                        data = json.dumps(event.to_dict())
+                        yield f"data: {data}\n\n"
+                    except asyncio.TimeoutError:
+                        yield ": keepalive\n\n"
+            except asyncio.CancelledError:
+                pass
+            finally:
+                _events.unsubscribe(q)
+
+        import asyncio
+        return StreamingResponse(generate(), media_type="text/event-stream",
+                                 headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
 
     # --- Token estimation ---
 
@@ -388,6 +428,7 @@ def create_app(db_path: Optional[Path] = None) -> FastAPI:
         store = _get_memory_store()
         tag_list = [t.strip() for t in tags.split(",") if t.strip()] if tags else None
         results = store.search(q, tag_list)
+        _events.emit("memory", "search", q or "(all)", f"{len(results)} results" + (f", tags={tags}" if tags else ""))
         return [m.to_dict() for m in results]
 
     @app.get("/api/memories/{key:path}")
@@ -402,6 +443,7 @@ def create_app(db_path: Optional[Path] = None) -> FastAPI:
     async def set_memory(req: MemoryIn):
         store = _get_memory_store()
         store.set(Memory(key=req.key, value=req.value, tags=req.tags))
+        _events.emit("memory", "create", req.key, f"tags={req.tags}")
         return {"status": "saved", "key": req.key}
 
     @app.put("/api/memories/{key:path}")
@@ -412,6 +454,7 @@ def create_app(db_path: Optional[Path] = None) -> FastAPI:
         except KeyError:
             raise HTTPException(404, f"Memory '{key}' not found.")
         store.set(Memory(key=key, value=req.value, tags=req.tags))
+        _events.emit("memory", "update", key)
         return {"status": "updated", "key": key}
 
     @app.delete("/api/memories/{key:path}")
@@ -419,6 +462,7 @@ def create_app(db_path: Optional[Path] = None) -> FastAPI:
         store = _get_memory_store()
         try:
             store.delete(key)
+            _events.emit("memory", "delete", key)
             return {"status": "deleted", "key": key}
         except KeyError as e:
             raise HTTPException(404, str(e))
@@ -433,6 +477,7 @@ def create_app(db_path: Optional[Path] = None) -> FastAPI:
                 deleted += 1
             except KeyError:
                 pass
+        _events.emit("memory", "bulk-delete", f"{deleted} memories")
         return {"status": "deleted", "count": deleted}
 
     @app.get("/api/export-memories")
@@ -729,6 +774,7 @@ def create_app(db_path: Optional[Path] = None) -> FastAPI:
             for m in memories:
                 store.set(m)
                 count += 1
+            _events.emit("import", "claude-md", file.filename, f"{count} memories")
             return {"status": "imported", "count": count, "filename": file.filename}
         finally:
             tmp_path.unlink(missing_ok=True)
@@ -748,6 +794,7 @@ def create_app(db_path: Optional[Path] = None) -> FastAPI:
             for m in memories:
                 store.set(m)
                 count += 1
+            _events.emit("import", "copilot-md", file.filename, f"{count} memories")
             return {"status": "imported", "count": count, "filename": file.filename}
         finally:
             tmp_path.unlink(missing_ok=True)
@@ -804,6 +851,7 @@ def create_app(db_path: Optional[Path] = None) -> FastAPI:
             if req.copy_from:
                 tags = req.copy_tags if req.copy_tags else None
                 imported = pm.import_memories_from(req.name, req.copy_from, tags)
+            _events.emit("profile", "create", p.name, f"imported {imported} memories" if imported else "")
             return {"status": "created", "name": p.name, "imported": imported}
         except ValueError as e:
             raise HTTPException(409, str(e))
@@ -814,6 +862,7 @@ def create_app(db_path: Optional[Path] = None) -> FastAPI:
         try:
             new_path = pm.switch(name)
             _init_db(new_path)
+            _events.emit("profile", "switch", name)
             return {"status": "switched", "active": name, "db_path": str(new_path)}
         except KeyError as e:
             raise HTTPException(404, str(e))
@@ -957,6 +1006,7 @@ def create_app(db_path: Optional[Path] = None) -> FastAPI:
         store = _get_memory_store()
         try:
             result = fm.scan(name, store)
+            _events.emit("folder", "scan", name, f"+{result.added} ~{result.updated} -{result.removed}")
             return {
                 "status": "scanned",
                 "name": name,
@@ -1029,6 +1079,7 @@ def create_app(db_path: Optional[Path] = None) -> FastAPI:
         pc = PaperlessConnector()
         store = _get_memory_store()
         result = pc.sync(store)
+        _events.emit("paperless", "sync", f"{result.total_remote} docs", f"+{result.added} ~{result.updated} -{result.removed}")
         return {
             "status": "synced",
             "added": result.added,

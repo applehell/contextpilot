@@ -27,6 +27,7 @@ function init() {
     });
 
     checkWelcome();
+    connectSSE();
     loadProfiles();
     loadDashboard();
 }
@@ -99,6 +100,102 @@ function showTab(name, clickedBtn) {
 }
 
 // ═══════════════════════════════════════════════════════════════
+// LIVE ACTIVITY (SSE)
+// ═══════════════════════════════════════════════════════════════
+
+let eventSource = null;
+let activityBuffer = [];
+const MAX_ACTIVITY = 100;
+
+function connectSSE() {
+    if (eventSource) eventSource.close();
+
+    eventSource = new EventSource('/api/events/stream');
+
+    eventSource.onopen = () => {
+        const el = document.getElementById('sse-status');
+        if (el) el.innerHTML = '<span class="sse-dot connected"></span>live';
+    };
+
+    eventSource.onmessage = (e) => {
+        try {
+            const event = JSON.parse(e.data);
+            activityBuffer.unshift(event);
+            if (activityBuffer.length > MAX_ACTIVITY) activityBuffer.pop();
+            appendActivityItem(event);
+            // Pulse the bot on non-api events
+            if (event.category !== 'api') { botBusy(); setTimeout(botIdle, 600); }
+        } catch (err) { console.error('SSE parse error:', err); }
+    };
+
+    eventSource.onerror = () => {
+        const el = document.getElementById('sse-status');
+        if (el) el.innerHTML = '<span class="sse-dot disconnected"></span>reconnecting...';
+    };
+}
+
+function appendActivityItem(event) {
+    const feed = document.getElementById('activity-feed');
+    if (!feed) return;
+
+    const filter = document.getElementById('activity-filter')?.value;
+    if (filter && event.category !== filter) return;
+
+    const html = renderActivityItem(event);
+    feed.insertAdjacentHTML('afterbegin', html);
+
+    // Trim old items
+    while (feed.children.length > MAX_ACTIVITY) {
+        feed.removeChild(feed.lastChild);
+    }
+}
+
+function renderActivityItem(e) {
+    const catClass = 'cat-' + e.category;
+    const detail = e.detail ? ` <span class="activity-detail">${escapeHtml(e.detail)}</span>` : '';
+    return `<div class="activity-item">
+        <span class="activity-cat ${catClass}">${e.category}</span>
+        <div class="activity-body">
+            <span class="activity-action">${escapeHtml(e.action)}</span>
+            <span class="activity-subject">${escapeHtml(e.subject)}</span>${detail}
+        </div>
+        <span class="activity-age">${escapeHtml(e.age)}</span>
+    </div>`;
+}
+
+async function loadActivityHistory() {
+    try {
+        const res = await fetch('/api/events?limit=50');
+        const events = await res.json();
+        activityBuffer = events;
+        renderActivityFeed();
+    } catch (e) { console.error(e); }
+}
+
+function renderActivityFeed() {
+    const feed = document.getElementById('activity-feed');
+    if (!feed) return;
+    const filter = document.getElementById('activity-filter')?.value;
+    const filtered = filter ? activityBuffer.filter(e => e.category === filter) : activityBuffer;
+
+    if (filtered.length === 0) {
+        feed.innerHTML = '<p class="muted" style="padding:12px 0;">No activity yet. Events will appear here in real-time.</p>';
+        return;
+    }
+    feed.innerHTML = filtered.map(e => renderActivityItem(e)).join('');
+}
+
+function filterActivity() {
+    renderActivityFeed();
+}
+
+function clearActivityFeed() {
+    activityBuffer = [];
+    const feed = document.getElementById('activity-feed');
+    if (feed) feed.innerHTML = '<p class="muted" style="padding:12px 0;">Cleared. New events will appear in real-time.</p>';
+}
+
+// ═══════════════════════════════════════════════════════════════
 // DASHBOARD
 // ═══════════════════════════════════════════════════════════════
 
@@ -123,21 +220,8 @@ async function loadDashboard() {
         skillEl.className = 'card-value' + (d.skill_alive > 0 ? ' green' : '');
         document.getElementById('dash-skills-detail').textContent = 'connected';
 
-        const actEl = document.getElementById('dash-activity');
-        if (!d.activity.length) {
-            actEl.innerHTML = '<p class="muted">No activity yet</p>';
-        } else {
-            actEl.innerHTML = d.activity.map(e => {
-                const color = OP_COLORS[e.operation] || 'var(--text-muted)';
-                const detail = e.detail ? ' — ' + escapeHtml(e.detail) : '';
-                return `<div class="activity-item">
-                    <span class="activity-op" style="color:${color};">${e.operation.toUpperCase()}</span>
-                    <span class="activity-key">${escapeHtml(e.memory_key)}</span>
-                    <span class="activity-detail">${detail}</span>
-                    <span class="activity-age">${escapeHtml(e.age)}</span>
-                </div>`;
-            }).join('');
-        }
+        // Load activity history on first dashboard load
+        if (activityBuffer.length === 0) loadActivityHistory();
     } catch (e) { console.error('Dashboard load failed:', e); } finally { botIdle(); }
 
     try {
