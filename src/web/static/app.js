@@ -28,11 +28,35 @@ function init() {
         input.addEventListener('change', () => importFile(input, input.dataset.import));
     });
 
+    startup();
+}
+
+async function startup() {
+    const status = document.getElementById('startup-status');
+    const bar = document.getElementById('startup-bar');
+    const steps = [
+        ['Connecting event stream...', 20, () => connectSSE()],
+        ['Loading version...', 35, () => loadVersion()],
+        ['Loading profiles...', 50, () => loadProfiles()],
+        ['Loading dashboard...', 75, () => loadDashboard()],
+        ['Ready', 100, () => {}],
+    ];
+
+    for (const [label, pct, fn] of steps) {
+        if (status) status.textContent = label;
+        if (bar) bar.style.width = pct + '%';
+        try { await fn(); } catch (e) { console.error(e); }
+        await new Promise(r => setTimeout(r, 120));
+    }
+
+    // Fade out loader
+    const loader = document.getElementById('startup-loader');
+    if (loader) {
+        loader.style.opacity = '0';
+        setTimeout(() => loader.remove(), 400);
+    }
+
     checkWelcome();
-    connectSSE();
-    loadProfiles();
-    loadDashboard();
-    loadVersion();
 }
 
 function checkWelcome() {

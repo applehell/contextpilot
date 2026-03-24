@@ -6,7 +6,7 @@
     <title>Context Pilot</title>
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="/static/style.css?v=12">
+    <link rel="stylesheet" href="/static/style.css?v=13">
     <script src="https://unpkg.com/vis-network@9.1.9/standalone/umd/vis-network.min.js"></script>
     <link rel="stylesheet" href="https://unpkg.com/easymde@2.18.0/dist/easymde.min.css">
     <script src="https://unpkg.com/easymde@2.18.0/dist/easymde.min.js"></script>
@@ -29,6 +29,19 @@
                 <li>Detect sensitive data and intelligently assemble context</li>
             </ul>
             <button class="btn btn-primary" id="welcome-dismiss-btn" style="padding:10px 32px;font-size:14px;">Get Started</button>
+        </div>
+    </div>
+
+    <!-- Startup Loader -->
+    <div id="startup-loader" style="position:fixed;inset:0;z-index:9500;background:var(--bg);display:flex;flex-direction:column;justify-content:center;align-items:center;gap:16px;transition:opacity 0.4s;">
+        <div class="bot-orb-large speaking">
+            <div class="orb-ring"></div>
+            <div class="orb"></div>
+        </div>
+        <div style="font-size:16px;font-weight:600;">Context Pilot</div>
+        <div id="startup-status" style="font-size:13px;color:var(--text-muted);">Starting up...</div>
+        <div style="width:200px;height:4px;background:var(--surface-alt);border-radius:2px;overflow:hidden;">
+            <div id="startup-bar" style="width:0%;height:100%;background:var(--accent);border-radius:2px;transition:width 0.3s;"></div>
         </div>
     </div>
 
@@ -297,7 +310,7 @@
 
     <div id="progress-toast"></div>
 
-    <script src="/static/app.js?v=12"></script>
+    <script src="/static/app.js?v=13"></script>
     <script>init();</script>
 </body>
 </html>
