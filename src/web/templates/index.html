@@ -125,6 +125,10 @@
                     <select id="memory-tag-filter" onchange="filterByTag()" style="width:auto;min-width:120px;">
                         <option value="">All Tags</option>
                     </select>
+                    <label style="display:inline;cursor:pointer;font-size:12px;white-space:nowrap;">
+                        <input type="checkbox" id="semantic-toggle" onchange="searchMemories()"> Semantic
+                    </label>
+                    <button class="btn btn-small" onclick="rebuildIndex()" title="Rebuild embedding index">Index</button>
                 </div>
                 <div class="form-row inline">
                     <input type="text" id="memory-key" placeholder="Key">

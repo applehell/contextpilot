@@ -1241,6 +1241,36 @@ def create_app(db_path: Optional[Path] = None) -> FastAPI:
         _events.emit("scheduler", "manual-run", "complete")
         return results
 
+    # --- Semantic Search ---
+
+    from src.core.embeddings import index_memories as _index_memories, semantic_search as _semantic_search, get_backend as _embed_backend
+
+    @app.post("/api/embeddings/index")
+    async def index_embeddings():
+        store = _get_memory_store()
+        memories = store.list()
+        stats = _index_memories(memories)
+        _events.emit("system", "index", "embeddings", f"{stats['indexed']} indexed, {stats['skipped']} skipped ({stats['backend']})")
+        return stats
+
+    @app.get("/api/embeddings/stats")
+    async def embedding_stats():
+        from src.core.embeddings import _get_store as _get_embed_store
+        return _get_embed_store().stats()
+
+    @app.get("/api/semantic-search")
+    async def semantic_search_api(q: str = Query("", min_length=1), limit: int = Query(10, ge=1, le=50)):
+        results = _semantic_search(q, limit)
+        store = _get_memory_store()
+        output = []
+        for key, score in results:
+            try:
+                m = store.get(key)
+                output.append({**m.to_dict(), "similarity": score})
+            except KeyError:
+                pass
+        return output
+
     # --- Connectors (Plugin Architecture) ---
 
     _connectors = ConnectorRegistry.instance()

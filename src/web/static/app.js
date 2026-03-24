@@ -557,7 +557,52 @@ async function deleteMemory(key) {
 
 async function searchMemories() {
     clearTimeout(debounceTimers['memSearch']);
-    debounceTimers['memSearch'] = setTimeout(() => filterByTag(), 300);
+    const semantic = document.getElementById('semantic-toggle')?.checked;
+    if (semantic) {
+        debounceTimers['memSearch'] = setTimeout(() => semanticSearch(), 500);
+    } else {
+        debounceTimers['memSearch'] = setTimeout(() => filterByTag(), 300);
+    }
+}
+
+async function semanticSearch() {
+    const q = document.getElementById('memory-search').value.trim();
+    if (!q) { loadMemories(); return; }
+    botBusy();
+    try {
+        const res = await fetch(`/api/semantic-search?q=${encodeURIComponent(q)}&limit=20`);
+        const data = await res.json();
+        // Add similarity badge to rendering
+        const list = document.getElementById('memory-list');
+        const countEl = document.getElementById('memory-count');
+        if (countEl) countEl.textContent = `${data.length} results (semantic)`;
+        if (data.length === 0) {
+            list.innerHTML = '<div class="empty-state">No semantic matches. Try rebuilding the index.</div>';
+            return;
+        }
+        list.innerHTML = data.map(m => {
+            const pct = Math.round((m.similarity || 0) * 100);
+            const tagsHtml = (m.tags || []).map(t => `<span class="tag" onclick="event.stopPropagation();clickTag('${escapeAttr(t)}')">#${escapeHtml(t)}</span>`).join(' ');
+            return `<div class="memory-item" onclick="viewMemory('${escapeAttr(m.key)}')">
+                <div class="main">
+                    <div class="key"><span class="badge badge-upd">${pct}%</span> ${escapeHtml(m.key)}</div>
+                    <div class="preview">${escapeHtml((m.value || '').substring(0, 150))}</div>
+                    <div class="meta">${tagsHtml}</div>
+                </div>
+            </div>`;
+        }).join('');
+    } catch (e) { console.error(e); }
+    finally { botIdle(); }
+}
+
+async function rebuildIndex() {
+    botBusy();
+    try {
+        const res = await fetch('/api/embeddings/index', { method: 'POST' });
+        const d = await res.json();
+        alert(`Index rebuilt: ${d.indexed} indexed, ${d.skipped} skipped (${d.backend} backend)`);
+    } catch (e) { alert('Error: ' + e.message); }
+    finally { botIdle(); }
 }
 
 function clickTag(tag) {
