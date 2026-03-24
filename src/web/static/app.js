@@ -97,7 +97,8 @@ function showTab(name, clickedBtn) {
     if (name === 'skills') loadSkills();
     if (name === 'graph') loadGraph();
     if (name === 'secrets') loadSecrets();
-    if (name === 'sources') { loadConnectors(); loadFolders(); }
+    if (name === 'sources') { loadScheduler(); loadConnectors(); loadFolders(); loadWebhooks(); }
+    if (name === 'assembler') loadTemplates();
 }
 
 // ═══════════════════════════════════════════════════════════════
@@ -223,6 +224,24 @@ async function loadDashboard() {
 
         // Load activity history on first dashboard load
         if (activityBuffer.length === 0) loadActivityHistory();
+
+        // Connector + scheduler stats for dashboard cards
+        try {
+            const cRes = await fetch('/api/connectors');
+            const connectors = await cRes.json();
+            const configured = connectors.filter(c => c.configured).length;
+            document.getElementById('dash-connectors').textContent = `${configured}/${connectors.length}`;
+            document.getElementById('dash-connectors-detail').textContent = 'configured';
+        } catch (e) {}
+        try {
+            const sRes = await fetch('/api/scheduler');
+            const sched = await sRes.json();
+            const el = document.getElementById('dash-scheduler');
+            if (sched.running) { el.textContent = 'ON'; el.className = 'card-value green'; }
+            else { el.textContent = 'OFF'; el.className = 'card-value'; }
+            document.getElementById('dash-scheduler-detail').textContent =
+                sched.running ? `every ${sched.interval_minutes}m` : 'not running';
+        } catch (e) {}
     } catch (e) { console.error('Dashboard load failed:', e); } finally { botIdle(); }
 
     try {
@@ -1474,6 +1493,269 @@ async function removeFolder(name) {
         await fetch(`/api/folders/${encodeURIComponent(name)}?purge=${purge}`, { method: 'DELETE' });
         loadFolders();
     } catch (e) { console.error(e); }
+}
+
+// ═══════════════════════════════════════════════════════════════
+// SCHEDULER
+// ═══════════════════════════════════════════════════════════════
+
+async function loadScheduler() {
+    try {
+        const res = await fetch('/api/scheduler');
+        const d = await res.json();
+        const actions = document.getElementById('scheduler-actions');
+        const status = document.getElementById('scheduler-status');
+        const dashVal = document.getElementById('dash-scheduler');
+        const dashDetail = document.getElementById('dash-scheduler-detail');
+
+        if (d.running) {
+            actions.innerHTML = `
+                <button class="btn btn-small" onclick="runSchedulerNow()">Run Now</button>
+                <button class="btn btn-small btn-danger" onclick="stopScheduler()">Stop</button>`;
+            status.textContent = `Running every ${d.interval_minutes} minutes` +
+                (d.last_run ? ` | Last: ${new Date(d.last_run * 1000).toLocaleString()}` : '');
+            if (dashVal) { dashVal.textContent = 'ON'; dashVal.className = 'card-value green'; }
+            if (dashDetail) dashDetail.textContent = `every ${d.interval_minutes}m`;
+        } else {
+            actions.innerHTML = `
+                <select id="sched-interval" style="width:auto;font-size:12px;padding:2px 8px;">
+                    <option value="15">15 min</option><option value="30" selected>30 min</option>
+                    <option value="60">1 hour</option><option value="360">6 hours</option>
+                </select>
+                <button class="btn btn-small btn-primary" onclick="startScheduler()">Start</button>`;
+            status.textContent = 'Not running' + (d.last_run ? ` | Last: ${new Date(d.last_run * 1000).toLocaleString()}` : '');
+            if (dashVal) { dashVal.textContent = 'OFF'; dashVal.className = 'card-value'; }
+            if (dashDetail) dashDetail.textContent = 'not running';
+        }
+    } catch (e) { console.error(e); }
+}
+
+async function startScheduler() {
+    const interval = document.getElementById('sched-interval')?.value || 30;
+    await fetch(`/api/scheduler/start?interval=${interval}`, { method: 'POST' });
+    loadScheduler();
+}
+
+async function stopScheduler() {
+    await fetch('/api/scheduler/stop', { method: 'POST' });
+    loadScheduler();
+}
+
+async function runSchedulerNow() {
+    botBusy();
+    try {
+        const res = await fetch('/api/scheduler/run-now', { method: 'POST' });
+        const d = await res.json();
+        const folders = Object.entries(d.folders || {}).map(([n, r]) => `${n}: +${r.added} ~${r.updated} -${r.removed}`);
+        const connectors = Object.entries(d.connectors || {}).map(([n, r]) => r.error ? `${n}: ERROR` : `${n}: +${r.added} ~${r.updated} -${r.removed}`);
+        alert('Sync complete:\n' + [...folders, ...connectors].join('\n') || 'No sources configured');
+        loadScheduler();
+    } catch (e) { alert('Error: ' + e.message); }
+    finally { botIdle(); }
+}
+
+// ═══════════════════════════════════════════════════════════════
+// TEMPLATES
+// ═══════════════════════════════════════════════════════════════
+
+async function loadTemplates() {
+    const el = document.getElementById('template-list');
+    if (!el) return;
+    try {
+        const res = await fetch('/api/templates');
+        const templates = await res.json();
+        if (templates.length === 0) {
+            el.innerHTML = '<p class="muted">No templates. Create one to quickly assemble context.</p>';
+            return;
+        }
+        el.innerHTML = templates.map(t => `<div class="memory-item" style="cursor:default;">
+            <div class="main">
+                <div class="key">${escapeHtml(t.name)}</div>
+                <div class="preview">${escapeHtml(t.description || '')}</div>
+                <div class="meta">
+                    <span class="age">budget: ${t.budget} tokens</span>
+                    <span class="age">tags: ${t.tag_filter.length ? t.tag_filter.join(', ') : 'all'}</span>
+                    ${t.key_filter ? '<span class="age">prefix: ' + escapeHtml(t.key_filter) + '</span>' : ''}
+                </div>
+            </div>
+            <div class="actions" style="display:flex;flex-direction:column;gap:4px;">
+                <button class="btn btn-small btn-primary" onclick="assembleTemplate('${escapeAttr(t.name)}')">Assemble</button>
+                <button class="btn btn-small btn-danger" onclick="deleteTemplate('${escapeAttr(t.name)}')">Delete</button>
+            </div>
+        </div>`).join('');
+    } catch (e) { console.error(e); }
+}
+
+function showAddTemplate() {
+    openModal('Create Context Template', `
+        <label>Name</label>
+        <input type="text" id="tpl-name" placeholder="e.g. smarthome, dev-context">
+        <label>Description</label>
+        <input type="text" id="tpl-desc" placeholder="Optional">
+        <label>Tag filter (comma-separated, empty = all)</label>
+        <input type="text" id="tpl-tags" placeholder="e.g. smarthome, network">
+        <label>Key prefix filter (empty = all)</label>
+        <input type="text" id="tpl-prefix" placeholder="e.g. folder/docs">
+        <label>Token budget</label>
+        <input type="number" id="tpl-budget" value="4000" min="100">
+    `, `
+        <button class="btn btn-primary" id="tpl-save-btn">Create</button>
+        <button class="btn" onclick="closeModal()">Cancel</button>
+    `);
+    document.getElementById('tpl-save-btn').addEventListener('click', submitTemplate);
+}
+
+async function submitTemplate() {
+    const name = document.getElementById('tpl-name').value.trim();
+    if (!name) { alert('Name is required.'); return; }
+    const body = {
+        name,
+        description: document.getElementById('tpl-desc').value.trim(),
+        tag_filter: document.getElementById('tpl-tags').value.split(',').map(t => t.trim()).filter(Boolean),
+        key_filter: document.getElementById('tpl-prefix').value.trim(),
+        budget: parseInt(document.getElementById('tpl-budget').value) || 4000,
+    };
+    try {
+        const res = await fetch('/api/templates', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(body) });
+        if (res.ok) { closeModal(); loadTemplates(); }
+        else alert('Failed to create template');
+    } catch (e) { alert('Error: ' + e.message); }
+}
+
+async function assembleTemplate(name) {
+    botBusy();
+    try {
+        const res = await fetch(`/api/templates/${encodeURIComponent(name)}/assemble`, { method: 'POST' });
+        const d = await res.json();
+        alert(`Template "${name}": ${d.used_tokens}/${d.budget} tokens, ${d.included}/${d.total_matching} memories included`);
+    } catch (e) { alert('Error: ' + e.message); }
+    finally { botIdle(); }
+}
+
+async function deleteTemplate(name) {
+    if (!confirm(`Delete template "${name}"?`)) return;
+    await fetch(`/api/templates/${encodeURIComponent(name)}`, { method: 'DELETE' });
+    loadTemplates();
+}
+
+// ═══════════════════════════════════════════════════════════════
+// EXPORT & DUPLICATES
+// ═══════════════════════════════════════════════════════════════
+
+async function exportClaudeMd() {
+    const tags = document.getElementById('export-tags')?.value.trim() || '';
+    const url = `/api/export-claude-md${tags ? '?tags=' + encodeURIComponent(tags) : ''}`;
+    try {
+        const res = await fetch(url);
+        const d = await res.json();
+        const blob = new Blob([d.content], {type: 'text/markdown'});
+        const a = document.createElement('a');
+        a.href = URL.createObjectURL(blob);
+        a.download = 'CLAUDE.md';
+        a.click();
+        document.getElementById('export-result').innerHTML =
+            `<p class="muted" style="margin-top:8px;">${d.memory_count} memories, ${d.token_count} tokens exported.</p>`;
+    } catch (e) { alert('Export failed: ' + e.message); }
+}
+
+async function findDuplicates() {
+    const el = document.getElementById('duplicate-list');
+    el.innerHTML = '<p class="muted">Scanning...</p>';
+    botBusy();
+    try {
+        const res = await fetch('/api/duplicates?threshold=0.6');
+        const groups = await res.json();
+        if (groups.length === 0) {
+            el.innerHTML = '<p class="muted">No duplicates found.</p>';
+            return;
+        }
+        el.innerHTML = groups.map(g => `<div class="memory-item" style="cursor:default;">
+            <div class="main">
+                <div class="key"><span class="badge badge-upd">${Math.round(g.similarity * 100)}%</span> ${g.keys.length} similar memories</div>
+                <div class="preview">${escapeHtml(g.sample)}</div>
+                <div class="meta">${g.keys.map(k => '<span class="tag">' + escapeHtml(k) + '</span>').join(' ')}</div>
+            </div>
+        </div>`).join('');
+    } catch (e) { el.innerHTML = '<p style="color:var(--danger);">Error: ' + escapeHtml(e.message) + '</p>'; }
+    finally { botIdle(); }
+}
+
+// ═══════════════════════════════════════════════════════════════
+// WEBHOOKS
+// ═══════════════════════════════════════════════════════════════
+
+async function loadWebhooks() {
+    const el = document.getElementById('webhook-list');
+    if (!el) return;
+    try {
+        const res = await fetch('/api/webhooks');
+        const hooks = await res.json();
+        if (hooks.length === 0) {
+            el.innerHTML = '<p class="muted">No webhooks configured.</p>';
+            return;
+        }
+        el.innerHTML = hooks.map(h => `<div class="memory-item" style="cursor:default;">
+            <div class="main">
+                <div class="key">
+                    <span class="badge" style="background:var(--accent-light);color:var(--accent);">${escapeHtml(h.type)}</span>
+                    ${escapeHtml(h.name)}
+                </div>
+                <div class="preview">${escapeHtml(h.url)}</div>
+                <div class="meta">
+                    <span class="age">events: ${h.events.length ? h.events.join(', ') : 'all'}</span>
+                    ${h.chat_id ? '<span class="age">chat: ' + escapeHtml(h.chat_id) + '</span>' : ''}
+                </div>
+            </div>
+            <div class="actions">
+                <button class="btn btn-small btn-danger" onclick="removeWebhook('${escapeAttr(h.name)}')">Remove</button>
+            </div>
+        </div>`).join('');
+    } catch (e) { console.error(e); }
+}
+
+function showAddWebhook() {
+    openModal('Add Webhook', `
+        <label>Name</label>
+        <input type="text" id="wh-name" placeholder="e.g. whatsapp-alerts">
+        <label>Type</label>
+        <select id="wh-type" style="width:100%;">
+            <option value="waha">WAHA (WhatsApp)</option>
+            <option value="generic">Generic HTTP</option>
+        </select>
+        <label>URL</label>
+        <input type="text" id="wh-url" placeholder="http://<server-ip>:3033">
+        <label>Chat ID (WAHA only)</label>
+        <input type="text" id="wh-chat" placeholder="491234567890@c.us">
+        <label>Events (comma-separated, empty = all)</label>
+        <input type="text" id="wh-events" placeholder="e.g. secrets.found, sync.error">
+    `, `
+        <button class="btn btn-primary" id="wh-save-btn">Add</button>
+        <button class="btn" onclick="closeModal()">Cancel</button>
+    `);
+    document.getElementById('wh-save-btn').addEventListener('click', submitWebhook);
+}
+
+async function submitWebhook() {
+    const name = document.getElementById('wh-name').value.trim();
+    const url = document.getElementById('wh-url').value.trim();
+    if (!name || !url) { alert('Name and URL are required.'); return; }
+    const body = {
+        name, url,
+        type: document.getElementById('wh-type').value,
+        chat_id: document.getElementById('wh-chat').value.trim(),
+        events: document.getElementById('wh-events').value.split(',').map(e => e.trim()).filter(Boolean),
+    };
+    try {
+        const res = await fetch('/api/webhooks', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(body) });
+        if (res.ok) { closeModal(); loadWebhooks(); }
+        else alert('Failed');
+    } catch (e) { alert('Error: ' + e.message); }
+}
+
+async function removeWebhook(name) {
+    if (!confirm(`Remove webhook "${name}"?`)) return;
+    await fetch(`/api/webhooks/${encodeURIComponent(name)}`, { method: 'DELETE' });
+    loadWebhooks();
 }
 
 // ═══════════════════════════════════════════════════════════════
