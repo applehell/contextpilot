@@ -333,6 +333,76 @@ label {
 .sse-dot.connected { background: var(--success); }
 .sse-dot.disconnected { background: var(--danger); }
 
+/* Progress Toast */
+#progress-toast {
+    position: fixed;
+    bottom: 20px;
+    right: 20px;
+    z-index: 9000;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    pointer-events: none;
+}
+
+.toast {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 12px 16px;
+    box-shadow: var(--shadow-lg);
+    font-size: 13px;
+    min-width: 280px;
+    max-width: 400px;
+    animation: toastIn 0.3s ease;
+    pointer-events: auto;
+}
+
+.toast.done { border-left: 3px solid var(--success); }
+.toast.error { border-left: 3px solid var(--danger); }
+.toast.running { border-left: 3px solid var(--accent); }
+
+@keyframes toastIn {
+    from { opacity: 0; transform: translateY(10px); }
+    to { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes toastOut {
+    from { opacity: 1; transform: translateY(0); }
+    to { opacity: 0; transform: translateY(10px); }
+}
+
+.toast-spinner {
+    width: 16px;
+    height: 16px;
+    border: 2px solid var(--border);
+    border-top-color: var(--accent);
+    border-radius: 50%;
+    animation: spin 0.8s linear infinite;
+    flex-shrink: 0;
+}
+
+@keyframes spin {
+    to { transform: rotate(360deg); }
+}
+
+.toast-check {
+    width: 16px;
+    height: 16px;
+    color: var(--success);
+    font-weight: bold;
+    flex-shrink: 0;
+    text-align: center;
+    line-height: 16px;
+}
+
+.toast-body { flex: 1; min-width: 0; }
+.toast-title { font-weight: 600; font-size: 12px; }
+.toast-detail { color: var(--text-muted); font-size: 11px; margin-top: 2px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
 /* Modal */
 .modal-overlay {
     display: none;

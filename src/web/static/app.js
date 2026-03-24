@@ -637,12 +637,13 @@ async function semanticSearch() {
 }
 
 async function rebuildIndex() {
+    const tid = showToast('Building search index', 'Computing embeddings...');
     botBusy();
     try {
         const res = await fetch('/api/embeddings/index', { method: 'POST' });
         const d = await res.json();
-        alert(`Index rebuilt: ${d.indexed} indexed, ${d.skipped} skipped (${d.backend} backend)`);
-    } catch (e) { alert('Error: ' + e.message); }
+        completeToast(tid, `${d.indexed} indexed, ${d.skipped} skipped (${d.backend})`, false);
+    } catch (e) { completeToast(tid, 'Failed: ' + e.message, true); }
     finally { botIdle(); }
 }
 
@@ -1400,30 +1401,32 @@ async function submitConnectorSetup(name, connectorInfo) {
 }
 
 async function testConnector(name) {
+    const tid = showToast(`Testing ${name}`, 'Connecting...');
     botBusy();
     try {
         const res = await fetch(`/api/connectors/${encodeURIComponent(name)}/test`, { method: 'POST' });
         const d = await res.json();
         if (d.ok) {
             const info = Object.entries(d).filter(([k]) => k !== 'ok').map(([k, v]) => `${k}: ${v}`).join(', ');
-            alert(`Connection OK! ${info}`);
+            completeToast(tid, info, false);
         } else {
-            alert('Connection failed: ' + (d.error || 'Unknown error'));
+            completeToast(tid, d.error || 'Unknown error', true);
         }
-    } catch (e) { alert('Test failed: ' + e.message); }
+    } catch (e) { completeToast(tid, 'Failed: ' + e.message, true); }
     finally { botIdle(); }
 }
 
 async function syncConnector(name) {
+    const tid = showToast(`Syncing ${name}`, 'Connecting to source...');
     botBusy();
     try {
         const res = await fetch(`/api/connectors/${encodeURIComponent(name)}/sync`, { method: 'POST' });
         const d = await res.json();
-        alert(`Sync complete: ${d.added} added, ${d.updated} updated, ${d.removed} removed, ${d.skipped} unchanged` +
-              (d.total_remote ? ` (${d.total_remote} remote)` : '') +
-              (d.errors?.length ? '\nErrors: ' + d.errors.join(', ') : ''));
+        const summary = `+${d.added} ~${d.updated} -${d.removed} (${d.skipped} unchanged)`;
+        const hasErrors = d.errors?.length > 0;
+        completeToast(tid, hasErrors ? `${summary} | Errors: ${d.errors.join(', ')}` : summary, hasErrors);
         loadConnectors();
-    } catch (e) { alert('Sync failed: ' + e.message); }
+    } catch (e) { completeToast(tid, 'Failed: ' + e.message, true); }
     finally { botIdle(); }
 }
 
@@ -1534,28 +1537,31 @@ async function submitAddFolder() {
 }
 
 async function scanFolder(name) {
+    const tid = showToast(`Scanning ${name}`, 'Reading files...');
     botBusy();
     try {
         const res = await fetch(`/api/folders/${encodeURIComponent(name)}/scan`, { method: 'POST' });
         const d = await res.json();
-        alert(`Scan complete: ${d.added} added, ${d.updated} updated, ${d.removed} removed, ${d.skipped} unchanged` +
-              (d.errors.length ? `\nErrors: ${d.errors.join(', ')}` : ''));
+        const summary = `+${d.added} ~${d.updated} -${d.removed} (${d.skipped} unchanged)`;
+        completeToast(tid, summary, d.errors.length > 0);
         loadFolders();
-    } catch (e) { alert('Scan failed: ' + e.message); }
+    } catch (e) { completeToast(tid, 'Failed: ' + e.message, true); }
     finally { botIdle(); }
 }
 
 async function scanAllFolders() {
+    const tid = showToast('Scanning all folders', 'Starting...');
     botBusy();
     try {
         const res = await fetch('/api/folders/scan-all', { method: 'POST' });
         const d = await res.json();
-        const summary = Object.entries(d).map(([name, r]) =>
-            `${name}: +${r.added} ~${r.updated} -${r.removed}`
-        ).join('\n');
-        alert(summary || 'No sources to scan.');
+        const entries = Object.entries(d);
+        const summary = entries.length
+            ? entries.map(([n, r]) => `${n}: +${r.added} ~${r.updated} -${r.removed}`).join(' | ')
+            : 'No sources configured';
+        completeToast(tid, summary, false);
         loadFolders();
-    } catch (e) { alert('Scan failed: ' + e.message); }
+    } catch (e) { completeToast(tid, 'Failed: ' + e.message, true); }
     finally { botIdle(); }
 }
 
@@ -1628,15 +1634,17 @@ async function stopScheduler() {
 }
 
 async function runSchedulerNow() {
+    const tid = showToast('Running full sync', 'Syncing all sources...');
     botBusy();
     try {
         const res = await fetch('/api/scheduler/run-now', { method: 'POST' });
         const d = await res.json();
-        const folders = Object.entries(d.folders || {}).map(([n, r]) => `${n}: +${r.added} ~${r.updated} -${r.removed}`);
-        const connectors = Object.entries(d.connectors || {}).map(([n, r]) => r.error ? `${n}: ERROR` : `${n}: +${r.added} ~${r.updated} -${r.removed}`);
-        alert('Sync complete:\n' + [...folders, ...connectors].join('\n') || 'No sources configured');
+        const folders = Object.entries(d.folders || {}).map(([n, r]) => `${n}: +${r.added}`);
+        const connectors = Object.entries(d.connectors || {}).map(([n, r]) => r.error ? `${n}: err` : `${n}: +${r.added}`);
+        const all = [...folders, ...connectors];
+        completeToast(tid, all.length ? all.join(' | ') : 'No sources configured', false);
         loadScheduler();
-    } catch (e) { alert('Error: ' + e.message); }
+    } catch (e) { completeToast(tid, 'Failed: ' + e.message, true); }
     finally { botIdle(); }
 }
 
@@ -1866,6 +1874,52 @@ async function loadVersion() {
         const el = document.getElementById('app-version');
         if (el) el.textContent = 'v' + d.version;
     } catch (e) {}
+}
+
+// ═══════════════════════════════════════════════════════════════
+// PROGRESS TOASTS
+// ═══════════════════════════════════════════════════════════════
+
+let toastCounter = 0;
+
+function showToast(title, detail) {
+    const id = 'toast-' + (++toastCounter);
+    const container = document.getElementById('progress-toast');
+    const html = `<div class="toast running" id="${id}">
+        <div class="toast-spinner"></div>
+        <div class="toast-body">
+            <div class="toast-title">${escapeHtml(title)}</div>
+            <div class="toast-detail">${escapeHtml(detail || 'Starting...')}</div>
+        </div>
+    </div>`;
+    container.insertAdjacentHTML('beforeend', html);
+    return id;
+}
+
+function updateToast(id, detail) {
+    const el = document.getElementById(id);
+    if (!el) return;
+    const detailEl = el.querySelector('.toast-detail');
+    if (detailEl) detailEl.textContent = detail;
+}
+
+function completeToast(id, detail, isError) {
+    const el = document.getElementById(id);
+    if (!el) return;
+    el.className = `toast ${isError ? 'error' : 'done'}`;
+    el.querySelector('.toast-spinner')?.remove();
+    const icon = document.createElement('div');
+    icon.className = 'toast-check';
+    icon.textContent = isError ? '!' : '\u2713';
+    if (isError) icon.style.color = 'var(--danger)';
+    el.prepend(icon);
+    const detailEl = el.querySelector('.toast-detail');
+    if (detailEl) detailEl.textContent = detail;
+
+    setTimeout(() => {
+        el.style.animation = 'toastOut 0.3s ease forwards';
+        setTimeout(() => el.remove(), 300);
+    }, isError ? 8000 : 4000);
 }
 
 // Bot animation
