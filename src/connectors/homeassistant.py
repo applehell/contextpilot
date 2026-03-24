@@ -22,8 +22,13 @@ class _HAAPI:
             "Authorization": f"Bearer {self.token}",
             "Accept": "application/json",
         })
-        with urllib.request.urlopen(req, timeout=15) as resp:
-            return json.loads(resp.read().decode())
+        try:
+            with urllib.request.urlopen(req, timeout=15) as resp:
+                return json.loads(resp.read().decode())
+        except urllib.error.HTTPError as e:
+            if e.code == 401:
+                raise ValueError("401 Unauthorized — use a Long-Lived Access Token (starts with eyJ...), not an API password. Create one in HA: Profile → Security → Long-Lived Access Tokens.")
+            raise
 
     def config(self) -> Dict:
         return self._get("/api/config")
@@ -56,7 +61,8 @@ class HomeAssistantConnector(ConnectorPlugin):
     def config_schema(self) -> List[ConfigField]:
         return [
             ConfigField("url", "URL", placeholder="http://<server-ip>:8123", required=True),
-            ConfigField("token", "Long-Lived Access Token", type="password", required=True),
+            ConfigField("token", "Long-Lived Access Token (starts with eyJ...)", type="password",
+                        placeholder="Profile → Security → Long-Lived Access Tokens → Create", required=True),
             ConfigField("sync_types", "Sync types", type="tags",
                         placeholder="automations, scenes, scripts (empty = all)", default="automations, scenes, scripts"),
         ]
