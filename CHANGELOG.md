@@ -1,5 +1,17 @@
 # Changelog
 
+## v3.1.0 — 2026-03-24
+
+Profile isolation: switching profiles changes ALL data.
+
+- Profiles now control memories, connectors, folders, webhooks, embeddings,
+  templates, assembly, dashboard, secrets scan — complete isolation
+- 13 integration tests verify every aspect of profile isolation
+- Connector plugin architecture with data_dir parameter per profile
+- ConnectorRegistry.reload() on profile switch
+- Scheduler stops on profile switch (prevents cross-profile sync)
+- 574 tests total
+
 ## v3.0.0 — 2026-03-24
 
 Major release: Knowledge Sources, Live Activity, UI Rewrite.

@@ -71,14 +71,27 @@ Dashboard upload buttons for:
 | **Copilot.md** | GitHub Copilot instruction files |
 | **SQLite .db** | Database from memory-mcp MCP Server |
 
-### Profiles
+### Profiles — Complete Isolation
 
-Multiple isolated knowledge databases (e.g. "Work", "Smarthome", "Personal"):
+Profiles are the central concept. Switching profiles changes **everything**:
 
-- Header dropdown to switch
+| Isolated per profile | Storage location |
+|---|---|
+| Memories, tags, FTS index | `profiles/{name}/data.db` |
+| Connector configs (Paperless, HA, Gitea...) | `profiles/{name}/connector_*.json` |
+| Folder sources | `profiles/{name}/folders.json` |
+| Webhooks | `profiles/{name}/webhooks.json` |
+| Embeddings / semantic search | `profiles/{name}/embeddings.db` |
+| Templates, relations, versions | Inside `data.db` |
+| Context assembly | Uses profile's memories |
+| Dashboard stats | Reflects active profile |
+| Secrets scan | Scans active profile only |
+
+- Header dropdown to switch instantly
 - Create new profile with optional knowledge import from existing profiles
 - Rename, delete, duplicate
 - Welcome screen for new profiles
+- Scheduler stops on profile switch (restart with new profile's sources)
 
 ### Knowledge Graph
 

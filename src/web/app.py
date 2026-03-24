@@ -183,7 +183,7 @@ def _get_profile_dir() -> Path:
 def create_app(db_path: Optional[Path] = None) -> FastAPI:
     _init_db(db_path)
 
-    app = FastAPI(title="Context Pilot", version="3.0.0")
+    app = FastAPI(title="Context Pilot", version="3.1.0")
 
     app.mount("/static", StaticFiles(directory=str(WEB_DIR / "static")), name="static")
     templates = Jinja2Templates(directory=str(WEB_DIR / "templates"))

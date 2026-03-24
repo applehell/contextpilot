@@ -12,13 +12,14 @@ from src.web.app import create_app
 @pytest.fixture
 def client(tmp_path, monkeypatch):
     db_path = tmp_path / "test.db"
-    # Isolate profiles, folders, connectors config to tmp_path
+    # Isolate ALL profile-dependent storage to tmp_path
     monkeypatch.setattr("src.storage.profiles.PROFILES_DIR", tmp_path / "profiles")
     monkeypatch.setattr("src.storage.profiles.CONFIG_FILE", tmp_path / "profiles.json")
     monkeypatch.setattr("src.storage.profiles.DEFAULT_DB", db_path)
-    monkeypatch.setattr("src.storage.folders.FOLDERS_CONFIG", tmp_path / "folders.json")
+    monkeypatch.setattr("src.storage.profiles._DATA_DIR", tmp_path)
     monkeypatch.setattr("src.storage.folders._DATA_DIR", tmp_path)
     monkeypatch.setattr("src.connectors.base._DATA_DIR", tmp_path)
+    monkeypatch.setattr("src.core.webhooks._DATA_DIR", tmp_path)
     # Reset singletons
     from src.connectors.registry import ConnectorRegistry
     ConnectorRegistry._instance = None
