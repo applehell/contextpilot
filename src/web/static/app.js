@@ -95,7 +95,7 @@ function showTab(name, clickedBtn) {
     if (name === 'skills') loadSkills();
     if (name === 'graph') loadGraph();
     if (name === 'secrets') loadSecrets();
-    if (name === 'sources') loadFolders();
+    if (name === 'sources') { loadPaperless(); loadFolders(); }
 }
 
 // ═══════════════════════════════════════════════════════════════
@@ -1069,6 +1069,151 @@ async function viewRedacted(key) {
             <div style="margin-bottom:8px;"><span class="badge ${SEV_BADGE_CLASS[d.severity] || ''}">${d.severity.toUpperCase()}</span></div>
             <pre>${escapeHtml(d.value)}</pre>
         `, `<button class="btn" onclick="closeModal()">Close</button>`);
+    } catch (e) { console.error(e); }
+}
+
+// ═══════════════════════════════════════════════════════════════
+// PAPERLESS-NGX
+// ═══════════════════════════════════════════════════════════════
+
+async function loadPaperless() {
+    const statusEl = document.getElementById('paperless-status');
+    const actionsEl = document.getElementById('paperless-actions');
+
+    try {
+        const res = await fetch('/api/paperless');
+        const d = await res.json();
+
+        if (!d.configured) {
+            actionsEl.innerHTML = '<button class="btn btn-small btn-primary" onclick="showPaperlessSetup()">Connect</button>';
+            statusEl.innerHTML = '<div class="empty-state">Not connected. Click "Connect" to set up Paperless-ngx.</div>';
+            return;
+        }
+
+        const lastSync = d.last_sync ? new Date(d.last_sync * 1000).toLocaleString() : 'never';
+        const tagsStr = d.sync_tags.length ? d.sync_tags.join(', ') : 'all';
+        const statusClass = d.enabled ? 'success' : 'danger';
+
+        actionsEl.innerHTML = `
+            <button class="btn btn-small btn-primary" onclick="syncPaperless()">Sync Now</button>
+            <button class="btn btn-small" onclick="testPaperless()">Test</button>
+            <button class="btn btn-small" onclick="showPaperlessSetup()">Settings</button>
+            <button class="btn btn-small btn-danger" onclick="removePaperless()">Disconnect</button>
+        `;
+
+        statusEl.innerHTML = `<div class="memory-item" style="cursor:default;">
+            <div class="main">
+                <div class="key">
+                    <span class="badge" style="background:var(--${statusClass}-light);color:var(--${statusClass});">${d.enabled ? 'connected' : 'disabled'}</span>
+                    ${escapeHtml(d.url)}
+                </div>
+                <div class="meta">
+                    <span class="age">${d.synced_docs} documents synced</span>
+                    <span class="age">last sync: ${lastSync}</span>
+                    <span class="age">tags: ${escapeHtml(tagsStr)}</span>
+                </div>
+            </div>
+        </div>`;
+    } catch (e) { console.error(e); }
+}
+
+function showPaperlessSetup() {
+    fetch('/api/paperless').then(r => r.json()).then(d => {
+        openModal('Paperless-ngx Setup', `
+            <label>URL</label>
+            <input type="text" id="pl-url" placeholder="http://192.168.1.x:8000" value="${escapeHtml(d.url || '')}">
+            <label>API Token</label>
+            <input type="text" id="pl-token" placeholder="Token from Paperless admin" value="${d.configured ? '••••••••' : ''}">
+            <label>Sync only these tags (empty = all documents)</label>
+            <input type="text" id="pl-tags" placeholder="e.g. important, finance" value="${escapeHtml((d.sync_tags || []).join(', '))}">
+            <div style="font-size:11px;color:var(--text-muted);margin-top:4px;">Comma-separated Paperless tag names. Leave empty to sync all documents.</div>
+        `, `
+            <button class="btn btn-primary" id="pl-save-btn">Save & Test</button>
+            <button class="btn" onclick="closeModal()">Cancel</button>
+        `);
+
+        document.getElementById('pl-save-btn').addEventListener('click', submitPaperlessSetup);
+    });
+}
+
+async function submitPaperlessSetup() {
+    const url = document.getElementById('pl-url').value.trim();
+    const tokenInput = document.getElementById('pl-token').value.trim();
+    const tagsStr = document.getElementById('pl-tags').value.trim();
+    const sync_tags = tagsStr ? tagsStr.split(',').map(t => t.trim()).filter(Boolean) : [];
+
+    if (!url) { alert('URL is required.'); return; }
+
+    // If token is dots, user didn't change it — only update URL/tags
+    if (tokenInput === '••••••••') {
+        try {
+            const res = await fetch('/api/paperless', {
+                method: 'PUT',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({ url, sync_tags })
+            });
+            if (res.ok) {
+                closeModal();
+                loadPaperless();
+            } else {
+                const d = await res.json();
+                alert(d.detail || 'Update failed');
+            }
+        } catch (e) { alert('Error: ' + e.message); }
+        return;
+    }
+
+    if (!tokenInput) { alert('API Token is required.'); return; }
+
+    try {
+        const res = await fetch('/api/paperless/setup', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({ url, token: tokenInput, sync_tags })
+        });
+        const d = await res.json();
+        if (d.test?.ok) {
+            closeModal();
+            loadPaperless();
+            alert(`Connected! ${d.test.document_count} documents, ${d.test.tag_count} tags found.`);
+        } else {
+            alert('Connection failed: ' + (d.test?.error || 'Unknown error'));
+        }
+    } catch (e) { alert('Error: ' + e.message); }
+}
+
+async function testPaperless() {
+    botBusy();
+    try {
+        const res = await fetch('/api/paperless/test', { method: 'POST' });
+        const d = await res.json();
+        if (d.ok) {
+            alert(`Connection OK! ${d.document_count} documents, ${d.tag_count} tags.`);
+        } else {
+            alert('Connection failed: ' + (d.error || 'Unknown error'));
+        }
+    } catch (e) { alert('Test failed: ' + e.message); }
+    finally { botIdle(); }
+}
+
+async function syncPaperless() {
+    botBusy();
+    try {
+        const res = await fetch('/api/paperless/sync', { method: 'POST' });
+        const d = await res.json();
+        alert(`Sync complete: ${d.added} added, ${d.updated} updated, ${d.removed} removed, ${d.skipped} unchanged (${d.total_remote} remote)` +
+              (d.errors.length ? '\nErrors: ' + d.errors.join(', ') : ''));
+        loadPaperless();
+    } catch (e) { alert('Sync failed: ' + e.message); }
+    finally { botIdle(); }
+}
+
+async function removePaperless() {
+    const purge = confirm('Also delete all synced memories?');
+    if (!confirm('Disconnect Paperless-ngx?')) return;
+    try {
+        await fetch(`/api/paperless?purge=${purge}`, { method: 'DELETE' });
+        loadPaperless();
     } catch (e) { console.error(e); }
 }
 

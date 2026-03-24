@@ -27,6 +27,7 @@ from src.core.compressors.code_compact import CodeCompactCompressor
 from src.core.secrets import SecretDetector
 from src.core.skill_registry import SkillRegistry
 from src.storage.memory_activity import MemoryActivityLog
+from src.connectors.paperless import PaperlessConnector
 from src.storage.folders import FolderManager
 from src.storage.profiles import ProfileManager
 from src.storage.usage import UsageStore, FeedbackRecord, block_hash
@@ -137,6 +138,19 @@ class ProfileCreate(BaseModel):
 
 class EstimateRequest(BaseModel):
     text: str
+
+
+class PaperlessSetup(BaseModel):
+    url: str
+    token: str
+    sync_tags: List[str] = []
+
+
+class PaperlessUpdate(BaseModel):
+    url: Optional[str] = None
+    token: Optional[str] = None
+    sync_tags: Optional[List[str]] = None
+    enabled: Optional[bool] = None
 
 
 class FolderSourceCreate(BaseModel):
@@ -970,6 +984,70 @@ def create_app(db_path: Optional[Path] = None) -> FastAPI:
             }
             for name, r in results.items()
         }
+
+    # --- Paperless-ngx ---
+
+    @app.get("/api/paperless")
+    async def paperless_status():
+        pc = PaperlessConnector()
+        cfg = pc.get_config()
+        return {
+            "configured": pc.configured,
+            "url": cfg.url,
+            "enabled": cfg.enabled,
+            "sync_tags": cfg.sync_tags,
+            "last_sync": cfg.last_sync,
+            "synced_docs": cfg.synced_docs,
+        }
+
+    @app.post("/api/paperless/setup")
+    async def paperless_setup(req: PaperlessSetup):
+        pc = PaperlessConnector()
+        pc.configure(req.url, req.token, req.sync_tags or None)
+        result = pc.test()
+        return {
+            "status": "configured",
+            "test": result,
+        }
+
+    @app.put("/api/paperless")
+    async def paperless_update(req: PaperlessUpdate):
+        pc = PaperlessConnector()
+        if not pc.configured:
+            raise HTTPException(400, "Paperless not configured. Use /api/paperless/setup first.")
+        updates = {k: v for k, v in req.model_dump().items() if v is not None}
+        pc.update(**updates)
+        return {"status": "updated"}
+
+    @app.post("/api/paperless/test")
+    async def paperless_test():
+        pc = PaperlessConnector()
+        return pc.test()
+
+    @app.post("/api/paperless/sync")
+    async def paperless_sync():
+        pc = PaperlessConnector()
+        store = _get_memory_store()
+        result = pc.sync(store)
+        return {
+            "status": "synced",
+            "added": result.added,
+            "updated": result.updated,
+            "removed": result.removed,
+            "skipped": result.skipped,
+            "total_remote": result.total_remote,
+            "errors": result.errors,
+        }
+
+    @app.delete("/api/paperless")
+    async def paperless_remove(purge: bool = Query(False)):
+        pc = PaperlessConnector()
+        purged = 0
+        if purge:
+            store = _get_memory_store()
+            purged = pc.purge(store)
+        pc.remove()
+        return {"status": "removed", "purged_memories": purged}
 
     return app
 
