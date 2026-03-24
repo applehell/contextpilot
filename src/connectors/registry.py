@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import importlib
 import pkgutil
+from pathlib import Path
 from typing import Dict, List, Optional, Type
 
 from .base import ConnectorPlugin
@@ -10,19 +11,28 @@ from .base import ConnectorPlugin
 
 class ConnectorRegistry:
     _instance: Optional[ConnectorRegistry] = None
+    _current_data_dir: Optional[Path] = None
 
-    def __init__(self) -> None:
+    def __init__(self, data_dir: Optional[Path] = None) -> None:
+        self._data_dir = data_dir
         self._plugins: Dict[str, ConnectorPlugin] = {}
         self._discover()
 
     @classmethod
-    def instance(cls) -> ConnectorRegistry:
-        if cls._instance is None:
-            cls._instance = cls()
+    def instance(cls, data_dir: Optional[Path] = None) -> ConnectorRegistry:
+        if cls._instance is None or (data_dir and data_dir != cls._current_data_dir):
+            cls._instance = cls(data_dir)
+            cls._current_data_dir = data_dir
+        return cls._instance
+
+    @classmethod
+    def reload(cls, data_dir: Optional[Path] = None) -> ConnectorRegistry:
+        """Force reload with new data_dir (e.g. after profile switch)."""
+        cls._instance = cls(data_dir)
+        cls._current_data_dir = data_dir
         return cls._instance
 
     def _discover(self) -> None:
-        """Auto-discover all ConnectorPlugin subclasses in the connectors package."""
         import src.connectors as pkg
 
         for importer, modname, ispkg in pkgutil.iter_modules(pkg.__path__):
@@ -37,7 +47,7 @@ class ConnectorRegistry:
                             and attr is not ConnectorPlugin
                             and hasattr(attr, 'name')
                             and attr.name):
-                        plugin = attr()
+                        plugin = attr(data_dir=self._data_dir)
                         self._plugins[plugin.name] = plugin
             except Exception as e:
                 print(f"Warning: Failed to load connector module '{modname}': {e}")

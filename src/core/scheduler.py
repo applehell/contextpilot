@@ -32,12 +32,13 @@ class SyncScheduler:
     def last_run(self) -> Optional[float]:
         return self._last_run
 
-    def start(self, get_store_fn, get_db_fn) -> None:
+    def start(self, get_store_fn, get_db_fn, get_profile_dir_fn=None) -> None:
         if self._running:
             return
         self._running = True
         self._get_store = get_store_fn
         self._get_db = get_db_fn
+        self._get_profile_dir = get_profile_dir_fn
         self._task = asyncio.create_task(self._loop())
 
     def stop(self) -> None:
@@ -55,7 +56,8 @@ class SyncScheduler:
 
         try:
             from ..storage.folders import FolderManager
-            fm = FolderManager()
+            profile_dir = self._get_profile_dir() if self._get_profile_dir else None
+            fm = FolderManager(profile_dir)
             store = self._get_store()
             folder_results = fm.scan_all(store)
             for name, r in folder_results.items():
@@ -67,7 +69,7 @@ class SyncScheduler:
 
         try:
             from ..connectors.registry import ConnectorRegistry
-            registry = ConnectorRegistry.instance()
+            registry = ConnectorRegistry.instance(profile_dir)
             store = self._get_store()
             for connector in registry.list():
                 if connector.configured and connector.enabled:

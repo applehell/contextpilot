@@ -56,17 +56,19 @@ class IndexResult:
 
 class FolderManager:
 
-    def __init__(self) -> None:
-        _DATA_DIR.mkdir(parents=True, exist_ok=True)
+    def __init__(self, data_dir: Optional[Path] = None) -> None:
+        self._dir = data_dir or _DATA_DIR
+        self._dir.mkdir(parents=True, exist_ok=True)
+        self._config_path = self._dir / "folders.json"
         self._config: Dict[str, Any] = self._load()
 
     def _load(self) -> Dict[str, Any]:
-        if FOLDERS_CONFIG.exists():
-            return json.loads(FOLDERS_CONFIG.read_text())
+        if self._config_path.exists():
+            return json.loads(self._config_path.read_text())
         return {"sources": {}}
 
     def _save(self) -> None:
-        FOLDERS_CONFIG.write_text(json.dumps(self._config, indent=2))
+        self._config_path.write_text(json.dumps(self._config, indent=2))
 
     def list(self) -> List[FolderSource]:
         result = []

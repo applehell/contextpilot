@@ -9,6 +9,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
+
 _DATA_DIR = Path(os.environ.get("CONTEXTPILOT_DATA_DIR", str(Path.home() / ".contextpilot")))
 WEBHOOKS_CONFIG = _DATA_DIR / "webhooks.json"
 
@@ -27,17 +28,19 @@ class WebhookConfig:
 
 class WebhookManager:
 
-    def __init__(self) -> None:
-        _DATA_DIR.mkdir(parents=True, exist_ok=True)
+    def __init__(self, data_dir: Optional[Path] = None) -> None:
+        self._dir = data_dir or _DATA_DIR
+        self._dir.mkdir(parents=True, exist_ok=True)
+        self._config_path = self._dir / "webhooks.json"
         self._config: Dict[str, Any] = self._load()
 
     def _load(self) -> Dict[str, Any]:
-        if WEBHOOKS_CONFIG.exists():
-            return json.loads(WEBHOOKS_CONFIG.read_text())
+        if self._config_path.exists():
+            return json.loads(self._config_path.read_text())
         return {"hooks": {}}
 
     def _save(self) -> None:
-        WEBHOOKS_CONFIG.write_text(json.dumps(self._config, indent=2))
+        self._config_path.write_text(json.dumps(self._config, indent=2))
 
     def list(self) -> List[WebhookConfig]:
         return [WebhookConfig(name=n, **d) for n, d in self._config["hooks"].items()]

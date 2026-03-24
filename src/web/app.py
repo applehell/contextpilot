@@ -175,6 +175,11 @@ def _init_db(db_path: Optional[Path] = None) -> None:
     _usage_store = UsageStore(_db)
 
 
+def _get_profile_dir() -> Path:
+    pm = ProfileManager()
+    return pm.active_data_dir
+
+
 def create_app(db_path: Optional[Path] = None) -> FastAPI:
     _init_db(db_path)
 
@@ -879,12 +884,24 @@ def create_app(db_path: Optional[Path] = None) -> FastAPI:
         except ValueError as e:
             raise HTTPException(409, str(e))
 
+    def _reload_profile_deps():
+        """Reload all profile-dependent singletons after profile switch."""
+        profile_dir = _get_profile_dir()
+        ConnectorRegistry.reload(profile_dir)
+        from src.core.embeddings import set_data_dir
+        set_data_dir(profile_dir)
+        from src.core.scheduler import SyncScheduler
+        s = SyncScheduler.instance()
+        if s.running:
+            s.stop()
+
     @app.post("/api/profiles/{name}/switch")
     async def switch_profile(name: str):
         pm = ProfileManager()
         try:
             new_path = pm.switch(name)
             _init_db(new_path)
+            _reload_profile_deps()
             _events.emit("profile", "switch", name)
             return {"status": "switched", "active": name, "db_path": str(new_path)}
         except KeyError as e:
@@ -975,7 +992,7 @@ def create_app(db_path: Optional[Path] = None) -> FastAPI:
 
     @app.get("/api/folders")
     async def list_folders():
-        fm = FolderManager()
+        fm = FolderManager(_get_profile_dir())
         return [
             {
                 "name": s.name,
@@ -993,7 +1010,7 @@ def create_app(db_path: Optional[Path] = None) -> FastAPI:
 
     @app.post("/api/folders", status_code=201)
     async def add_folder(req: FolderSourceCreate):
-        fm = FolderManager()
+        fm = FolderManager(_get_profile_dir())
         try:
             s = fm.add(req.name, req.path, req.extensions, req.recursive, req.description)
             return {"status": "created", "name": s.name}
@@ -1002,7 +1019,7 @@ def create_app(db_path: Optional[Path] = None) -> FastAPI:
 
     @app.put("/api/folders/{name}")
     async def update_folder(name: str, req: FolderSourceUpdate):
-        fm = FolderManager()
+        fm = FolderManager(_get_profile_dir())
         updates = {k: v for k, v in req.model_dump().items() if v is not None}
         try:
             fm.update(name, **updates)
@@ -1012,7 +1029,7 @@ def create_app(db_path: Optional[Path] = None) -> FastAPI:
 
     @app.delete("/api/folders/{name}")
     async def delete_folder(name: str, purge: bool = Query(False)):
-        fm = FolderManager()
+        fm = FolderManager(_get_profile_dir())
         try:
             purged = 0
             if purge:
@@ -1025,7 +1042,7 @@ def create_app(db_path: Optional[Path] = None) -> FastAPI:
 
     @app.post("/api/folders/{name}/scan")
     async def scan_folder(name: str):
-        fm = FolderManager()
+        fm = FolderManager(_get_profile_dir())
         store = _get_memory_store()
         try:
             result = fm.scan(name, store)
@@ -1044,7 +1061,7 @@ def create_app(db_path: Optional[Path] = None) -> FastAPI:
 
     @app.post("/api/folders/scan-all")
     async def scan_all_folders():
-        fm = FolderManager()
+        fm = FolderManager(_get_profile_dir())
         store = _get_memory_store()
         results = fm.scan_all(store)
         return {
@@ -1212,14 +1229,14 @@ def create_app(db_path: Optional[Path] = None) -> FastAPI:
 
     @app.get("/api/webhooks")
     async def list_webhooks():
-        wm = WebhookManager()
+        wm = WebhookManager(_get_profile_dir())
         return [{"name": h.name, "type": h.type, "url": h.url, "enabled": h.enabled,
                  "events": h.events, "chat_id": h.chat_id} for h in wm.list()]
 
     @app.post("/api/webhooks", status_code=201)
     async def add_webhook(request: Request):
         body = await request.json()
-        wm = WebhookManager()
+        wm = WebhookManager(_get_profile_dir())
         wm.add(body["name"], body["type"], body["url"],
                chat_id=body.get("chat_id", ""), session=body.get("session", "default"),
                events=body.get("events", []))
@@ -1227,7 +1244,7 @@ def create_app(db_path: Optional[Path] = None) -> FastAPI:
 
     @app.delete("/api/webhooks/{name}")
     async def remove_webhook(name: str):
-        wm = WebhookManager()
+        wm = WebhookManager(_get_profile_dir())
         try:
             wm.remove(name)
             return {"status": "deleted"}
@@ -1237,7 +1254,7 @@ def create_app(db_path: Optional[Path] = None) -> FastAPI:
     @app.post("/api/webhooks/test")
     async def test_webhook(request: Request):
         body = await request.json()
-        wm = WebhookManager()
+        wm = WebhookManager(_get_profile_dir())
         results = wm.notify(body.get("event", "test"), body.get("message", "Context Pilot test notification"))
         return {"results": results}
 
@@ -1254,7 +1271,7 @@ def create_app(db_path: Optional[Path] = None) -> FastAPI:
     async def scheduler_start(interval: int = Query(30, ge=1, le=1440)):
         s = SyncScheduler.instance(interval)
         s.set_interval(interval)
-        s.start(_get_memory_store, lambda: _db)
+        s.start(_get_memory_store, lambda: _db, _get_profile_dir)
         _events.emit("scheduler", "start", f"{interval}m interval")
         return {"status": "started", "interval_minutes": interval}
 
@@ -1270,6 +1287,7 @@ def create_app(db_path: Optional[Path] = None) -> FastAPI:
         s = SyncScheduler.instance()
         s._get_store = _get_memory_store
         s._get_db = lambda: _db
+        s._get_profile_dir = _get_profile_dir
         results = await s.run_once()
         _events.emit("scheduler", "manual-run", "complete")
         return results
@@ -1306,17 +1324,18 @@ def create_app(db_path: Optional[Path] = None) -> FastAPI:
 
     # --- Connectors (Plugin Architecture) ---
 
-    _connectors = ConnectorRegistry.instance()
+    def _get_connectors():
+        return ConnectorRegistry.instance(_get_profile_dir())
 
     def _get_connector(name: str):
-        c = _connectors.get(name)
+        c = _get_connectors().get(name)
         if not c:
             raise HTTPException(404, f"Connector '{name}' not found")
         return c
 
     @app.get("/api/connectors")
     async def list_connectors():
-        return [c.get_status() for c in _connectors.list()]
+        return [c.get_status() for c in _get_connectors().list()]
 
     @app.get("/api/connectors/{name}")
     async def connector_status(name: str):

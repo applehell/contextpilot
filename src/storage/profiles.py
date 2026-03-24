@@ -67,6 +67,13 @@ class ProfileManager:
         p = self._config["profiles"].get(self.active_name, {})
         return Path(p.get("db_path", str(DEFAULT_DB)))
 
+    @property
+    def active_data_dir(self) -> Path:
+        """Return the data directory for the active profile's configs."""
+        if self.active_name == "default":
+            return _DATA_DIR
+        return PROFILES_DIR / self.active_name
+
     def list(self) -> List[Profile]:
         result = []
         for name, data in self._config["profiles"].items():

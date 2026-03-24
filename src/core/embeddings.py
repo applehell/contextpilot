@@ -195,12 +195,23 @@ class TFIDFEngine:
 
 _tfidf_engine = TFIDFEngine()
 _embedding_store: Optional[EmbeddingStore] = None
+_embedding_data_dir: Optional[Path] = None
+
+
+def set_data_dir(data_dir: Path) -> None:
+    """Set the data directory and reset the store."""
+    global _embedding_store, _embedding_data_dir
+    _embedding_data_dir = data_dir
+    if _embedding_store is not None:
+        _embedding_store.close()
+    _embedding_store = None
 
 
 def _get_store() -> EmbeddingStore:
     global _embedding_store
     if _embedding_store is None:
-        _embedding_store = EmbeddingStore()
+        path = (_embedding_data_dir or _DATA_DIR) / "embeddings.db"
+        _embedding_store = EmbeddingStore(path)
     return _embedding_store
 
 

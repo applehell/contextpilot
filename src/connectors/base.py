@@ -63,9 +63,10 @@ class ConnectorPlugin(ABC):
     description: str = ""       # short description for the UI
     icon: str = ""              # emoji or short label
 
-    def __init__(self) -> None:
-        _DATA_DIR.mkdir(parents=True, exist_ok=True)
-        self._config_path = _DATA_DIR / f"connector_{self.name}.json"
+    def __init__(self, data_dir: Optional[Path] = None) -> None:
+        self._data_dir = data_dir or _DATA_DIR
+        self._data_dir.mkdir(parents=True, exist_ok=True)
+        self._config_path = self._data_dir / f"connector_{self.name}.json"
         self._config: Dict[str, Any] = self._load()
 
     def _load(self) -> Dict[str, Any]:
