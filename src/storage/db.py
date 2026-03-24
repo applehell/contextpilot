@@ -5,7 +5,7 @@ import sqlite3
 from pathlib import Path
 from typing import Optional
 
-SCHEMA_VERSION = 8
+SCHEMA_VERSION = 9
 
 MIGRATIONS = {
     1: [
@@ -201,6 +201,11 @@ MIGRATIONS = {
             created_at REAL NOT NULL,
             updated_at REAL NOT NULL
         )""",
+    ],
+    9: [
+        # -- auto-detected relations flag --
+        """ALTER TABLE memory_relations ADD COLUMN auto INTEGER NOT NULL DEFAULT 0""",
+        """ALTER TABLE memory_relations ADD COLUMN confidence REAL NOT NULL DEFAULT 1.0""",
     ],
 }
 

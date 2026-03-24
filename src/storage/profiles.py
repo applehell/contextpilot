@@ -1,10 +1,12 @@
 """Profile manager — multiple isolated knowledge databases."""
 from __future__ import annotations
 
+import io
 import json
 import shutil
 import time
 import uuid
+import zipfile
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Dict, List, Optional
@@ -228,7 +230,14 @@ class ProfileManager:
 
         return new_profile
 
-    def import_memories_from(self, target_pid: str, source_pid: str, tags: Optional[List[str]] = None) -> int:
+    def import_memories_from(self, target_pid: str, source_pid: str,
+                             tags: Optional[List[str]] = None,
+                             conflict_resolution: str = "skip") -> Dict:
+        """Import memories from source into target profile.
+
+        conflict_resolution: "skip" | "overwrite" | "keep_both"
+        Returns: {"imported": int, "overwritten": int, "skipped": int}
+        """
         source = self._config["profiles"].get(source_pid)
         target = self._config["profiles"].get(target_pid)
         if not source:
@@ -239,13 +248,15 @@ class ProfileManager:
         source_path = Path(source["db_path"])
         target_path = Path(target["db_path"])
         if not source_path.exists():
-            return 0
+            return {"imported": 0, "overwritten": 0, "skipped": 0}
 
         import json as _json
 
         src_db = Database(source_path, check_same_thread=False)
         tgt_db = Database(target_path, check_same_thread=False)
-        count = 0
+        imported = 0
+        overwritten = 0
+        skipped = 0
 
         try:
             rows = src_db.conn.execute(
@@ -260,28 +271,47 @@ class ProfileManager:
                 existing = tgt_db.conn.execute(
                     "SELECT key FROM memories WHERE key = ?", (row["key"],)
                 ).fetchone()
+
                 if existing:
+                    if conflict_resolution == "overwrite":
+                        tgt_db.conn.execute(
+                            "UPDATE memories SET value=?, tags=?, metadata=?, updated_at=? WHERE key=?",
+                            (row["value"], row["tags"], row["metadata"], row["updated_at"], row["key"]),
+                        )
+                        overwritten += 1
+                    elif conflict_resolution == "keep_both":
+                        new_key = row["key"] + "_imported"
+                        suffix = 1
+                        while tgt_db.conn.execute("SELECT key FROM memories WHERE key=?", (new_key,)).fetchone():
+                            suffix += 1
+                            new_key = f"{row['key']}_imported_{suffix}"
+                        tgt_db.conn.execute(
+                            "INSERT INTO memories (key, value, tags, metadata, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)",
+                            (new_key, row["value"], row["tags"], row["metadata"], row["created_at"], row["updated_at"]),
+                        )
+                        imported += 1
+                    else:
+                        skipped += 1
                     continue
 
                 tgt_db.conn.execute(
                     "INSERT INTO memories (key, value, tags, metadata, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)",
                     (row["key"], row["value"], row["tags"], row["metadata"], row["created_at"], row["updated_at"]),
                 )
-                count += 1
+                imported += 1
 
             tgt_db.conn.commit()
-            # Rebuild FTS index to include imported memories
-            if count > 0:
+            if imported > 0 or overwritten > 0:
                 tgt_db.conn.execute("INSERT INTO memories_fts(memories_fts) VALUES('rebuild')")
                 tgt_db.conn.commit()
         finally:
             src_db.close()
             tgt_db.close()
 
-        return count
+        return {"imported": imported, "overwritten": overwritten, "skipped": skipped}
 
     def preview_import(self, target_pid: str, source_pid: str, tags: Optional[List[str]] = None) -> Dict:
-        """Preview how many memories would be imported (total, new, skipped)."""
+        """Preview import with conflict details."""
         source = self._config["profiles"].get(source_pid)
         target = self._config["profiles"].get(target_pid)
         if not source:
@@ -292,7 +322,7 @@ class ProfileManager:
         source_path = Path(source["db_path"])
         target_path = Path(target["db_path"])
         if not source_path.exists():
-            return {"total": 0, "new": 0, "skipped": 0}
+            return {"total": 0, "new": 0, "conflicts": 0, "conflict_keys": []}
 
         import json as _json
 
@@ -300,10 +330,11 @@ class ProfileManager:
         tgt_db = Database(target_path, check_same_thread=False)
         total = 0
         new = 0
+        conflicts = []
 
         try:
             rows = src_db.conn.execute(
-                "SELECT key, tags FROM memories"
+                "SELECT key, value, tags FROM memories"
             ).fetchall()
 
             for row in rows:
@@ -312,15 +343,29 @@ class ProfileManager:
                     continue
                 total += 1
                 existing = tgt_db.conn.execute(
-                    "SELECT key FROM memories WHERE key = ?", (row["key"],)
+                    "SELECT value, tags FROM memories WHERE key = ?", (row["key"],)
                 ).fetchone()
-                if not existing:
+                if existing:
+                    existing_tags = _json.loads(existing["tags"]) if existing["tags"] else []
+                    conflicts.append({
+                        "key": row["key"],
+                        "source_preview": row["value"][:200],
+                        "target_preview": existing["value"][:200],
+                        "source_tags": row_tags,
+                        "target_tags": existing_tags,
+                    })
+                else:
                     new += 1
         finally:
             src_db.close()
             tgt_db.close()
 
-        return {"total": total, "new": new, "skipped": total - new}
+        return {
+            "total": total,
+            "new": new,
+            "conflicts": len(conflicts),
+            "conflict_keys": conflicts[:50],
+        }
 
     def get_profile_tags(self, pid: str) -> List[str]:
         """Get all unique tags from a profile's memories."""
@@ -343,3 +388,79 @@ class ProfileManager:
             return sorted(all_tags)
         finally:
             db.close()
+
+    def export_profile(self, pid: str) -> bytes:
+        """Export a profile as a ZIP archive (DB + config files)."""
+        profile = self._config["profiles"].get(pid)
+        if not profile:
+            raise KeyError(f"Profile '{pid}' not found.")
+
+        db_path = Path(profile["db_path"])
+        if pid == DEFAULT_ID:
+            profile_dir = _DATA_DIR
+        else:
+            profile_dir = PROFILES_DIR / pid
+
+        buf = io.BytesIO()
+        with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
+            # Profile metadata (no ID — generated fresh on import)
+            meta = {
+                "name": profile.get("name", pid),
+                "description": profile.get("description", ""),
+                "created_at": profile.get("created_at", 0),
+                "exported_at": time.time(),
+            }
+            zf.writestr("profile.json", json.dumps(meta, indent=2))
+
+            if db_path.exists():
+                zf.write(str(db_path), "data.db")
+
+            for pattern in ["connector_*.json", "folders.json", "webhooks.json"]:
+                for f in profile_dir.glob(pattern):
+                    zf.write(str(f), f.name)
+
+        return buf.getvalue()
+
+    def import_profile(self, zip_data: bytes, name: Optional[str] = None) -> Profile:
+        """Import a profile from a ZIP archive."""
+        buf = io.BytesIO(zip_data)
+        with zipfile.ZipFile(buf, "r") as zf:
+            names = zf.namelist()
+            if "profile.json" not in names:
+                raise ValueError("Invalid profile archive: missing profile.json")
+
+            meta = json.loads(zf.read("profile.json"))
+            profile_name = name or meta.get("name", "imported")
+
+            # Ensure unique name
+            if self._find_by_name(profile_name):
+                base = profile_name
+                suffix = 2
+                while self._find_by_name(f"{base} ({suffix})"):
+                    suffix += 1
+                profile_name = f"{base} ({suffix})"
+
+            new_profile = self.create(profile_name, meta.get("description", ""))
+            profile_dir = PROFILES_DIR / new_profile.id
+
+            if "data.db" in names:
+                db_dest = Path(new_profile.db_path)
+                zf.extract("data.db", str(profile_dir))
+                extracted = profile_dir / "data.db"
+                if extracted != db_dest:
+                    shutil.move(str(extracted), str(db_dest))
+
+                # Rebuild FTS index
+                db = Database(db_dest, check_same_thread=False)
+                try:
+                    db.conn.execute("INSERT INTO memories_fts(memories_fts) VALUES('rebuild')")
+                    db.conn.commit()
+                finally:
+                    db.close()
+
+            for entry in names:
+                if entry in ("profile.json", "data.db"):
+                    continue
+                zf.extract(entry, str(profile_dir))
+
+        return new_profile

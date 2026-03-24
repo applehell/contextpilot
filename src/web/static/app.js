@@ -1078,6 +1078,22 @@ function graphFitAll() {
     if (graphNetwork) graphNetwork.fit({ animation: true });
 }
 
+async function detectDependencies() {
+    const tid = showToast('Detecting dependencies', 'Analyzing memories...');
+    try {
+        const res = await fetch('/api/dependencies/detect', { method: 'POST' });
+        if (res.ok) {
+            const d = await res.json();
+            completeToast(tid, `${d.added} dependencies detected`, false);
+            loadGraph();
+        } else {
+            completeToast(tid, 'Detection failed', true);
+        }
+    } catch (e) {
+        completeToast(tid, 'Error: ' + e.message, true);
+    }
+}
+
 // ═══════════════════════════════════════════════════════════════
 // IMPORT
 // ═══════════════════════════════════════════════════════════════
@@ -1128,6 +1144,7 @@ async function loadProfiles() {
         document.getElementById('profile-delete-btn').style.display = notDefault ? '' : 'none';
         document.getElementById('profile-rename-btn').style.display = notDefault ? '' : 'none';
         document.getElementById('profile-import-btn').style.display = d.profiles.length > 1 ? '' : 'none';
+        document.getElementById('profile-export-btn').style.display = '';
     } catch (e) { console.error(e); }
 }
 
@@ -1285,6 +1302,52 @@ async function deleteActiveProfile() {
 }
 
 // ═══════════════════════════════════════════════════════════════
+// PROFILE EXPORT / IMPORT ZIP
+// ═══════════════════════════════════════════════════════════════
+
+async function exportActiveProfile() {
+    const pid = document.getElementById('profile-select').value;
+    const tid = showToast('Exporting profile', 'Creating ZIP...');
+    try {
+        const res = await fetch(`/api/profiles/${encodeURIComponent(pid)}/export`);
+        if (!res.ok) throw new Error('Export failed');
+        const blob = await res.blob();
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = res.headers.get('Content-Disposition')?.match(/filename="(.+)"/)?.[1] || 'profile.zip';
+        a.click();
+        URL.revokeObjectURL(url);
+        completeToast(tid, 'Download started', false);
+    } catch (e) {
+        completeToast(tid, 'Export failed: ' + e.message, true);
+    }
+}
+
+async function importProfileZip(input) {
+    const file = input.files[0];
+    if (!file) return;
+    input.value = '';
+
+    const tid = showToast('Importing profile', `Uploading ${file.name}...`);
+    try {
+        const form = new FormData();
+        form.append('file', file);
+        const res = await fetch('/api/profiles/import-zip', { method: 'POST', body: form });
+        if (res.ok) {
+            const d = await res.json();
+            completeToast(tid, `Profile "${d.name}" imported`, false);
+            loadProfiles();
+        } else {
+            const d = await res.json();
+            completeToast(tid, d.detail || 'Import failed', true);
+        }
+    } catch (e) {
+        completeToast(tid, 'Error: ' + e.message, true);
+    }
+}
+
+// ═══════════════════════════════════════════════════════════════
 // IMPORT MEMORIES FROM ANOTHER PROFILE
 // ═══════════════════════════════════════════════════════════════
 
@@ -1318,6 +1381,21 @@ async function showImportMemoriesDialog() {
         </div>
         <div id="import-preview" style="margin-top:12px;padding:8px;background:var(--bg-secondary);border-radius:6px;font-size:13px;color:var(--text-muted);">
             Select a source profile to see preview...
+        </div>
+        <div id="import-conflict-section" style="display:none;margin-top:12px;">
+            <label>Conflict resolution</label>
+            <div style="display:flex;flex-direction:column;gap:6px;margin-top:4px;">
+                <label style="font-size:13px;font-weight:normal;cursor:pointer;">
+                    <input type="radio" name="conflict-resolution" value="skip" checked> Skip duplicates
+                </label>
+                <label style="font-size:13px;font-weight:normal;cursor:pointer;">
+                    <input type="radio" name="conflict-resolution" value="overwrite"> Overwrite with source version
+                </label>
+                <label style="font-size:13px;font-weight:normal;cursor:pointer;">
+                    <input type="radio" name="conflict-resolution" value="keep_both"> Keep both (suffix _imported)
+                </label>
+            </div>
+            <div id="import-conflict-list" style="margin-top:8px;max-height:150px;overflow-y:auto;font-size:12px;"></div>
         </div>
     `, `
         <button class="btn btn-primary" id="import-memories-btn">Import</button>
@@ -1365,6 +1443,8 @@ async function updateImportPreview() {
     const tagsStr = document.getElementById('import-tags-input').value;
     const tags = tagsStr ? tagsStr.split(',').map(t => t.trim()).filter(Boolean) : [];
     const preview = document.getElementById('import-preview');
+    const conflictSection = document.getElementById('import-conflict-section');
+    const conflictList = document.getElementById('import-conflict-list');
 
     const activePid = document.getElementById('profile-select').value;
 
@@ -1375,9 +1455,24 @@ async function updateImportPreview() {
             body: JSON.stringify({ source_id: sourcePid, tags })
         });
         const d = await res.json();
-        preview.innerHTML = `<strong>${d.new}</strong> new memories to import` +
-            (d.skipped > 0 ? ` &middot; <span style="color:var(--text-muted)">${d.skipped} already exist (skipped)</span>` : '') +
-            ` &middot; ${d.total} total matched`;
+        preview.innerHTML = `<strong>${d.new}</strong> new memories` +
+            (d.conflicts > 0 ? ` &middot; <strong style="color:var(--warning)">${d.conflicts}</strong> conflicts` : '') +
+            ` &middot; ${d.total} total`;
+
+        if (d.conflicts > 0) {
+            conflictSection.style.display = '';
+            conflictList.innerHTML = d.conflict_keys.map(c =>
+                `<div style="padding:4px 0;border-bottom:1px solid var(--border);">
+                    <strong>${escapeHtml(c.key)}</strong>
+                    <div style="display:flex;gap:8px;margin-top:2px;">
+                        <span style="color:var(--text-muted);">Source: ${escapeHtml(c.source_preview.substring(0, 80))}...</span>
+                    </div>
+                </div>`
+            ).join('');
+        } else {
+            conflictSection.style.display = 'none';
+            conflictList.innerHTML = '';
+        }
     } catch (e) {
         preview.innerHTML = 'Error loading preview';
     }
@@ -1388,18 +1483,23 @@ async function submitImportMemories() {
     const tagsStr = document.getElementById('import-tags-input').value;
     const tags = tagsStr ? tagsStr.split(',').map(t => t.trim()).filter(Boolean) : [];
     const activePid = document.getElementById('profile-select').value;
+    const conflictEl = document.querySelector('input[name="conflict-resolution"]:checked');
+    const conflictResolution = conflictEl ? conflictEl.value : 'skip';
 
     const tid = showToast('Importing memories', 'Loading...');
     try {
         const res = await fetch(`/api/profiles/${encodeURIComponent(activePid)}/import-memories`, {
             method: 'POST',
             headers: {'Content-Type': 'application/json'},
-            body: JSON.stringify({ source_id: sourcePid, tags })
+            body: JSON.stringify({ source_id: sourcePid, tags, conflict_resolution: conflictResolution })
         });
         if (res.ok) {
             const d = await res.json();
             closeModal();
-            completeToast(tid, `${d.count} memories imported`, false);
+            let msg = `${d.imported} imported`;
+            if (d.overwritten) msg += `, ${d.overwritten} overwritten`;
+            if (d.skipped) msg += `, ${d.skipped} skipped`;
+            completeToast(tid, msg, false);
             loadProfiles();
             const activeTab = document.querySelector('.tab.active');
             if (activeTab) showTab(activeTab.dataset.tab, activeTab);

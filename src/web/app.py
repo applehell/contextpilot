@@ -7,7 +7,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 from fastapi import FastAPI, File, HTTPException, Query, Request, UploadFile
-from fastapi.responses import HTMLResponse
+from fastapi.responses import HTMLResponse, Response
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from pydantic import BaseModel
@@ -140,6 +140,7 @@ class ProfileCreate(BaseModel):
 class ImportMemoriesRequest(BaseModel):
     source_id: str
     tags: List[str] = []
+    conflict_resolution: str = "skip"
 
 
 class EstimateRequest(BaseModel):
@@ -593,6 +594,33 @@ def create_app(db_path: Optional[Path] = None) -> FastAPI:
                             "width": 1,
                         })
 
+        # Add edges from memory_relations
+        from src.storage.relations import RelationStore
+        rel_store = RelationStore(_get_db())
+        memory_keys = {m.key for m in memories}
+        RELATION_COLORS = {
+            "references": "#89b4fa",
+            "shared_entity": "#a6e3a1",
+            "tag_cluster": "#cba6f7",
+            "related": "#f9e2af",
+        }
+        for rel in rel_store.list_all():
+            if rel.source_key not in memory_keys or rel.target_key not in memory_keys:
+                continue
+            pair = tuple(sorted([rel.source_key, rel.target_key]))
+            rel_edge_key = (*pair, rel.relation_type)
+            if rel_edge_key not in edge_set:
+                edge_set.add(rel_edge_key)
+                color = RELATION_COLORS.get(rel.relation_type, "#f9e2af")
+                edges.append({
+                    "from": rel.source_key,
+                    "to": rel.target_key,
+                    "title": rel.relation_type + (" (auto)" if rel.auto else ""),
+                    "color": {"color": color, "opacity": 0.7},
+                    "width": 2,
+                    "dashes": rel.auto,
+                })
+
         # Build vis.js group config
         group_config = {}
         for group_name, idx in groups_seen.items():
@@ -623,6 +651,19 @@ def create_app(db_path: Optional[Path] = None) -> FastAPI:
     @app.get("/api/knowledge-graph")
     async def knowledge_graph():
         return _build_knowledge_graph()
+
+    @app.post("/api/dependencies/detect")
+    async def detect_dependencies_endpoint():
+        from src.core.dependency_detector import detect_dependencies
+        from src.storage.relations import RelationStore
+        store = _get_memory_store()
+        memories = store.list()
+        relations = detect_dependencies(memories)
+        rel_store = RelationStore(_get_db())
+        cleared = rel_store.clear_auto()
+        added = rel_store.bulk_add_auto(relations)
+        _events.emit("graph", "detect", "dependencies", f"{added} detected, {cleared} previous cleared")
+        return {"detected": len(relations), "added": added, "cleared": cleared}
 
     # --- Memory Activity ---
 
@@ -885,7 +926,8 @@ def create_app(db_path: Optional[Path] = None) -> FastAPI:
             imported = 0
             if req.copy_from:
                 tags = req.copy_tags if req.copy_tags else None
-                imported = pm.import_memories_from(p.id, req.copy_from, tags)
+                result = pm.import_memories_from(p.id, req.copy_from, tags)
+                imported = result["imported"]
             _events.emit("profile", "create", p.name, f"imported {imported} memories" if imported else "")
             return {"status": "created", "id": p.id, "name": p.name, "imported": imported}
         except ValueError as e:
@@ -955,12 +997,17 @@ def create_app(db_path: Optional[Path] = None) -> FastAPI:
         pm = ProfileManager()
         tags = req.tags if req.tags else None
         try:
-            count = pm.import_memories_from(pid, req.source_id, tags)
+            result = pm.import_memories_from(pid, req.source_id, tags, req.conflict_resolution)
+            detail = f"{result['imported']} imported"
+            if result['overwritten']:
+                detail += f", {result['overwritten']} overwritten"
+            if result['skipped']:
+                detail += f", {result['skipped']} skipped"
             _events.emit("profile", "import", pm.get(pid).name,
-                         f"{count} memories imported from {pm.get(req.source_id).name}")
+                         f"{detail} from {pm.get(req.source_id).name}")
             if pid == pm.active_id:
                 _init_db(pm.active_db_path)
-            return {"status": "imported", "count": count}
+            return {"status": "imported", **result}
         except KeyError as e:
             raise HTTPException(404, str(e))
 
@@ -972,6 +1019,33 @@ def create_app(db_path: Optional[Path] = None) -> FastAPI:
             return pm.preview_import(pid, req.source_id, tags)
         except KeyError as e:
             raise HTTPException(404, str(e))
+
+    @app.get("/api/profiles/{pid}/export")
+    async def export_profile(pid: str):
+        pm = ProfileManager()
+        try:
+            data = pm.export_profile(pid)
+            profile = pm.get(pid)
+            filename = f"contextpilot-{profile.name}.zip"
+            _events.emit("profile", "export", profile.name)
+            return Response(
+                content=data,
+                media_type="application/zip",
+                headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+            )
+        except KeyError as e:
+            raise HTTPException(404, str(e))
+
+    @app.post("/api/profiles/import-zip", status_code=201)
+    async def import_profile_zip(file: UploadFile = File(...), name: str = Query("")):
+        pm = ProfileManager()
+        content = await file.read()
+        try:
+            p = pm.import_profile(content, name or None)
+            _events.emit("profile", "import-zip", p.name, f"from {file.filename}")
+            return {"status": "imported", "id": p.id, "name": p.name}
+        except ValueError as e:
+            raise HTTPException(400, str(e))
 
     # --- Secrets / Sensitivity ---
 
