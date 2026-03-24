@@ -42,14 +42,15 @@ function checkWelcome() {
         if (e.target === overlay) dismissWelcome();
     });
 
-    const dismissed = localStorage.getItem('cp-welcome-dismissed');
+    const WELCOME_KEY = 'cp-welcome-v2';
+    const dismissed = localStorage.getItem(WELCOME_KEY);
     if (!dismissed) {
         requestAnimationFrame(() => overlay.classList.add('active'));
     }
 }
 
 function dismissWelcome() {
-    localStorage.setItem('cp-welcome-dismissed', '1');
+    localStorage.setItem('cp-welcome-v2', '1');
     const overlay = document.getElementById('welcome-overlay');
     if (overlay) overlay.classList.remove('active');
 }
