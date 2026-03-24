@@ -1127,6 +1127,7 @@ async function loadProfiles() {
         const notDefault = active && !active.is_default;
         document.getElementById('profile-delete-btn').style.display = notDefault ? '' : 'none';
         document.getElementById('profile-rename-btn').style.display = notDefault ? '' : 'none';
+        document.getElementById('profile-import-btn').style.display = d.profiles.length > 1 ? '' : 'none';
     } catch (e) { console.error(e); }
 }
 
@@ -1281,6 +1282,134 @@ async function deleteActiveProfile() {
         loadProfiles();
         loadDashboard();
     } catch (e) { console.error(e); }
+}
+
+// ═══════════════════════════════════════════════════════════════
+// IMPORT MEMORIES FROM ANOTHER PROFILE
+// ═══════════════════════════════════════════════════════════════
+
+async function showImportMemoriesDialog() {
+    let profiles = [];
+    try {
+        const res = await fetch('/api/profiles');
+        const d = await res.json();
+        profiles = d.profiles.filter(p => !p.is_active);
+    } catch (e) { console.error(e); return; }
+
+    if (profiles.length === 0) {
+        alert('No other profiles available to import from.');
+        return;
+    }
+
+    const profileOpts = profiles.map(p =>
+        `<option value="${escapeAttr(p.id)}">${escapeHtml(p.name)} (${p.memory_count})</option>`
+    ).join('');
+
+    openModal('Import Memories', `
+        <label>Source profile</label>
+        <select id="import-source-profile" onchange="loadImportTags()" style="width:100%;">
+            ${profileOpts}
+        </select>
+        <div id="import-tags-section" style="margin-top:12px;">
+            <label>Filter by tags (empty = all)</label>
+            <input type="text" id="import-tags-input" placeholder="e.g. smarthome, network" oninput="updateImportPreview()">
+            <div style="font-size:11px;color:var(--text-muted);margin-top:4px;">Comma-separated. Click tags below to add them.</div>
+            <div id="import-available-tags" style="margin-top:6px;display:flex;flex-wrap:wrap;gap:4px;"></div>
+        </div>
+        <div id="import-preview" style="margin-top:12px;padding:8px;background:var(--bg-secondary);border-radius:6px;font-size:13px;color:var(--text-muted);">
+            Select a source profile to see preview...
+        </div>
+    `, `
+        <button class="btn btn-primary" id="import-memories-btn">Import</button>
+        <button class="btn" onclick="closeModal()">Cancel</button>
+    `);
+
+    document.getElementById('import-memories-btn').addEventListener('click', submitImportMemories);
+    loadImportTags();
+}
+
+async function loadImportTags() {
+    const pid = document.getElementById('import-source-profile').value;
+    const container = document.getElementById('import-available-tags');
+    container.innerHTML = '';
+
+    try {
+        const res = await fetch(`/api/profiles/${encodeURIComponent(pid)}/tags`);
+        const tags = await res.json();
+        if (tags.length > 0) {
+            container.innerHTML = tags.map(t =>
+                `<span class="tag" onclick="addImportTag('${escapeAttr(t)}')" style="cursor:pointer;">#${escapeHtml(t)}</span>`
+            ).join(' ');
+        } else {
+            container.innerHTML = '<span class="muted">No tags in this profile</span>';
+        }
+    } catch (e) {
+        container.innerHTML = '<span class="muted">Error loading tags</span>';
+    }
+
+    updateImportPreview();
+}
+
+function addImportTag(tag) {
+    const input = document.getElementById('import-tags-input');
+    const current = input.value.split(',').map(t => t.trim()).filter(Boolean);
+    if (!current.includes(tag)) {
+        current.push(tag);
+        input.value = current.join(', ');
+    }
+    updateImportPreview();
+}
+
+async function updateImportPreview() {
+    const sourcePid = document.getElementById('import-source-profile').value;
+    const tagsStr = document.getElementById('import-tags-input').value;
+    const tags = tagsStr ? tagsStr.split(',').map(t => t.trim()).filter(Boolean) : [];
+    const preview = document.getElementById('import-preview');
+
+    const activePid = document.getElementById('profile-select').value;
+
+    try {
+        const res = await fetch(`/api/profiles/${encodeURIComponent(activePid)}/preview-import`, {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({ source_id: sourcePid, tags })
+        });
+        const d = await res.json();
+        preview.innerHTML = `<strong>${d.new}</strong> new memories to import` +
+            (d.skipped > 0 ? ` &middot; <span style="color:var(--text-muted)">${d.skipped} already exist (skipped)</span>` : '') +
+            ` &middot; ${d.total} total matched`;
+    } catch (e) {
+        preview.innerHTML = 'Error loading preview';
+    }
+}
+
+async function submitImportMemories() {
+    const sourcePid = document.getElementById('import-source-profile').value;
+    const tagsStr = document.getElementById('import-tags-input').value;
+    const tags = tagsStr ? tagsStr.split(',').map(t => t.trim()).filter(Boolean) : [];
+    const activePid = document.getElementById('profile-select').value;
+
+    const tid = showToast('Importing memories', 'Loading...');
+    try {
+        const res = await fetch(`/api/profiles/${encodeURIComponent(activePid)}/import-memories`, {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({ source_id: sourcePid, tags })
+        });
+        if (res.ok) {
+            const d = await res.json();
+            closeModal();
+            completeToast(tid, `${d.count} memories imported`, false);
+            loadProfiles();
+            const activeTab = document.querySelector('.tab.active');
+            if (activeTab) showTab(activeTab.dataset.tab, activeTab);
+        } else {
+            const d = await res.json();
+            completeToast(tid, d.detail || 'Import failed', true);
+        }
+    } catch (e) {
+        completeToast(tid, 'Error: ' + e.message, true);
+    }
 }
 
 // ═══════════════════════════════════════════════════════════════

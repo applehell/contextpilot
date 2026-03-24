@@ -270,8 +270,76 @@ class ProfileManager:
                 count += 1
 
             tgt_db.conn.commit()
+            # Rebuild FTS index to include imported memories
+            if count > 0:
+                tgt_db.conn.execute("INSERT INTO memories_fts(memories_fts) VALUES('rebuild')")
+                tgt_db.conn.commit()
         finally:
             src_db.close()
             tgt_db.close()
 
         return count
+
+    def preview_import(self, target_pid: str, source_pid: str, tags: Optional[List[str]] = None) -> Dict:
+        """Preview how many memories would be imported (total, new, skipped)."""
+        source = self._config["profiles"].get(source_pid)
+        target = self._config["profiles"].get(target_pid)
+        if not source:
+            raise KeyError(f"Profile '{source_pid}' not found.")
+        if not target:
+            raise KeyError(f"Profile '{target_pid}' not found.")
+
+        source_path = Path(source["db_path"])
+        target_path = Path(target["db_path"])
+        if not source_path.exists():
+            return {"total": 0, "new": 0, "skipped": 0}
+
+        import json as _json
+
+        src_db = Database(source_path, check_same_thread=False)
+        tgt_db = Database(target_path, check_same_thread=False)
+        total = 0
+        new = 0
+
+        try:
+            rows = src_db.conn.execute(
+                "SELECT key, tags FROM memories"
+            ).fetchall()
+
+            for row in rows:
+                row_tags = _json.loads(row["tags"]) if row["tags"] else []
+                if tags and not any(t in row_tags for t in tags):
+                    continue
+                total += 1
+                existing = tgt_db.conn.execute(
+                    "SELECT key FROM memories WHERE key = ?", (row["key"],)
+                ).fetchone()
+                if not existing:
+                    new += 1
+        finally:
+            src_db.close()
+            tgt_db.close()
+
+        return {"total": total, "new": new, "skipped": total - new}
+
+    def get_profile_tags(self, pid: str) -> List[str]:
+        """Get all unique tags from a profile's memories."""
+        profile = self._config["profiles"].get(pid)
+        if not profile:
+            raise KeyError(f"Profile '{pid}' not found.")
+        db_path = Path(profile["db_path"])
+        if not db_path.exists():
+            return []
+
+        import json as _json
+
+        db = Database(db_path, check_same_thread=False)
+        try:
+            rows = db.conn.execute("SELECT tags FROM memories").fetchall()
+            all_tags = set()
+            for row in rows:
+                tags = _json.loads(row["tags"]) if row["tags"] else []
+                all_tags.update(tags)
+            return sorted(all_tags)
+        finally:
+            db.close()

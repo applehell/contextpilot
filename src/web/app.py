@@ -137,6 +137,11 @@ class ProfileCreate(BaseModel):
     copy_tags: List[str] = []
 
 
+class ImportMemoriesRequest(BaseModel):
+    source_id: str
+    tags: List[str] = []
+
+
 class EstimateRequest(BaseModel):
     text: str
 
@@ -936,6 +941,37 @@ def create_app(db_path: Optional[Path] = None) -> FastAPI:
             return {"status": "deleted", "id": pid}
         except (KeyError, ValueError) as e:
             raise HTTPException(400, str(e))
+
+    @app.get("/api/profiles/{pid}/tags")
+    async def get_profile_tags(pid: str):
+        pm = ProfileManager()
+        try:
+            return pm.get_profile_tags(pid)
+        except KeyError as e:
+            raise HTTPException(404, str(e))
+
+    @app.post("/api/profiles/{pid}/import-memories")
+    async def import_memories_into_profile(pid: str, req: ImportMemoriesRequest):
+        pm = ProfileManager()
+        tags = req.tags if req.tags else None
+        try:
+            count = pm.import_memories_from(pid, req.source_id, tags)
+            _events.emit("profile", "import", pm.get(pid).name,
+                         f"{count} memories imported from {pm.get(req.source_id).name}")
+            if pid == pm.active_id:
+                _init_db(pm.active_db_path)
+            return {"status": "imported", "count": count}
+        except KeyError as e:
+            raise HTTPException(404, str(e))
+
+    @app.post("/api/profiles/{pid}/preview-import")
+    async def preview_import(pid: str, req: ImportMemoriesRequest):
+        pm = ProfileManager()
+        tags = req.tags if req.tags else None
+        try:
+            return pm.preview_import(pid, req.source_id, tags)
+        except KeyError as e:
+            raise HTTPException(404, str(e))
 
     # --- Secrets / Sensitivity ---
 
