@@ -101,6 +101,21 @@ docker run --rm -v context-pilot-data:/data -v ~/backup:/backup \
   alpine tar czf /backup/context-pilot-backup.tar.gz -C /data .
 ```
 
+## Mapping Folders for Indexing
+
+To make host directories available as knowledge sources, add read-only volume mounts:
+
+```yaml
+services:
+  context-pilot:
+    volumes:
+      - context-pilot-data:/data
+      - ~/documents:/mnt/documents:ro
+      - ~/configs:/mnt/configs:ro
+```
+
+Then in the Web UI → Sources tab → "+ Add Folder" → use `/mnt/documents` as path.
+
 ## Environment Variables
 
 | Variable | Default | Description |

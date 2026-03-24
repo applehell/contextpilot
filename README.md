@@ -1,18 +1,18 @@
 # Context Pilot
 
-Wissensdatenbank-Manager fuer AI Models. Laeuft als Web-App im Browser und stellt Wissen per MCP Server on-demand fuer Claude Code bereit.
+Knowledge management hub for AI workflows. Runs as a web app with real-time activity streaming and connects to Claude Code via MCP Server.
 
-## Schnellstart
+## Quick Start
 
-### Docker (empfohlen)
+### Docker (recommended)
 
 ```bash
 docker compose up -d
 ```
 
-Web UI: http://localhost:8080
+Web UI: http://localhost:8080 | Health: http://localhost:8080/health
 
-### Lokal
+### Local
 
 ```bash
 python3 -m venv .venv && source .venv/bin/activate
@@ -20,209 +20,268 @@ pip install -r requirements.txt
 python -m src.web
 ```
 
-### Kommandozeilen-Optionen
+### CLI Options
 
 ```bash
 python -m src.web                          # Web UI + MCP Server
-python -m src.web --no-mcp                 # Nur Web UI
-python -m src.web --port 9090              # Anderer Port
-python -m src.web --mcp-port 8500          # MCP auf anderem Port
+python -m src.web --no-mcp                 # Web UI only
+python -m src.web --port 9090              # Custom port
+python -m src.web --mcp-port 8500          # MCP on custom port
 ```
 
-## Was die App kann
+## Features
 
-### Memories verwalten
+### Memories
 
-- Erstellen, bearbeiten, loeschen (Klick auf Memory oeffnet Detail-Ansicht)
-- Volltextsuche + Tag-Filter (Tags sind klickbar)
-- NEU/UPD Badges fuer kuerzlich erstellte/geaenderte Memories
-- Bulk-Auswahl zum Sammelloeschen
-- Export als JSON (alle oder nach Tag gefiltert)
+- Create, edit, delete with full-text search (FTS5)
+- Tag-based filtering (clickable tags)
+- NEW/UPD badges for recent changes
+- Bulk select and delete
+- Export as JSON (all or filtered by tag)
+
+### Knowledge Sources
+
+#### Folder Mapping
+
+Map local directories to index files as memories:
+
+- Recursive or top-level scanning
+- Filter by file extension (.pdf, .md, .txt, .json, .py, etc.)
+- Content-hash deduplication — unchanged files skipped on re-scan
+- Deleted files automatically removed
+- PDF text extraction (via pypdf)
+
+#### Paperless-ngx Connector
+
+Sync OCR'd documents from Paperless-ngx:
+
+- Token-based authentication
+- Tag-filtered sync (only sync specific document tags)
+- Rich content: metadata header (title, correspondent, type, date) + OCR text
+- Content-hash deduplication
+- Connection test built into the UI
 
 ### Import
 
-Im Dashboard gibt es Upload-Buttons fuer:
+Dashboard upload buttons for:
 
-| Format | Was wird importiert |
+| Format | What gets imported |
 |---|---|
-| **CLAUDE.md** | Sektionen aus Claude Code Instruktionsdateien |
-| **Copilot.md** | GitHub Copilot Instruktionsdateien |
-| **SQLite .db** | Datenbank vom memory-mcp MCP Server |
+| **CLAUDE.md** | Sections from Claude Code instruction files |
+| **Copilot.md** | GitHub Copilot instruction files |
+| **SQLite .db** | Database from memory-mcp MCP Server |
 
-### Profile
+### Profiles
 
-Mehrere isolierte Wissensdatenbanken (z.B. "Arbeit", "Smarthome", "Privat"):
+Multiple isolated knowledge databases (e.g. "Work", "Smarthome", "Personal"):
 
-- Dropdown im Header zum Wechseln
-- Neues Profil erstellen (`+` Button)
-- Profil umbenennen (Rename Button)
-- Profil loeschen oder duplizieren
+- Header dropdown to switch
+- Create new profile with optional knowledge import from existing profiles
+- Rename, delete, duplicate
+- Welcome screen for new profiles
 
 ### Knowledge Graph
 
-Interaktive Visualisierung aller Memories als Netzwerk:
+Interactive visualization of all memories as a network:
 
-- Nodes = Memories, farbcodiert nach Gruppe
-- Edges = gemeinsame Tags
-- Suche filtert/hebt Nodes hervor
-- Klick zeigt Details + Inhalt
+- Nodes = Memories, color-coded by group
+- Edges = shared tags
+- Search highlights matching nodes
+- Click shows details + content
 
 ### Secrets Scanner
 
-Erkennt sensitive Inhalte in Memories:
+Detects sensitive content in memories:
 
-| Severity | Beispiele |
+| Severity | Examples |
 |---|---|
-| **Critical** | Private Keys, Passwoerter, Connection Strings |
-| **High** | API Keys, Bearer Tokens, GitHub/AWS Tokens |
-| **Medium** | WiFi-Passwoerter, Inline-Credentials |
-| **Low** | Private IPs, E-Mail-Adressen |
+| **Critical** | Private keys, passwords, connection strings |
+| **High** | API keys, bearer tokens, GitHub/AWS tokens |
+| **Medium** | WiFi passwords, inline credentials |
+| **Low** | Private IPs, email addresses |
 
-- Eigener Secrets-Tab mit Statistiken und Filter
-- Redacted View fuer sensitive Memories
+### Live Activity Feed
+
+Real-time event streaming via Server-Sent Events (SSE):
+
+- All API calls, memory operations, imports, scans, syncs tracked
+- Color-coded category badges (memory, api, import, folder, paperless, profile)
+- Category filter dropdown
+- SSE connection status indicator
+
+### Health Endpoint
+
+`GET /health` returns system metrics:
+
+- Uptime, version, platform, Python version
+- Memory/token/tag counts
+- Skill status, profile info
+- Storage size, disk usage
+- Request count and error rate
 
 ### Context Preview
 
-Zeigt wie Memories fuer einen Skill assembliert werden:
+Shows how memories are assembled for a skill:
 
-- Token-Budget einstellen
-- Sehen welche Memories eingeschlossen/gedroppt werden
-- Auto-Compress: Code → code_compact, Schritte → mermaid, Prosa → bullet_extract
+- Set token budget
+- See which memories are included/dropped
+- Auto-compress: code → code_compact, steps → mermaid, prose → bullet_extract
 
-### MCP Server (On-Demand)
+### MCP Server
 
-Der MCP Server laeuft **nur wenn die App gestartet ist**:
+The MCP server runs alongside the web app:
 
-1. App starten → MCP Server (SSE) startet auf Port 8400
-2. Registriert sich in `~/.claude.json`
-3. Claude Code kann Memories nutzen
-4. App beenden → Deregistrierung → kein Zugriff mehr
+1. Start app → MCP Server (SSE) starts on port 8400
+2. Registers in `~/.claude.json`
+3. Claude Code can access memories
+4. Stop app → deregistration
 
 ## Docker
 
 ```yaml
-# docker-compose.yml
 services:
   context-pilot:
     build: .
     ports:
-      - "8080:8080"   # Web UI
-      - "8400:8400"   # MCP SSE
+      - "8080:8080"
+      - "8400:8400"
     volumes:
       - context-pilot-data:/data
+      - /path/to/docs:/mnt/docs:ro    # optional: map folders for indexing
 ```
 
-Daten liegen persistent im Docker Volume. Image-Groesse: ~557MB.
+See [DOCKER.md](DOCKER.md) for full NAS device setup guide.
 
-## Architektur
+## Architecture
 
 ```
 Browser ──→ Web UI (FastAPI, Port 8080)
-               ├── Dashboard (Stats, Import, MCP Status)
-               ├── Memories (CRUD, Suche, Edit-Modal, Tags)
+               ├── Dashboard (Stats, Import, Live Activity SSE)
+               ├── Memories (CRUD, Search, Edit Modal, Tags)
                ├── Skills (Live MCP Skill Monitor)
                ├── Knowledge Graph (vis.js)
                ├── Secrets (Scanner, Redacted View)
+               ├── Sources (Folder Mapping, Paperless-ngx)
                └── Assembler (Token Budget, Compress Test)
 
 Claude Code ──→ MCP Server (SSE, Port 8400)
-                   ├── get_skill_context (Relevanz + Kompression)
+                   ├── get_skill_context (relevance + compression)
                    ├── memory_set / get / delete / search
                    └── register_skill / heartbeat
 
-Beide ──→ SQLite (~/.contextpilot/data.db)
+Paperless-ngx ──→ REST API Sync (Token auth)
+
+Both ──→ SQLite (~/.contextpilot/data.db)
 ```
 
-## Datenpfade
+## Data Paths
 
 ```
 ~/.contextpilot/
-  data.db                      ← Standard-Datenbank (default Profil)
-  profiles.json                ← Profil-Konfiguration (aktives Profil)
+  data.db                      ← Default database
+  profiles.json                ← Profile configuration
+  folders.json                 ← Folder source configuration
+  paperless.json               ← Paperless-ngx connection config
   profiles/
-    <profilname>/
-      data.db                  ← Datenbank fuer dieses Profil
+    <name>/
+      data.db                  ← Profile-specific database
 
-# Im Docker-Container (CONTEXTPILOT_DATA_DIR=/data):
+# In Docker (CONTEXTPILOT_DATA_DIR=/data):
 /data/
   data.db
   profiles.json
+  folders.json
+  paperless.json
   profiles/<name>/data.db
 ```
 
-## Projektstruktur
+## Project Structure
 
 ```
 src/
-  core/                        ← Kernlogik (Assembler, Compressoren, Relevanz)
-    assembler.py               ← 3-Phasen Token-Budget Assembler
-    block.py                   ← Block Datenmodell
-    compressors/               ← 7 Kompressoren (bullet, mermaid, yaml, code, ...)
-    relevance.py               ← Relevance Scoring Engine
-    secrets.py                 ← Secrets Detector (OWASP Patterns)
-    token_budget.py            ← tiktoken Wrapper
-    claude_config.py           ← MCP Registration in ~/.claude.json
-    weight_adjuster.py         ← Usage-basierte Gewichtung
-  storage/                     ← SQLite Persistenz
-    db.py                      ← DB Engine + Migrationen (v1-v6)
+  core/                        ← Core logic
+    assembler.py               ← 3-phase token-budget assembler
+    block.py                   ← Block data model
+    compressors/               ← 7 compressors (bullet, mermaid, yaml, code, ...)
+    events.py                  ← Global EventBus with SSE broadcast
+    relevance.py               ← Relevance scoring engine
+    secrets.py                 ← Secrets detector (OWASP patterns)
+    token_budget.py            ← tiktoken wrapper
+    weight_adjuster.py         ← Usage-based weight adjustment
+  connectors/                  ← External service connectors
+    paperless.py               ← Paperless-ngx REST API client + sync
+  storage/                     ← SQLite persistence
+    db.py                      ← DB engine + migrations (v1-v6)
     memory.py                  ← MemoryStore (CRUD + FTS5)
-    memory_activity.py         ← Activity Log
-    profiles.py                ← Profil-Manager
-    usage.py                   ← Usage Tracking + Feedback
-  web/                         ← Web-App (FastAPI + HTMX)
-    app.py                     ← API Endpoints
-    templates/index.html       ← Single-Page Frontend
-    static/app.js              ← Frontend-Logik
-    static/style.css           ← Styling (Catppuccin Dark)
-  interfaces/                  ← Externe Schnittstellen
+    memory_activity.py         ← Activity log
+    folders.py                 ← Folder source manager + file indexer
+    profiles.py                ← Profile manager
+    usage.py                   ← Usage tracking + feedback
+  web/                         ← Web app (FastAPI + vanilla JS)
+    app.py                     ← API endpoints
+    templates/index.html       ← Single-page frontend
+    static/app.js              ← Frontend logic
+    static/style.css           ← Light theme (Inter font)
+  interfaces/                  ← External interfaces
     mcp_server.py              ← MCP Server (stdio + SSE)
     cli.py                     ← Click CLI
-  importers/                   ← Memory-Import
-    claude.py                  ← CLAUDE.md Parser
-    copilot.py                 ← copilot-instructions.md Parser
-    sqlite.py                  ← memory-mcp SQLite Importer
-tests/                         ← 444 Tests
+  importers/                   ← Memory import
+    claude.py                  ← CLAUDE.md parser
+    copilot.py                 ← copilot-instructions.md parser
+    sqlite.py                  ← memory-mcp SQLite importer
+tests/                         ← Test suite
 ```
 
 ## API
 
-| Endpoint | Methode | Beschreibung |
+| Endpoint | Method | Description |
 |---|---|---|
-| `/api/dashboard` | GET | Aggregierte Stats |
-| `/api/memories` | GET/POST | Memories auflisten/erstellen |
-| `/api/memories/{key}` | GET/PUT/DELETE | Memory lesen/bearbeiten/loeschen |
-| `/api/memories/search` | GET | Volltextsuche + Tags |
-| `/api/memories/bulk-delete` | POST | Mehrere Memories loeschen |
-| `/api/export-memories` | GET | Export als JSON |
-| `/api/memory-tags` | GET | Alle Tags |
-| `/api/memory-activity` | GET | Aenderungs-Log |
-| `/api/sensitivity` | GET | Secrets Scan |
-| `/api/redacted?key=...` | GET | Redacted View |
-| `/api/knowledge-graph` | GET | Graph-Daten (vis.js) |
-| `/api/skills` | GET | Registrierte MCP Skills |
-| `/api/profiles` | GET/POST | Profile auflisten/erstellen |
-| `/api/profiles/{name}` | PUT/DELETE | Profil umbenennen/loeschen |
-| `/api/profiles/{name}/switch` | POST | Profil wechseln |
-| `/api/profiles/{name}/duplicate` | POST | Profil duplizieren |
-| `/api/import/claude-md` | POST | CLAUDE.md Upload |
-| `/api/import/copilot-md` | POST | Copilot.md Upload |
-| `/api/import/sqlite` | POST | SQLite DB Upload |
-| `/api/preview-context` | POST | Assembly Preview |
-| `/api/test-compress` | POST | Compressor testen |
-| `/api/estimate` | POST | Token-Schaetzung |
-| `/api/assemble` | POST | Block Assembly |
-| `/api/mcp-status` | GET | MCP Server Status |
+| `/health` | GET | System metrics and health check |
+| `/api/events` | GET | Recent events (with category filter) |
+| `/api/events/stream` | GET | SSE real-time event stream |
+| `/api/events/stats` | GET | Event count statistics |
+| `/api/dashboard` | GET | Aggregated dashboard stats |
+| `/api/memories` | GET/POST | List/create memories |
+| `/api/memories/{key}` | GET/PUT/DELETE | Read/update/delete memory |
+| `/api/memories/search` | GET | Full-text search + tags |
+| `/api/memories/bulk-delete` | POST | Bulk delete memories |
+| `/api/export-memories` | GET | Export as JSON |
+| `/api/memory-tags` | GET | All tags |
+| `/api/sensitivity` | GET | Secrets scan |
+| `/api/redacted?key=...` | GET | Redacted view |
+| `/api/knowledge-graph` | GET | Graph data (vis.js) |
+| `/api/skills` | GET | Registered MCP skills |
+| `/api/profiles` | GET/POST | List/create profiles |
+| `/api/profiles/{name}` | PUT/DELETE | Rename/delete profile |
+| `/api/profiles/{name}/switch` | POST | Switch profile |
+| `/api/profiles/{name}/duplicate` | POST | Duplicate profile |
+| `/api/folders` | GET/POST | List/add folder sources |
+| `/api/folders/{name}` | PUT/DELETE | Update/remove folder source |
+| `/api/folders/{name}/scan` | POST | Scan single folder |
+| `/api/folders/scan-all` | POST | Scan all enabled folders |
+| `/api/paperless` | GET/PUT/DELETE | Paperless config/status |
+| `/api/paperless/setup` | POST | Configure + test connection |
+| `/api/paperless/test` | POST | Test connection |
+| `/api/paperless/sync` | POST | Sync documents |
+| `/api/import/claude-md` | POST | Upload CLAUDE.md |
+| `/api/import/copilot-md` | POST | Upload Copilot.md |
+| `/api/import/sqlite` | POST | Upload SQLite DB |
+| `/api/preview-context` | POST | Assembly preview |
+| `/api/test-compress` | POST | Test compressor |
+| `/api/estimate` | POST | Token estimation |
+| `/api/assemble` | POST | Block assembly |
+| `/api/mcp-status` | GET | MCP server status |
 
-## Entwicklung
+## Development
 
 ```bash
 python3 -m venv .venv && source .venv/bin/activate
 pip install -e '.[dev]'
-pytest tests/ -v              # 444 Tests
-python -m src.web --reload    # Hot-Reload
+pytest tests/ -v
+python -m src.web --reload    # Hot-reload
 docker build -t context-pilot .
 ```
 
-## Technologie
+## Technology
 
-Python 3.11+, FastAPI, HTMX, vis.js, SQLite (WAL + FTS5), FastMCP (SSE), tiktoken, Docker
+Python 3.11+, FastAPI, vanilla JS, vis.js, SQLite (WAL + FTS5), SSE, FastMCP, tiktoken, Docker

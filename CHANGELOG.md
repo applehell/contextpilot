@@ -1,5 +1,31 @@
 # Changelog
 
+## v3.0.0 — 2026-03-24
+
+Major release: Knowledge Sources, Live Activity, UI Rewrite.
+
+### New Features
+- **Folder Sources** — Map external directories as knowledge sources with content-hash deduplication, recursive scanning, extension filtering, and auto-removal of deleted files
+- **Paperless-ngx Connector** — Sync OCR'd documents via REST API with tag-filtered sync, connection test UI, and content-hash tracking
+- **Live Activity Feed** — Real-time SSE event stream tracking all API calls, memory operations, imports, scans, and syncs with color-coded category badges
+- **Health Endpoint** — `GET /health` returns uptime, version, memory/token counts, skill status, storage size, disk usage, request metrics
+- **Profile Knowledge Import** — Create new profiles with memories copied from existing profiles (all or filtered by tags)
+- **Welcome Screen** — Animated onboarding overlay for first-time users and new profiles
+
+### UI Rewrite
+- Complete redesign: light theme with Inter font, CSS variables, warm accent colors
+- Animated bot orb in header (pulses on API activity)
+- Tab navigation via data attributes (no inline onclick)
+- Modal system with footer buttons
+- Cache-busting for static assets
+- All UI strings in English
+
+### Infrastructure
+- EventBus singleton with async SSE subscriber model
+- Docker healthcheck uses `/health` endpoint
+- NAS device deployment guide (DOCKER.md)
+- 3 new test suites: EventBus, FolderManager, PaperlessConnector
+
 ## v2.2.0 — 2026-03-23
 
 - Memory Edit-Modal (Klick zum Anzeigen, Edit-Button zum Bearbeiten)
