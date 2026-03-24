@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import time
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
@@ -168,6 +169,82 @@ def create_app(db_path: Optional[Path] = None) -> FastAPI:
     @app.get("/", response_class=HTMLResponse)
     async def index(request: Request):
         return templates.TemplateResponse(request, "index.html")
+
+    # --- Health ---
+
+    _start_time = time.time()
+    _request_count = {"total": 0, "errors": 0}
+
+    @app.middleware("http")
+    async def _count_requests(request: Request, call_next):
+        _request_count["total"] += 1
+        response = await call_next(request)
+        if response.status_code >= 500:
+            _request_count["errors"] += 1
+        return response
+
+    @app.get("/health")
+    async def health():
+        import platform
+        import os
+        import shutil
+
+        store = _get_memory_store()
+        memories = store.list()
+        total_tokens = sum(TokenBudget.estimate(m.value) for m in memories)
+
+        registry = SkillRegistry.instance()
+        all_skills = registry.list_all()
+        alive_skills = registry.list_alive()
+
+        pm = ProfileManager()
+        profiles = pm.list()
+
+        uptime = time.time() - _start_time
+        days, rem = divmod(int(uptime), 86400)
+        hours, rem = divmod(rem, 3600)
+        minutes, _ = divmod(rem, 60)
+        uptime_str = f"{days}d {hours}h {minutes}m" if days else f"{hours}h {minutes}m"
+
+        data_dir = Path(os.environ.get("CONTEXTPILOT_DATA_DIR", str(Path.home() / ".contextpilot")))
+        db_size = 0
+        if data_dir.exists():
+            for f in data_dir.rglob("*.db"):
+                db_size += f.stat().st_size
+        disk = shutil.disk_usage(str(data_dir)) if data_dir.exists() else None
+
+        return {
+            "status": "healthy",
+            "version": app.version,
+            "uptime": uptime_str,
+            "uptime_seconds": int(uptime),
+            "python": platform.python_version(),
+            "platform": f"{platform.system()} {platform.machine()}",
+            "pid": os.getpid(),
+            "requests": {
+                "total": _request_count["total"],
+                "errors": _request_count["errors"],
+            },
+            "memories": {
+                "count": len(memories),
+                "tokens": total_tokens,
+                "tags": len(store.tags()),
+            },
+            "skills": {
+                "total": len(all_skills),
+                "alive": len(alive_skills),
+            },
+            "profiles": {
+                "count": len(profiles),
+                "active": pm.active_name,
+            },
+            "storage": {
+                "db_size_bytes": db_size,
+                "db_size_mb": round(db_size / (1024 * 1024), 2),
+                "disk_free_gb": round(disk.free / (1024**3), 2) if disk else None,
+                "disk_total_gb": round(disk.total / (1024**3), 2) if disk else None,
+            },
+        }
 
     # --- Token estimation ---
 
