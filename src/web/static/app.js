@@ -270,7 +270,8 @@ async function loadDashboard() {
 async function previewContext() {
     const budget = parseInt(document.getElementById('preview-budget').value) || 8000;
     const el = document.getElementById('preview-result');
-    el.innerHTML = '<p class="muted">Assembling...</p>';
+    const tid = showToast('Context Preview', `Assembling with ${budget} token budget...`);
+    botBusy();
 
     try {
         const res = await fetch('/api/preview-context?budget=' + budget, { method: 'POST' });
@@ -309,9 +310,11 @@ async function previewContext() {
         }
 
         el.innerHTML = html;
+        completeToast(tid, `${d.used_tokens}/${d.budget} tokens, ${d.block_count} blocks`, false);
     } catch (e) {
         el.innerHTML = '<p style="color:var(--danger);">Error: ' + escapeHtml(e.message) + '</p>';
-    }
+        completeToast(tid, 'Failed: ' + e.message, true);
+    } finally { botIdle(); }
 }
 
 // ═══════════════════════════════════════════════════════════════
@@ -604,6 +607,7 @@ async function saveEditedMemory(key) {
     const tagsStr = document.getElementById('edit-tags').value;
     const tags = tagsStr ? tagsStr.split(',').map(t => t.trim()).filter(Boolean) : [];
     destroyEditor();
+    const tid = showToast('Saving memory', key);
     try {
         const res = await fetch(memoryUrl(key), {
             method: 'PUT',
@@ -611,12 +615,13 @@ async function saveEditedMemory(key) {
             body: JSON.stringify({key, value, tags})
         });
         if (res.ok) {
+            completeToast(tid, 'Saved', false);
             closeModal();
             loadMemories();
         } else {
-            alert('Save failed: ' + res.status);
+            completeToast(tid, 'Save failed: ' + res.status, true);
         }
-    } catch (e) { alert('Error: ' + e.message); }
+    } catch (e) { completeToast(tid, 'Error: ' + e.message, true); }
 }
 
 async function saveNewMemory() {
@@ -660,6 +665,7 @@ async function searchMemories() {
 async function semanticSearch() {
     const q = document.getElementById('memory-search').value.trim();
     if (!q) { loadMemories(); return; }
+    const tid = showToast('Semantic search', q);
     botBusy();
     try {
         const res = await fetch(`/api/semantic-search?q=${encodeURIComponent(q)}&limit=20`);
@@ -683,7 +689,8 @@ async function semanticSearch() {
                 </div>
             </div>`;
         }).join('');
-    } catch (e) { console.error(e); }
+        completeToast(tid, `${data.length} results`, false);
+    } catch (e) { completeToast(tid, 'Failed', true); console.error(e); }
     finally { botIdle(); }
 }
 
@@ -724,14 +731,17 @@ async function bulkDeleteSelected() {
     if (checked.length === 0) { alert('No memories selected.'); return; }
     const keys = Array.from(checked).map(cb => cb.dataset.key);
     if (!confirm(`Delete ${keys.length} memories?`)) return;
+    const tid = showToast('Deleting memories', `${keys.length} selected...`);
     try {
-        await fetch('/api/memories/bulk-delete', {
+        const res = await fetch('/api/memories/bulk-delete', {
             method: 'POST',
             headers: {'Content-Type': 'application/json'},
             body: JSON.stringify(keys)
         });
+        const d = await res.json();
+        completeToast(tid, `${d.count} deleted`, false);
         loadMemories();
-    } catch (e) { console.error(e); }
+    } catch (e) { completeToast(tid, 'Failed', true); }
 }
 
 async function exportMemories() {
@@ -840,6 +850,7 @@ async function testCompressBlock(btn) {
     if (!content) return;
     if (!hint) { alert('Select a compression hint first.'); return; }
 
+    const tid = showToast('Compressing block', hint);
     try {
         const res = await fetch('/api/test-compress', {
             method: 'POST',
@@ -847,8 +858,9 @@ async function testCompressBlock(btn) {
             body: JSON.stringify({content, compress_hint: hint})
         });
         const d = await res.json();
-        if (d.error) { alert(d.error); return; }
+        if (d.error) { completeToast(tid, d.error, true); return; }
 
+        completeToast(tid, `${d.original_tokens} → ${d.compressed_tokens} tokens (-${d.savings_pct}%)`, false);
         const panel = document.getElementById('compress-result');
         panel.style.display = 'block';
         document.getElementById('compress-meta').innerHTML =
@@ -856,7 +868,7 @@ async function testCompressBlock(btn) {
             `(<span style="color:var(--success);">-${d.savings_pct}%</span>)`;
         document.getElementById('compress-preview').textContent = d.compressed_content;
         panel.scrollIntoView({ behavior: 'smooth' });
-    } catch (e) { console.error(e); }
+    } catch (e) { completeToast(tid, 'Failed: ' + e.message, true); }
 }
 
 async function runAssemble() {
@@ -874,6 +886,8 @@ async function runAssemble() {
     });
     if (blocks.length === 0) return;
 
+    const tid = showToast('Assembling context', `${blocks.length} blocks, budget ${budget}`);
+    botBusy();
     try {
         const res = await fetch('/api/assemble', {
             method: 'POST',
@@ -881,8 +895,10 @@ async function runAssemble() {
             body: JSON.stringify({blocks, budget})
         });
         const data = await res.json();
+        completeToast(tid, `${data.used_tokens}/${data.budget} tokens, ${data.block_count} blocks`, false);
         showAssemblyResult(data);
-    } catch (e) { console.error('Assembly failed:', e); }
+    } catch (e) { completeToast(tid, 'Failed: ' + e.message, true); }
+    finally { botIdle(); }
 }
 
 function showAssemblyResult(data) {
@@ -1421,18 +1437,20 @@ async function submitConnectorSetup(name, connectorInfo) {
 
     // If only updating non-password fields
     if (hasPasswordPlaceholder && connectorInfo.configured) {
+        const tid = showToast(`Updating ${name}`, 'Saving settings...');
         try {
             const res = await fetch(`/api/connectors/${encodeURIComponent(name)}`, {
                 method: 'PUT',
                 headers: {'Content-Type': 'application/json'},
                 body: JSON.stringify(values)
             });
-            if (res.ok) { closeModal(); loadConnectors(); }
-            else { const d = await res.json(); alert(d.detail || 'Update failed'); }
-        } catch (e) { alert('Error: ' + e.message); }
+            if (res.ok) { completeToast(tid, 'Settings saved', false); closeModal(); loadConnectors(); }
+            else { const d = await res.json(); completeToast(tid, d.detail || 'Update failed', true); }
+        } catch (e) { completeToast(tid, 'Error: ' + e.message, true); }
         return;
     }
 
+    const tid = showToast(`Connecting ${name}`, 'Testing connection...');
     try {
         const res = await fetch(`/api/connectors/${encodeURIComponent(name)}/setup`, {
             method: 'POST',
@@ -1441,14 +1459,14 @@ async function submitConnectorSetup(name, connectorInfo) {
         });
         const d = await res.json();
         if (d.test?.ok) {
+            const info = Object.entries(d.test).filter(([k]) => k !== 'ok').map(([k, v]) => `${k}: ${v}`).join(', ');
+            completeToast(tid, `Connected! ${info}`, false);
             closeModal();
             loadConnectors();
-            const info = Object.entries(d.test).filter(([k]) => k !== 'ok').map(([k, v]) => `${k}: ${v}`).join(', ');
-            alert(`Connected! ${info}`);
         } else {
-            alert('Connection failed: ' + (d.test?.error || 'Unknown error'));
+            completeToast(tid, d.test?.error || 'Connection failed', true);
         }
-    } catch (e) { alert('Error: ' + e.message); }
+    } catch (e) { completeToast(tid, 'Error: ' + e.message, true); }
 }
 
 async function testConnector(name) {
@@ -1768,12 +1786,13 @@ async function submitTemplate() {
 }
 
 async function assembleTemplate(name) {
+    const tid = showToast(`Assembling "${name}"`, 'Selecting memories...');
     botBusy();
     try {
         const res = await fetch(`/api/templates/${encodeURIComponent(name)}/assemble`, { method: 'POST' });
         const d = await res.json();
-        alert(`Template "${name}": ${d.used_tokens}/${d.budget} tokens, ${d.included}/${d.total_matching} memories included`);
-    } catch (e) { alert('Error: ' + e.message); }
+        completeToast(tid, `${d.used_tokens}/${d.budget} tokens, ${d.included}/${d.total_matching} memories`, false);
+    } catch (e) { completeToast(tid, 'Failed: ' + e.message, true); }
     finally { botIdle(); }
 }
 
@@ -1790,6 +1809,7 @@ async function deleteTemplate(name) {
 async function exportClaudeMd() {
     const tags = document.getElementById('export-tags')?.value.trim() || '';
     const url = `/api/export-claude-md${tags ? '?tags=' + encodeURIComponent(tags) : ''}`;
+    const tid = showToast('Exporting CLAUDE.md', 'Generating...');
     try {
         const res = await fetch(url);
         const d = await res.json();
@@ -1798,18 +1818,20 @@ async function exportClaudeMd() {
         a.href = URL.createObjectURL(blob);
         a.download = 'CLAUDE.md';
         a.click();
+        completeToast(tid, `${d.memory_count} memories, ${d.token_count} tokens`, false);
         document.getElementById('export-result').innerHTML =
             `<p class="muted" style="margin-top:8px;">${d.memory_count} memories, ${d.token_count} tokens exported.</p>`;
-    } catch (e) { alert('Export failed: ' + e.message); }
+    } catch (e) { completeToast(tid, 'Failed: ' + e.message, true); }
 }
 
 async function findDuplicates() {
     const el = document.getElementById('duplicate-list');
-    el.innerHTML = '<p class="muted">Scanning...</p>';
+    const tid = showToast('Duplicate scan', 'Comparing memories...');
     botBusy();
     try {
         const res = await fetch('/api/duplicates?threshold=0.6');
         const groups = await res.json();
+        completeToast(tid, `${groups.length} duplicate groups found`, false);
         if (groups.length === 0) {
             el.innerHTML = '<p class="muted">No duplicates found.</p>';
             return;
@@ -1821,7 +1843,7 @@ async function findDuplicates() {
                 <div class="meta">${g.keys.map(k => '<span class="tag">' + escapeHtml(k) + '</span>').join(' ')}</div>
             </div>
         </div>`).join('');
-    } catch (e) { el.innerHTML = '<p style="color:var(--danger);">Error: ' + escapeHtml(e.message) + '</p>'; }
+    } catch (e) { el.innerHTML = '<p style="color:var(--danger);">Error: ' + escapeHtml(e.message) + '</p>'; completeToast(tid, 'Failed', true); }
     finally { botIdle(); }
 }
 
