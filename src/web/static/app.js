@@ -30,6 +30,7 @@ function init() {
     connectSSE();
     loadProfiles();
     loadDashboard();
+    loadVersion();
 }
 
 function checkWelcome() {
@@ -1458,6 +1459,16 @@ function escapeHtml(str) {
 
 function escapeAttr(str) {
     return str.replace(/'/g, "\\'").replace(/"/g, '&quot;');
+}
+
+// Version
+async function loadVersion() {
+    try {
+        const res = await fetch('/health');
+        const d = await res.json();
+        const el = document.getElementById('app-version');
+        if (el) el.textContent = 'v' + d.version;
+    } catch (e) {}
 }
 
 // Bot animation
