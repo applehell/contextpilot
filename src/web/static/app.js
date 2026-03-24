@@ -1424,12 +1424,18 @@ const SEV_COLORS = {
 };
 
 async function loadSecrets() {
+    const tid = showToast('Secret scan', 'Scanning all memories...');
     try {
         const res = await fetch('/api/sensitivity');
         secretsData = await res.json();
         renderSecretsStats(secretsData);
         renderSecretsList(secretsData.memories);
-    } catch (e) { console.error(e); }
+        const s = secretsData.sensitive;
+        completeToast(tid, s ? `${s} sensitive of ${secretsData.total}` : `${secretsData.total} memories clean`);
+    } catch (e) {
+        console.error(e);
+        completeToast(tid, 'Scan failed', true);
+    }
 }
 
 function renderSecretsStats(d) {

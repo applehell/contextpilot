@@ -77,8 +77,8 @@ class BookmarkConnector(ConnectorPlugin):
     description = "Fetch and index web pages as knowledge sources"
     icon = "B"
 
-    def __init__(self) -> None:
-        super().__init__()
+    def __init__(self, data_dir: Optional[Path] = None) -> None:
+        super().__init__(data_dir=data_dir)
         if "urls" not in self._config:
             self._config["urls"] = []
 
