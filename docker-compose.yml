@@ -1,6 +1,7 @@
 services:
   context-pilot:
     build: .
+    image: context-pilot:latest
     container_name: context-pilot
     restart: unless-stopped
     ports:
