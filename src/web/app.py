@@ -437,9 +437,12 @@ def create_app(db_path: Optional[Path] = None) -> FastAPI:
     async def update_memory(key: str, req: MemoryIn):
         store = _get_memory_store()
         try:
-            store.get(key)  # Verify exists
+            old = store.get(key)
         except KeyError:
             raise HTTPException(404, f"Memory '{key}' not found.")
+        # Save version before overwriting
+        from src.storage.versions import VersionStore
+        VersionStore(_db).record(key, old.value, old.tags, old.metadata, changed_by="web")
         store.set(Memory(key=key, value=req.value, tags=req.tags))
         _events.emit("memory", "update", key)
         return {"status": "updated", "key": key}
@@ -1021,6 +1024,222 @@ def create_app(db_path: Optional[Path] = None) -> FastAPI:
             }
             for name, r in results.items()
         }
+
+    # --- Memory Versions ---
+
+    from src.storage.versions import VersionStore
+    from src.storage.relations import RelationStore
+    from src.storage.templates import TemplateStore, ContextTemplate
+
+    @app.get("/api/memories/{key:path}/versions")
+    async def memory_versions(key: str, limit: int = Query(20, ge=1, le=100)):
+        vs = VersionStore(_db)
+        versions = vs.history(key, limit)
+        return [{"id": v.id, "value": v.value[:500], "tags": v.tags,
+                 "changed_by": v.changed_by, "created_at": v.created_at} for v in versions]
+
+    # --- Memory Relations ---
+
+    @app.get("/api/relations/{key:path}")
+    async def get_relations(key: str):
+        rs = RelationStore(_db)
+        return [{"id": r.id, "source_key": r.source_key, "target_key": r.target_key,
+                 "relation_type": r.relation_type, "created_at": r.created_at} for r in rs.get_relations(key)]
+
+    @app.post("/api/relations", status_code=201)
+    async def add_relation(request: Request):
+        body = await request.json()
+        rs = RelationStore(_db)
+        try:
+            r = rs.add(body["source_key"], body["target_key"], body.get("relation_type", "related"))
+            _events.emit("memory", "link", f"{r.source_key} -> {r.target_key}", r.relation_type)
+            return {"id": r.id, "source_key": r.source_key, "target_key": r.target_key}
+        except ValueError as e:
+            raise HTTPException(409, str(e))
+
+    @app.delete("/api/relations/{relation_id}")
+    async def remove_relation(relation_id: int):
+        rs = RelationStore(_db)
+        try:
+            rs.remove(relation_id)
+            return {"status": "deleted"}
+        except KeyError as e:
+            raise HTTPException(404, str(e))
+
+    # --- Context Templates ---
+
+    @app.get("/api/templates")
+    async def list_templates():
+        ts = TemplateStore(_db)
+        return [{"name": t.name, "description": t.description, "tag_filter": t.tag_filter,
+                 "key_filter": t.key_filter, "budget": t.budget} for t in ts.list()]
+
+    @app.post("/api/templates", status_code=201)
+    async def save_template(request: Request):
+        body = await request.json()
+        ts = TemplateStore(_db)
+        t = ContextTemplate(
+            name=body["name"], description=body.get("description", ""),
+            tag_filter=body.get("tag_filter", []), key_filter=body.get("key_filter", ""),
+            budget=body.get("budget", 4000),
+        )
+        ts.save(t)
+        _events.emit("template", "save", t.name)
+        return {"status": "saved", "name": t.name}
+
+    @app.delete("/api/templates/{name}")
+    async def delete_template(name: str):
+        ts = TemplateStore(_db)
+        try:
+            ts.delete(name)
+            return {"status": "deleted"}
+        except KeyError as e:
+            raise HTTPException(404, str(e))
+
+    @app.post("/api/templates/{name}/assemble")
+    async def assemble_template(name: str):
+        ts = TemplateStore(_db)
+        try:
+            t = ts.get(name)
+        except KeyError:
+            raise HTTPException(404, f"Template '{name}' not found")
+
+        store = _get_memory_store()
+        memories = store.list()
+
+        # Apply filters
+        if t.tag_filter:
+            memories = [m for m in memories if any(tag in m.tags for tag in t.tag_filter)]
+        if t.key_filter:
+            memories = [m for m in memories if t.key_filter.lower() in m.key.lower()]
+
+        total_tokens = sum(TokenBudget.estimate(m.value) for m in memories)
+        included = []
+        used = 0
+        for m in memories:
+            tokens = TokenBudget.estimate(m.value)
+            if used + tokens <= t.budget:
+                included.append({"key": m.key, "tokens": tokens, "preview": m.value[:200]})
+                used += tokens
+
+        return {
+            "template": t.name,
+            "budget": t.budget,
+            "used_tokens": used,
+            "included": len(included),
+            "total_matching": len(memories),
+            "blocks": included,
+        }
+
+    # --- Export as CLAUDE.md ---
+
+    @app.get("/api/export-claude-md")
+    async def export_claude_md(tags: str = Query(""), key_prefix: str = Query("")):
+        store = _get_memory_store()
+        memories = store.list()
+
+        if tags:
+            tag_list = [t.strip() for t in tags.split(",") if t.strip()]
+            memories = [m for m in memories if any(t in m.tags for t in tag_list)]
+        if key_prefix:
+            memories = [m for m in memories if m.key.startswith(key_prefix)]
+
+        sections = []
+        for m in sorted(memories, key=lambda x: x.key):
+            heading = m.key.replace("/", " > ").title()
+            sections.append(f"## {heading}\n\n{m.value}")
+
+        content = "# Context Pilot Export\n\n" + "\n\n---\n\n".join(sections)
+        return {"content": content, "memory_count": len(memories),
+                "token_count": TokenBudget.estimate(content)}
+
+    # --- Duplicate Detection ---
+
+    @app.get("/api/duplicates")
+    async def find_duplicates_api(threshold: float = Query(0.6, ge=0.3, le=1.0)):
+        from src.core.duplicates import find_duplicates
+        store = _get_memory_store()
+        groups = find_duplicates(store.list(), threshold)
+        return [{"keys": g.keys, "similarity": g.similarity, "sample": g.sample} for g in groups]
+
+    @app.get("/api/similar/{key:path}")
+    async def find_similar_api(key: str, threshold: float = Query(0.5, ge=0.3, le=1.0)):
+        from src.core.duplicates import find_similar
+        store = _get_memory_store()
+        try:
+            target = store.get(key)
+        except KeyError:
+            raise HTTPException(404, f"Memory '{key}' not found")
+        results = find_similar(target, store.list(), threshold)
+        return [{"key": k, "similarity": s} for k, s in results]
+
+    # --- Webhooks ---
+
+    from src.core.webhooks import WebhookManager
+
+    @app.get("/api/webhooks")
+    async def list_webhooks():
+        wm = WebhookManager()
+        return [{"name": h.name, "type": h.type, "url": h.url, "enabled": h.enabled,
+                 "events": h.events, "chat_id": h.chat_id} for h in wm.list()]
+
+    @app.post("/api/webhooks", status_code=201)
+    async def add_webhook(request: Request):
+        body = await request.json()
+        wm = WebhookManager()
+        wm.add(body["name"], body["type"], body["url"],
+               chat_id=body.get("chat_id", ""), session=body.get("session", "default"),
+               events=body.get("events", []))
+        return {"status": "created", "name": body["name"]}
+
+    @app.delete("/api/webhooks/{name}")
+    async def remove_webhook(name: str):
+        wm = WebhookManager()
+        try:
+            wm.remove(name)
+            return {"status": "deleted"}
+        except KeyError as e:
+            raise HTTPException(404, str(e))
+
+    @app.post("/api/webhooks/test")
+    async def test_webhook(request: Request):
+        body = await request.json()
+        wm = WebhookManager()
+        results = wm.notify(body.get("event", "test"), body.get("message", "Context Pilot test notification"))
+        return {"results": results}
+
+    # --- Scheduler ---
+
+    from src.core.scheduler import SyncScheduler
+
+    @app.get("/api/scheduler")
+    async def scheduler_status():
+        s = SyncScheduler.instance()
+        return s.get_status()
+
+    @app.post("/api/scheduler/start")
+    async def scheduler_start(interval: int = Query(30, ge=1, le=1440)):
+        s = SyncScheduler.instance(interval)
+        s.set_interval(interval)
+        s.start(_get_memory_store, lambda: _db)
+        _events.emit("scheduler", "start", f"{interval}m interval")
+        return {"status": "started", "interval_minutes": interval}
+
+    @app.post("/api/scheduler/stop")
+    async def scheduler_stop():
+        s = SyncScheduler.instance()
+        s.stop()
+        _events.emit("scheduler", "stop", "manual")
+        return {"status": "stopped"}
+
+    @app.post("/api/scheduler/run-now")
+    async def scheduler_run_now():
+        s = SyncScheduler.instance()
+        s._get_store = _get_memory_store
+        s._get_db = lambda: _db
+        results = await s.run_once()
+        _events.emit("scheduler", "manual-run", "complete")
+        return results
 
     # --- Connectors (Plugin Architecture) ---
 

@@ -5,7 +5,7 @@ import sqlite3
 from pathlib import Path
 from typing import Optional
 
-SCHEMA_VERSION = 6
+SCHEMA_VERSION = 8
 
 MIGRATIONS = {
     1: [
@@ -165,6 +165,42 @@ MIGRATIONS = {
         )""",
         """CREATE INDEX IF NOT EXISTS idx_memory_activity_time ON memory_activity(created_at DESC)""",
         """CREATE INDEX IF NOT EXISTS idx_memory_activity_key ON memory_activity(memory_key)""",
+    ],
+    7: [
+        # -- memory version history --
+        """CREATE TABLE IF NOT EXISTS memory_versions (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            memory_key TEXT NOT NULL,
+            value TEXT NOT NULL,
+            tags TEXT NOT NULL DEFAULT '[]',
+            metadata TEXT NOT NULL DEFAULT '{}',
+            changed_by TEXT NOT NULL DEFAULT '',
+            created_at REAL NOT NULL
+        )""",
+        """CREATE INDEX IF NOT EXISTS idx_memory_versions_key ON memory_versions(memory_key, created_at DESC)""",
+        # -- memory relations --
+        """CREATE TABLE IF NOT EXISTS memory_relations (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            source_key TEXT NOT NULL,
+            target_key TEXT NOT NULL,
+            relation_type TEXT NOT NULL DEFAULT 'related',
+            created_at REAL NOT NULL,
+            UNIQUE(source_key, target_key, relation_type)
+        )""",
+        """CREATE INDEX IF NOT EXISTS idx_relations_source ON memory_relations(source_key)""",
+        """CREATE INDEX IF NOT EXISTS idx_relations_target ON memory_relations(target_key)""",
+    ],
+    8: [
+        # -- context templates --
+        """CREATE TABLE IF NOT EXISTS context_templates (
+            name TEXT PRIMARY KEY,
+            description TEXT NOT NULL DEFAULT '',
+            tag_filter TEXT NOT NULL DEFAULT '[]',
+            key_filter TEXT NOT NULL DEFAULT '',
+            budget INTEGER NOT NULL DEFAULT 4000,
+            created_at REAL NOT NULL,
+            updated_at REAL NOT NULL
+        )""",
     ],
 }
 
