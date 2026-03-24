@@ -95,6 +95,7 @@ function showTab(name, clickedBtn) {
     if (name === 'skills') loadSkills();
     if (name === 'graph') loadGraph();
     if (name === 'secrets') loadSecrets();
+    if (name === 'sources') loadFolders();
 }
 
 // ═══════════════════════════════════════════════════════════════
@@ -1068,6 +1069,151 @@ async function viewRedacted(key) {
             <div style="margin-bottom:8px;"><span class="badge ${SEV_BADGE_CLASS[d.severity] || ''}">${d.severity.toUpperCase()}</span></div>
             <pre>${escapeHtml(d.value)}</pre>
         `, `<button class="btn" onclick="closeModal()">Close</button>`);
+    } catch (e) { console.error(e); }
+}
+
+// ═══════════════════════════════════════════════════════════════
+// FOLDER SOURCES
+// ═══════════════════════════════════════════════════════════════
+
+async function loadFolders() {
+    const el = document.getElementById('folder-list');
+    try {
+        const res = await fetch('/api/folders');
+        const folders = await res.json();
+        if (folders.length === 0) {
+            el.innerHTML = '<div class="empty-state">No folder sources configured. Click "+ Add Folder" to map a directory.</div>';
+            return;
+        }
+        el.innerHTML = folders.map(f => {
+            const lastScan = f.last_scan
+                ? new Date(f.last_scan * 1000).toLocaleString()
+                : 'never';
+            const extList = f.extensions.length
+                ? f.extensions.join(', ')
+                : 'all supported';
+            const statusClass = f.enabled ? 'green' : 'red';
+            const statusText = f.enabled ? 'enabled' : 'disabled';
+
+            return `<div class="memory-item" style="cursor:default;">
+                <div class="main">
+                    <div class="key">
+                        <span class="badge" style="background:var(--accent-light);color:var(--accent);">${escapeHtml(f.indexed_files + '')} files</span>
+                        ${escapeHtml(f.name)}
+                    </div>
+                    <div class="preview">${escapeHtml(f.path)}</div>
+                    <div class="meta">
+                        <span class="age">${extList}</span>
+                        <span class="age">${f.recursive ? 'recursive' : 'top-level'}</span>
+                        <span class="age">scanned: ${lastScan}</span>
+                        <span class="badge" style="background:var(--${statusClass === 'green' ? 'success' : 'danger'}-light);color:var(--${statusClass === 'green' ? 'success' : 'danger'});">${statusText}</span>
+                    </div>
+                    ${f.description ? '<div class="preview" style="margin-top:2px;">' + escapeHtml(f.description) + '</div>' : ''}
+                </div>
+                <div class="actions" style="display:flex;flex-direction:column;gap:4px;">
+                    <button class="btn btn-small btn-primary" onclick="scanFolder('${escapeAttr(f.name)}')">Scan</button>
+                    <button class="btn btn-small" onclick="toggleFolder('${escapeAttr(f.name)}', ${!f.enabled})">${f.enabled ? 'Disable' : 'Enable'}</button>
+                    <button class="btn btn-small btn-danger" onclick="removeFolder('${escapeAttr(f.name)}')">Remove</button>
+                </div>
+            </div>`;
+        }).join('');
+    } catch (e) { console.error(e); }
+}
+
+function showAddFolderDialog() {
+    openModal('Add Folder Source', `
+        <label>Name</label>
+        <input type="text" id="folder-name" placeholder="e.g. docs, configs, notes">
+        <label>Path</label>
+        <input type="text" id="folder-path" placeholder="/path/to/folder">
+        <label>Description</label>
+        <input type="text" id="folder-desc" placeholder="Optional">
+        <label>File extensions (empty = all supported)</label>
+        <input type="text" id="folder-ext" placeholder="e.g. .pdf, .md, .txt">
+        <div style="margin-top:8px;">
+            <label style="display:inline;cursor:pointer;">
+                <input type="checkbox" id="folder-recursive" checked> Scan subfolders recursively
+            </label>
+        </div>
+    `, `
+        <button class="btn btn-primary" id="add-folder-btn">Add</button>
+        <button class="btn" onclick="closeModal()">Cancel</button>
+    `);
+
+    document.getElementById('add-folder-btn').addEventListener('click', submitAddFolder);
+}
+
+async function submitAddFolder() {
+    const name = document.getElementById('folder-name').value.trim();
+    const path = document.getElementById('folder-path').value.trim();
+    if (!name || !path) { alert('Name and path are required.'); return; }
+
+    const description = document.getElementById('folder-desc').value.trim();
+    const extStr = document.getElementById('folder-ext').value.trim();
+    const extensions = extStr ? extStr.split(',').map(e => e.trim()).filter(Boolean) : [];
+    const recursive = document.getElementById('folder-recursive').checked;
+
+    try {
+        const res = await fetch('/api/folders', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({ name, path, extensions, recursive, description })
+        });
+        if (res.ok) {
+            closeModal();
+            loadFolders();
+        } else {
+            const d = await res.json();
+            alert(d.detail || 'Failed to add folder');
+        }
+    } catch (e) { alert('Error: ' + e.message); }
+}
+
+async function scanFolder(name) {
+    botBusy();
+    try {
+        const res = await fetch(`/api/folders/${encodeURIComponent(name)}/scan`, { method: 'POST' });
+        const d = await res.json();
+        alert(`Scan complete: ${d.added} added, ${d.updated} updated, ${d.removed} removed, ${d.skipped} unchanged` +
+              (d.errors.length ? `\nErrors: ${d.errors.join(', ')}` : ''));
+        loadFolders();
+    } catch (e) { alert('Scan failed: ' + e.message); }
+    finally { botIdle(); }
+}
+
+async function scanAllFolders() {
+    botBusy();
+    try {
+        const res = await fetch('/api/folders/scan-all', { method: 'POST' });
+        const d = await res.json();
+        const summary = Object.entries(d).map(([name, r]) =>
+            `${name}: +${r.added} ~${r.updated} -${r.removed}`
+        ).join('\n');
+        alert(summary || 'No sources to scan.');
+        loadFolders();
+    } catch (e) { alert('Scan failed: ' + e.message); }
+    finally { botIdle(); }
+}
+
+async function toggleFolder(name, enabled) {
+    try {
+        await fetch(`/api/folders/${encodeURIComponent(name)}`, {
+            method: 'PUT',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({ enabled })
+        });
+        loadFolders();
+    } catch (e) { console.error(e); }
+}
+
+async function removeFolder(name) {
+    const purge = confirm(`Remove folder source "${name}"?\n\nClick OK to also delete all indexed memories, or Cancel to keep them.`);
+    // If they clicked Cancel on the first confirm, they don't want to remove at all
+    if (!confirm(`Remove source "${name}"?`)) return;
+
+    try {
+        await fetch(`/api/folders/${encodeURIComponent(name)}?purge=${purge}`, { method: 'DELETE' });
+        loadFolders();
     } catch (e) { console.error(e); }
 }
 

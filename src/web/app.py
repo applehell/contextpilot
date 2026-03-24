@@ -27,6 +27,7 @@ from src.core.compressors.code_compact import CodeCompactCompressor
 from src.core.secrets import SecretDetector
 from src.core.skill_registry import SkillRegistry
 from src.storage.memory_activity import MemoryActivityLog
+from src.storage.folders import FolderManager
 from src.storage.profiles import ProfileManager
 from src.storage.usage import UsageStore, FeedbackRecord, block_hash
 
@@ -136,6 +137,22 @@ class ProfileCreate(BaseModel):
 
 class EstimateRequest(BaseModel):
     text: str
+
+
+class FolderSourceCreate(BaseModel):
+    name: str
+    path: str
+    extensions: List[str] = []
+    recursive: bool = True
+    description: str = ""
+
+
+class FolderSourceUpdate(BaseModel):
+    path: Optional[str] = None
+    extensions: Optional[List[str]] = None
+    recursive: Optional[bool] = None
+    enabled: Optional[bool] = None
+    description: Optional[str] = None
 
 
 # --- App ---
@@ -867,6 +884,92 @@ def create_app(db_path: Optional[Path] = None) -> FastAPI:
             }
         except KeyError as e:
             raise HTTPException(404, str(e))
+
+    # --- Folder Sources ---
+
+    @app.get("/api/folders")
+    async def list_folders():
+        fm = FolderManager()
+        return [
+            {
+                "name": s.name,
+                "path": s.path,
+                "extensions": s.extensions,
+                "recursive": s.recursive,
+                "enabled": s.enabled,
+                "created_at": s.created_at,
+                "last_scan": s.last_scan,
+                "indexed_files": s.indexed_files,
+                "description": s.description,
+            }
+            for s in fm.list()
+        ]
+
+    @app.post("/api/folders", status_code=201)
+    async def add_folder(req: FolderSourceCreate):
+        fm = FolderManager()
+        try:
+            s = fm.add(req.name, req.path, req.extensions, req.recursive, req.description)
+            return {"status": "created", "name": s.name}
+        except ValueError as e:
+            raise HTTPException(400, str(e))
+
+    @app.put("/api/folders/{name}")
+    async def update_folder(name: str, req: FolderSourceUpdate):
+        fm = FolderManager()
+        updates = {k: v for k, v in req.model_dump().items() if v is not None}
+        try:
+            fm.update(name, **updates)
+            return {"status": "updated", "name": name}
+        except KeyError as e:
+            raise HTTPException(404, str(e))
+
+    @app.delete("/api/folders/{name}")
+    async def delete_folder(name: str, purge: bool = Query(False)):
+        fm = FolderManager()
+        try:
+            purged = 0
+            if purge:
+                store = _get_memory_store()
+                purged = fm.purge(name, store)
+            fm.remove(name)
+            return {"status": "deleted", "name": name, "purged_memories": purged}
+        except KeyError as e:
+            raise HTTPException(404, str(e))
+
+    @app.post("/api/folders/{name}/scan")
+    async def scan_folder(name: str):
+        fm = FolderManager()
+        store = _get_memory_store()
+        try:
+            result = fm.scan(name, store)
+            return {
+                "status": "scanned",
+                "name": name,
+                "added": result.added,
+                "updated": result.updated,
+                "removed": result.removed,
+                "skipped": result.skipped,
+                "errors": result.errors,
+            }
+        except KeyError as e:
+            raise HTTPException(404, str(e))
+
+    @app.post("/api/folders/scan-all")
+    async def scan_all_folders():
+        fm = FolderManager()
+        store = _get_memory_store()
+        results = fm.scan_all(store)
+        return {
+            name: {
+                "added": r.added,
+                "updated": r.updated,
+                "removed": r.removed,
+                "skipped": r.skipped,
+                "errors": r.errors,
+            }
+            for name, r in results.items()
+        }
 
     return app
 
