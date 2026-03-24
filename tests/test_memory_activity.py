@@ -65,16 +65,16 @@ class TestClear:
 class TestActivityEntry:
     def test_age_label_just_now(self):
         e = ActivityEntry("created", "k", "", time.time())
-        assert "gerade eben" in e.age_label
+        assert e.age_label == "just now"
 
     def test_age_label_minutes(self):
         e = ActivityEntry("created", "k", "", time.time() - 300)
-        assert "Min" in e.age_label
+        assert "m ago" in e.age_label
 
     def test_age_label_hours(self):
         e = ActivityEntry("created", "k", "", time.time() - 7200)
-        assert "Std" in e.age_label
+        assert "h ago" in e.age_label
 
     def test_age_label_days(self):
         e = ActivityEntry("created", "k", "", time.time() - 172800)
-        assert "Tagen" in e.age_label
+        assert "d ago" in e.age_label

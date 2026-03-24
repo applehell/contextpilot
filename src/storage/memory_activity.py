@@ -19,12 +19,12 @@ class ActivityEntry:
     def age_label(self) -> str:
         delta = time.time() - self.created_at
         if delta < 60:
-            return "gerade eben"
+            return "just now"
         if delta < 3600:
-            return f"vor {int(delta / 60)} Min"
+            return f"{int(delta / 60)}m ago"
         if delta < 86400:
-            return f"vor {int(delta / 3600)} Std"
-        return f"vor {int(delta / 86400)} Tagen"
+            return f"{int(delta / 3600)}h ago"
+        return f"{int(delta / 86400)}d ago"
 
 
 class MemoryActivityLog:
