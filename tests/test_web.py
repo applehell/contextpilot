@@ -128,7 +128,8 @@ class TestMemories:
     def test_list_empty(self, client):
         r = client.get("/api/memories")
         assert r.status_code == 200
-        assert r.json() == []
+        assert r.json()["memories"] == []
+        assert r.json()["total"] == 0
 
     def test_set_and_get(self, client):
         r = client.post("/api/memories", json={"key": "greeting", "value": "hello", "tags": ["test"]})
@@ -167,14 +168,15 @@ class TestMemories:
         client.post("/api/memories", json={"key": "a", "value": "1"})
         client.post("/api/memories", json={"key": "b", "value": "2"})
         r = client.get("/api/memories")
-        assert len(r.json()) == 2
+        assert r.json()["total"] == 2
+        assert len(r.json()["memories"]) == 2
 
     def test_search(self, client):
         client.post("/api/memories", json={"key": "python-tip", "value": "use list comprehensions"})
         client.post("/api/memories", json={"key": "js-tip", "value": "use arrow functions"})
         r = client.get("/api/memories/search?q=python")
         assert r.status_code == 200
-        results = r.json()
+        results = r.json()["memories"]
         assert len(results) >= 1
         assert any(m["key"] == "python-tip" for m in results)
 
@@ -182,7 +184,7 @@ class TestMemories:
         client.post("/api/memories", json={"key": "tagged", "value": "val", "tags": ["important"]})
         client.post("/api/memories", json={"key": "untagged", "value": "val"})
         r = client.get("/api/memories/search?tags=important")
-        results = r.json()
+        results = r.json()["memories"]
         assert len(results) == 1
         assert results[0]["key"] == "tagged"
 
@@ -348,8 +350,8 @@ class TestMemoryEdit:
         assert r.status_code == 200
         assert r.json()["count"] == 2
         r2 = client.get("/api/memories")
-        assert len(r2.json()) == 1
-        assert r2.json()[0]["key"] == "b"
+        assert r2.json()["total"] == 1
+        assert r2.json()["memories"][0]["key"] == "b"
 
     def test_export_all(self, client):
         client.post("/api/memories", json={"key": "x", "value": "val", "tags": ["t"]})

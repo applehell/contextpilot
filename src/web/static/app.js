@@ -2,6 +2,8 @@
 
 let debounceTimers = {};
 let bulkMode = false;
+let currentPage = 1;
+const PAGE_SIZE = 50;
 let blockIndex = 1;
 let graphNetwork = null;
 let graphDataCache = null;
@@ -353,15 +355,22 @@ async function loadSkills() {
 
 async function loadMemories() {
     botBusy();
+    const source = document.getElementById('memory-source-filter')?.value || '';
     try {
-        const [memRes, tagRes] = await Promise.all([
-            fetch('/api/memories'),
+        const [memRes, tagRes, srcRes] = await Promise.all([
+            fetch(`/api/memories?page=${currentPage}&page_size=${PAGE_SIZE}&source=${encodeURIComponent(source)}&sort=updated&order=desc`),
             fetch('/api/memory-tags'),
+            fetch('/api/memories/sources'),
         ]);
         const data = await memRes.json();
         const tags = await tagRes.json();
-        renderMemories(data);
+        const sources = await srcRes.json();
+        renderMemories(data.memories);
         renderTagFilter(tags);
+        renderSourceFilter(sources, source);
+        renderPagination(data);
+        const countEl = document.getElementById('memory-count');
+        if (countEl) countEl.textContent = `${data.total} memories (page ${data.page}/${data.pages})`;
     } catch (e) { console.error(e); } finally { botIdle(); }
 }
 
@@ -378,22 +387,63 @@ function renderTagFilter(tags) {
     });
 }
 
+function renderSourceFilter(sources, current) {
+    const sel = document.getElementById('memory-source-filter');
+    if (!sel) return;
+    const prevVal = current || sel.value;
+    sel.innerHTML = '<option value="">All Sources</option>';
+    sources.forEach(s => {
+        const opt = document.createElement('option');
+        opt.value = s.source;
+        opt.textContent = `${s.source} (${s.count})`;
+        if (s.source === prevVal) opt.selected = true;
+        sel.appendChild(opt);
+    });
+}
+
+function renderPagination(data) {
+    const el = document.getElementById('pagination');
+    if (!el || data.pages <= 1) { if (el) el.innerHTML = ''; return; }
+
+    let html = '';
+    html += `<button class="btn btn-small" ${data.page <= 1 ? 'disabled' : ''} onclick="goToPage(${data.page - 1})">Prev</button>`;
+
+    const start = Math.max(1, data.page - 2);
+    const end = Math.min(data.pages, data.page + 2);
+    for (let i = start; i <= end; i++) {
+        html += `<button class="btn btn-small ${i === data.page ? 'btn-primary' : ''}" onclick="goToPage(${i})">${i}</button>`;
+    }
+
+    html += `<button class="btn btn-small" ${data.page >= data.pages ? 'disabled' : ''} onclick="goToPage(${data.page + 1})">Next</button>`;
+    html += `<span style="font-size:11px;color:var(--text-muted);">${data.total} total</span>`;
+    el.innerHTML = html;
+}
+
+function goToPage(page) {
+    currentPage = page;
+    const q = document.getElementById('memory-search').value.trim();
+    if (q) { filterByTag(); } else { loadMemories(); }
+}
+
 async function filterByTag() {
     const tag = document.getElementById('memory-tag-filter').value;
+    const source = document.getElementById('memory-source-filter')?.value || '';
     const q = document.getElementById('memory-search').value.trim();
     try {
-        let url = '/api/memories/search?q=' + encodeURIComponent(q);
+        let url = `/api/memories/search?q=${encodeURIComponent(q)}&page=${currentPage}&page_size=${PAGE_SIZE}`;
         if (tag) url += '&tags=' + encodeURIComponent(tag);
+        if (source) url += '&source=' + encodeURIComponent(source);
         const res = await fetch(url);
         const data = await res.json();
-        renderMemories(data);
+        renderMemories(data.memories);
+        renderPagination(data);
+        const countEl = document.getElementById('memory-count');
+        if (countEl) countEl.textContent = `${data.total} results (page ${data.page}/${data.pages})`;
     } catch (e) { console.error(e); }
 }
 
 function renderMemories(data) {
     const list = document.getElementById('memory-list');
-    const countEl = document.getElementById('memory-count');
-    if (countEl) countEl.textContent = `${data.length} memories`;
 
     if (data.length === 0) {
         list.innerHTML = '<div class="empty-state">No memories found.</div>';
@@ -597,6 +647,7 @@ async function deleteMemory(key) {
 }
 
 async function searchMemories() {
+    currentPage = 1;
     clearTimeout(debounceTimers['memSearch']);
     const semantic = document.getElementById('semantic-toggle')?.checked;
     if (semantic) {

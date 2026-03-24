@@ -57,11 +57,46 @@ class MemoryStore:
     def __init__(self, db: Database) -> None:
         self._db = db
 
-    def list(self) -> List[Memory]:
-        rows = self._db.conn.execute(
-            "SELECT key, value, tags, metadata, created_at, updated_at FROM memories ORDER BY key"
-        ).fetchall()
+    def list(self, limit: int = 0, offset: int = 0, source: str = "",
+             sort: str = "key", order: str = "asc") -> List[Memory]:
+        allowed_sorts = {"key": "key", "updated": "updated_at", "created": "created_at"}
+        sort_col = allowed_sorts.get(sort, "key")
+        order_dir = "DESC" if order == "desc" else "ASC"
+
+        sql = "SELECT key, value, tags, metadata, created_at, updated_at FROM memories"
+        params: list = []
+
+        if source:
+            sql += " WHERE key LIKE ?"
+            params.append(f"{source}/%")
+
+        sql += f" ORDER BY {sort_col} {order_dir}"
+
+        if limit > 0:
+            sql += " LIMIT ? OFFSET ?"
+            params.extend([limit, offset])
+
+        rows = self._db.conn.execute(sql, params).fetchall()
         return [_row_to_memory(r) for r in rows]
+
+    def count(self, source: str = "") -> int:
+        if source:
+            row = self._db.conn.execute("SELECT count(*) FROM memories WHERE key LIKE ?", (f"{source}/%",)).fetchone()
+        else:
+            row = self._db.conn.execute("SELECT count(*) FROM memories").fetchone()
+        return row[0] if row else 0
+
+    def sources(self) -> List[dict]:
+        """Return distinct source prefixes with counts."""
+        rows = self._db.conn.execute(
+            "SELECT key FROM memories"
+        ).fetchall()
+        counts: dict = {}
+        for r in rows:
+            key = r["key"]
+            prefix = key.split("/")[0] if "/" in key else "(none)"
+            counts[prefix] = counts.get(prefix, 0) + 1
+        return sorted([{"source": k, "count": v} for k, v in counts.items()], key=lambda x: -x["count"])
 
     def get(self, key: str) -> Memory:
         row = self._db.conn.execute(
@@ -103,12 +138,12 @@ class MemoryStore:
         self._db.conn.execute("DELETE FROM memories WHERE key = ?", (key,))
         self._db.conn.commit()
 
-    def search(self, query: str, tags: Optional[List[str]] = None) -> List[Memory]:
+    def search(self, query: str, tags: Optional[List[str]] = None,
+               source: str = "", limit: int = 0, offset: int = 0) -> List[Memory]:
         q = query.strip()
         tag_set: Optional[Set[str]] = set(tags) if tags else None
 
         if q:
-            # Use FTS5 for text search, then filter by tags in Python
             fts_query = '"' + q.replace('"', '""') + '"'
             rows = self._db.conn.execute(
                 """SELECT m.key, m.value, m.tags, m.metadata, m.created_at, m.updated_at
@@ -118,7 +153,6 @@ class MemoryStore:
                    ORDER BY rank""",
                 (fts_query,),
             ).fetchall()
-            # FTS may miss substring matches — fall back to LIKE for simple queries
             fts_keys = {r["key"] for r in rows}
             like_pattern = f"%{q}%"
             like_rows = self._db.conn.execute(
@@ -144,7 +178,12 @@ class MemoryStore:
             mem = _row_to_memory(r)
             if tag_set and not tag_set.issubset(set(mem.tags)):
                 continue
+            if source and not mem.key.startswith(f"{source}/"):
+                continue
             results.append(mem)
+
+        if limit > 0:
+            return results[offset:offset + limit]
         return results
 
     def tags(self) -> List[str]:

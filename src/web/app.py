@@ -403,20 +403,53 @@ def create_app(db_path: Optional[Path] = None) -> FastAPI:
     # --- Memories ---
 
     @app.get("/api/memories")
-    async def list_memories():
+    async def list_memories(
+        page: int = Query(1, ge=1),
+        page_size: int = Query(50, ge=1, le=200),
+        source: str = Query(""),
+        sort: str = Query("key"),
+        order: str = Query("asc"),
+    ):
         store = _get_memory_store()
-        return [m.to_dict() for m in store.list()]
+        offset = (page - 1) * page_size
+        memories = store.list(limit=page_size, offset=offset, source=source, sort=sort, order=order)
+        total = store.count(source=source)
+        return {
+            "memories": [m.to_dict() for m in memories],
+            "total": total,
+            "page": page,
+            "page_size": page_size,
+            "pages": max(1, (total + page_size - 1) // page_size),
+        }
+
+    @app.get("/api/memories/sources")
+    async def memory_sources():
+        store = _get_memory_store()
+        return store.sources()
 
     @app.get("/api/memories/search")
     async def search_memories(
         q: str = Query(""),
         tags: str = Query(""),
+        source: str = Query(""),
+        page: int = Query(1, ge=1),
+        page_size: int = Query(50, ge=1, le=200),
     ):
         store = _get_memory_store()
         tag_list = [t.strip() for t in tags.split(",") if t.strip()] if tags else None
-        results = store.search(q, tag_list)
-        _events.emit("memory", "search", q or "(all)", f"{len(results)} results" + (f", tags={tags}" if tags else ""))
-        return [m.to_dict() for m in results]
+        offset = (page - 1) * page_size
+        results = store.search(q, tag_list, source=source, limit=page_size, offset=offset)
+        # Count total without pagination for UI
+        total_results = store.search(q, tag_list, source=source)
+        total = len(total_results)
+        _events.emit("memory", "search", q or "(all)", f"{total} results" + (f", source={source}" if source else ""))
+        return {
+            "memories": [m.to_dict() for m in results],
+            "total": total,
+            "page": page,
+            "page_size": page_size,
+            "pages": max(1, (total + page_size - 1) // page_size),
+        }
 
     @app.get("/api/memories/{key:path}")
     async def get_memory(key: str):
