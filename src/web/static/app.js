@@ -97,7 +97,7 @@ function showTab(name, clickedBtn) {
     if (name === 'skills') loadSkills();
     if (name === 'graph') loadGraph();
     if (name === 'secrets') loadSecrets();
-    if (name === 'sources') { loadPaperless(); loadFolders(); }
+    if (name === 'sources') { loadConnectors(); loadFolders(); }
 }
 
 // ═══════════════════════════════════════════════════════════════
@@ -1158,122 +1158,150 @@ async function viewRedacted(key) {
 }
 
 // ═══════════════════════════════════════════════════════════════
-// PAPERLESS-NGX
+// CONNECTORS (Plugin Architecture)
 // ═══════════════════════════════════════════════════════════════
 
-async function loadPaperless() {
-    const statusEl = document.getElementById('paperless-status');
-    const actionsEl = document.getElementById('paperless-actions');
-
+async function loadConnectors() {
+    const el = document.getElementById('connectors-list');
     try {
-        const res = await fetch('/api/paperless');
-        const d = await res.json();
-
-        if (!d.configured) {
-            actionsEl.innerHTML = '<button class="btn btn-small btn-primary" onclick="showPaperlessSetup()">Connect</button>';
-            statusEl.innerHTML = '<div class="empty-state">Not connected. Click "Connect" to set up Paperless-ngx.</div>';
+        const res = await fetch('/api/connectors');
+        const connectors = await res.json();
+        if (connectors.length === 0) {
+            el.innerHTML = '<div class="panel"><p class="muted">No connectors available.</p></div>';
             return;
         }
-
-        const lastSync = d.last_sync ? new Date(d.last_sync * 1000).toLocaleString() : 'never';
-        const tagsStr = d.sync_tags.length ? d.sync_tags.join(', ') : 'all';
-        const statusClass = d.enabled ? 'success' : 'danger';
-
-        actionsEl.innerHTML = `
-            <button class="btn btn-small btn-primary" onclick="syncPaperless()">Sync Now</button>
-            <button class="btn btn-small" onclick="testPaperless()">Test</button>
-            <button class="btn btn-small" onclick="showPaperlessSetup()">Settings</button>
-            <button class="btn btn-small btn-danger" onclick="removePaperless()">Disconnect</button>
-        `;
-
-        statusEl.innerHTML = `<div class="memory-item" style="cursor:default;">
-            <div class="main">
-                <div class="key">
-                    <span class="badge" style="background:var(--${statusClass}-light);color:var(--${statusClass});">${d.enabled ? 'connected' : 'disabled'}</span>
-                    ${escapeHtml(d.url)}
-                </div>
-                <div class="meta">
-                    <span class="age">${d.synced_docs} documents synced</span>
-                    <span class="age">last sync: ${lastSync}</span>
-                    <span class="age">tags: ${escapeHtml(tagsStr)}</span>
-                </div>
-            </div>
-        </div>`;
+        el.innerHTML = connectors.map(c => renderConnectorPanel(c)).join('');
     } catch (e) { console.error(e); }
 }
 
-function showPaperlessSetup() {
-    fetch('/api/paperless').then(r => r.json()).then(d => {
-        openModal('Paperless-ngx Setup', `
-            <label>URL</label>
-            <input type="text" id="pl-url" placeholder="http://192.168.1.x:8000" value="${escapeHtml(d.url || '')}">
-            <label>API Token</label>
-            <input type="text" id="pl-token" placeholder="Token from Paperless admin" value="${d.configured ? '••••••••' : ''}">
-            <label>Sync only these tags (empty = all documents)</label>
-            <input type="text" id="pl-tags" placeholder="e.g. important, finance" value="${escapeHtml((d.sync_tags || []).join(', '))}">
-            <div style="font-size:11px;color:var(--text-muted);margin-top:4px;">Comma-separated Paperless tag names. Leave empty to sync all documents.</div>
-        `, `
-            <button class="btn btn-primary" id="pl-save-btn">Save & Test</button>
+function renderConnectorPanel(c) {
+    const lastSync = c.last_sync ? new Date(c.last_sync * 1000).toLocaleString() : 'never';
+    let actions, statusHtml;
+
+    if (!c.configured) {
+        actions = `<button class="btn btn-small btn-primary" onclick="showConnectorSetup('${escapeAttr(c.name)}')">Connect</button>`;
+        statusHtml = `<div class="empty-state">Not connected. Click "Connect" to set up.</div>`;
+    } else {
+        const statusClass = c.enabled ? 'success' : 'danger';
+        const statusLabel = c.enabled ? 'connected' : 'disabled';
+
+        // Build config summary from non-password fields
+        const summary = c.schema
+            .filter(f => f.type !== 'password' && c.config[f.name])
+            .map(f => `<span class="age">${escapeHtml(f.label)}: ${escapeHtml(String(c.config[f.name]))}</span>`)
+            .join('');
+
+        actions = `
+            <button class="btn btn-small btn-primary" onclick="syncConnector('${escapeAttr(c.name)}')">Sync</button>
+            <button class="btn btn-small" onclick="testConnector('${escapeAttr(c.name)}')">Test</button>
+            <button class="btn btn-small" onclick="showConnectorSetup('${escapeAttr(c.name)}')">Settings</button>
+            <button class="btn btn-small btn-danger" onclick="removeConnector('${escapeAttr(c.name)}')">Disconnect</button>
+        `;
+
+        statusHtml = `<div class="memory-item" style="cursor:default;">
+            <div class="main">
+                <div class="key">
+                    <span class="badge" style="background:var(--${statusClass}-light);color:var(--${statusClass});">${statusLabel}</span>
+                    ${escapeHtml(c.display_name)}
+                </div>
+                <div class="meta">
+                    <span class="age">${c.synced_count} items synced</span>
+                    <span class="age">last sync: ${lastSync}</span>
+                    ${summary}
+                </div>
+            </div>
+        </div>`;
+    }
+
+    return `<div class="panel">
+        <div style="display:flex;justify-content:space-between;align-items:center;">
+            <h2>${escapeHtml(c.display_name)}</h2>
+            <div style="display:flex;gap:8px;">${actions}</div>
+        </div>
+        <p class="muted" style="margin-bottom:12px;">${escapeHtml(c.description)}</p>
+        ${statusHtml}
+    </div>`;
+}
+
+function showConnectorSetup(name) {
+    fetch(`/api/connectors/${encodeURIComponent(name)}`).then(r => r.json()).then(c => {
+        const fields = c.schema.map(f => {
+            const val = c.config[f.name] || f.default || '';
+            const inputType = f.type === 'password' ? 'text' : 'text';
+            const displayVal = f.type === 'password' && c.configured ? '••••••••' : escapeHtml(String(val));
+            return `<label>${escapeHtml(f.label)}${f.required ? ' *' : ''}</label>
+                <input type="${inputType}" id="conn-${f.name}" placeholder="${escapeHtml(f.placeholder)}" value="${displayVal}">`;
+        }).join('');
+
+        openModal(`${c.display_name} Setup`, fields, `
+            <button class="btn btn-primary" id="conn-save-btn">Save & Test</button>
             <button class="btn" onclick="closeModal()">Cancel</button>
         `);
 
-        document.getElementById('pl-save-btn').addEventListener('click', submitPaperlessSetup);
+        document.getElementById('conn-save-btn').addEventListener('click', () => submitConnectorSetup(name, c));
     });
 }
 
-async function submitPaperlessSetup() {
-    const url = document.getElementById('pl-url').value.trim();
-    const tokenInput = document.getElementById('pl-token').value.trim();
-    const tagsStr = document.getElementById('pl-tags').value.trim();
-    const sync_tags = tagsStr ? tagsStr.split(',').map(t => t.trim()).filter(Boolean) : [];
+async function submitConnectorSetup(name, connectorInfo) {
+    const values = {};
+    let hasPasswordPlaceholder = false;
 
-    if (!url) { alert('URL is required.'); return; }
+    for (const f of connectorInfo.schema) {
+        const el = document.getElementById(`conn-${f.name}`);
+        if (!el) continue;
+        const val = el.value.trim();
 
-    // If token is dots, user didn't change it — only update URL/tags
-    if (tokenInput === '••••••••') {
+        if (f.type === 'password' && val === '••••••••') {
+            hasPasswordPlaceholder = true;
+            continue; // skip unchanged password
+        }
+        if (f.required && !val) {
+            alert(`${f.label} is required.`);
+            return;
+        }
+        values[f.name] = val;
+    }
+
+    // If only updating non-password fields
+    if (hasPasswordPlaceholder && connectorInfo.configured) {
         try {
-            const res = await fetch('/api/paperless', {
+            const res = await fetch(`/api/connectors/${encodeURIComponent(name)}`, {
                 method: 'PUT',
                 headers: {'Content-Type': 'application/json'},
-                body: JSON.stringify({ url, sync_tags })
+                body: JSON.stringify(values)
             });
-            if (res.ok) {
-                closeModal();
-                loadPaperless();
-            } else {
-                const d = await res.json();
-                alert(d.detail || 'Update failed');
-            }
+            if (res.ok) { closeModal(); loadConnectors(); }
+            else { const d = await res.json(); alert(d.detail || 'Update failed'); }
         } catch (e) { alert('Error: ' + e.message); }
         return;
     }
 
-    if (!tokenInput) { alert('API Token is required.'); return; }
-
     try {
-        const res = await fetch('/api/paperless/setup', {
+        const res = await fetch(`/api/connectors/${encodeURIComponent(name)}/setup`, {
             method: 'POST',
             headers: {'Content-Type': 'application/json'},
-            body: JSON.stringify({ url, token: tokenInput, sync_tags })
+            body: JSON.stringify(values)
         });
         const d = await res.json();
         if (d.test?.ok) {
             closeModal();
-            loadPaperless();
-            alert(`Connected! ${d.test.document_count} documents, ${d.test.tag_count} tags found.`);
+            loadConnectors();
+            const info = Object.entries(d.test).filter(([k]) => k !== 'ok').map(([k, v]) => `${k}: ${v}`).join(', ');
+            alert(`Connected! ${info}`);
         } else {
             alert('Connection failed: ' + (d.test?.error || 'Unknown error'));
         }
     } catch (e) { alert('Error: ' + e.message); }
 }
 
-async function testPaperless() {
+async function testConnector(name) {
     botBusy();
     try {
-        const res = await fetch('/api/paperless/test', { method: 'POST' });
+        const res = await fetch(`/api/connectors/${encodeURIComponent(name)}/test`, { method: 'POST' });
         const d = await res.json();
         if (d.ok) {
-            alert(`Connection OK! ${d.document_count} documents, ${d.tag_count} tags.`);
+            const info = Object.entries(d).filter(([k]) => k !== 'ok').map(([k, v]) => `${k}: ${v}`).join(', ');
+            alert(`Connection OK! ${info}`);
         } else {
             alert('Connection failed: ' + (d.error || 'Unknown error'));
         }
@@ -1281,24 +1309,25 @@ async function testPaperless() {
     finally { botIdle(); }
 }
 
-async function syncPaperless() {
+async function syncConnector(name) {
     botBusy();
     try {
-        const res = await fetch('/api/paperless/sync', { method: 'POST' });
+        const res = await fetch(`/api/connectors/${encodeURIComponent(name)}/sync`, { method: 'POST' });
         const d = await res.json();
-        alert(`Sync complete: ${d.added} added, ${d.updated} updated, ${d.removed} removed, ${d.skipped} unchanged (${d.total_remote} remote)` +
-              (d.errors.length ? '\nErrors: ' + d.errors.join(', ') : ''));
-        loadPaperless();
+        alert(`Sync complete: ${d.added} added, ${d.updated} updated, ${d.removed} removed, ${d.skipped} unchanged` +
+              (d.total_remote ? ` (${d.total_remote} remote)` : '') +
+              (d.errors?.length ? '\nErrors: ' + d.errors.join(', ') : ''));
+        loadConnectors();
     } catch (e) { alert('Sync failed: ' + e.message); }
     finally { botIdle(); }
 }
 
-async function removePaperless() {
+async function removeConnector(name) {
+    if (!confirm(`Disconnect "${name}"?`)) return;
     const purge = confirm('Also delete all synced memories?');
-    if (!confirm('Disconnect Paperless-ngx?')) return;
     try {
-        await fetch(`/api/paperless?purge=${purge}`, { method: 'DELETE' });
-        loadPaperless();
+        await fetch(`/api/connectors/${encodeURIComponent(name)}?purge=${purge}`, { method: 'DELETE' });
+        loadConnectors();
     } catch (e) { console.error(e); }
 }
 

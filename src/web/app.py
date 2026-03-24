@@ -27,7 +27,7 @@ from src.core.compressors.code_compact import CodeCompactCompressor
 from src.core.secrets import SecretDetector
 from src.core.skill_registry import SkillRegistry
 from src.storage.memory_activity import MemoryActivityLog
-from src.connectors.paperless import PaperlessConnector
+from src.connectors.registry import ConnectorRegistry
 from src.core.events import EventBus
 from src.storage.folders import FolderManager
 from src.storage.profiles import ProfileManager
@@ -139,19 +139,6 @@ class ProfileCreate(BaseModel):
 
 class EstimateRequest(BaseModel):
     text: str
-
-
-class PaperlessSetup(BaseModel):
-    url: str
-    token: str
-    sync_tags: List[str] = []
-
-
-class PaperlessUpdate(BaseModel):
-    url: Optional[str] = None
-    token: Optional[str] = None
-    sync_tags: Optional[List[str]] = None
-    enabled: Optional[bool] = None
 
 
 class FolderSourceCreate(BaseModel):
@@ -1035,69 +1022,70 @@ def create_app(db_path: Optional[Path] = None) -> FastAPI:
             for name, r in results.items()
         }
 
-    # --- Paperless-ngx ---
+    # --- Connectors (Plugin Architecture) ---
 
-    @app.get("/api/paperless")
-    async def paperless_status():
-        pc = PaperlessConnector()
-        cfg = pc.get_config()
-        return {
-            "configured": pc.configured,
-            "url": cfg.url,
-            "enabled": cfg.enabled,
-            "sync_tags": cfg.sync_tags,
-            "last_sync": cfg.last_sync,
-            "synced_docs": cfg.synced_docs,
-        }
+    _connectors = ConnectorRegistry.instance()
 
-    @app.post("/api/paperless/setup")
-    async def paperless_setup(req: PaperlessSetup):
-        pc = PaperlessConnector()
-        pc.configure(req.url, req.token, req.sync_tags or None)
-        result = pc.test()
-        return {
-            "status": "configured",
-            "test": result,
-        }
+    def _get_connector(name: str):
+        c = _connectors.get(name)
+        if not c:
+            raise HTTPException(404, f"Connector '{name}' not found")
+        return c
 
-    @app.put("/api/paperless")
-    async def paperless_update(req: PaperlessUpdate):
-        pc = PaperlessConnector()
-        if not pc.configured:
-            raise HTTPException(400, "Paperless not configured. Use /api/paperless/setup first.")
-        updates = {k: v for k, v in req.model_dump().items() if v is not None}
-        pc.update(**updates)
+    @app.get("/api/connectors")
+    async def list_connectors():
+        return [c.get_status() for c in _connectors.list()]
+
+    @app.get("/api/connectors/{name}")
+    async def connector_status(name: str):
+        return _get_connector(name).get_status()
+
+    @app.post("/api/connectors/{name}/setup")
+    async def connector_setup(name: str, request: Request):
+        c = _get_connector(name)
+        body = await request.json()
+        c.configure(body)
+        result = c.test_connection()
+        _events.emit("connector", "setup", name, f"ok={result.get('ok')}")
+        return {"status": "configured", "test": result}
+
+    @app.put("/api/connectors/{name}")
+    async def connector_update(name: str, request: Request):
+        c = _get_connector(name)
+        if not c.configured:
+            raise HTTPException(400, f"Connector '{name}' not configured yet.")
+        body = await request.json()
+        c.update(body)
         return {"status": "updated"}
 
-    @app.post("/api/paperless/test")
-    async def paperless_test():
-        pc = PaperlessConnector()
-        return pc.test()
+    @app.post("/api/connectors/{name}/test")
+    async def connector_test(name: str):
+        c = _get_connector(name)
+        return c.test_connection()
 
-    @app.post("/api/paperless/sync")
-    async def paperless_sync():
-        pc = PaperlessConnector()
+    @app.post("/api/connectors/{name}/sync")
+    async def connector_sync(name: str):
+        c = _get_connector(name)
         store = _get_memory_store()
-        result = pc.sync(store)
-        _events.emit("paperless", "sync", f"{result.total_remote} docs", f"+{result.added} ~{result.updated} -{result.removed}")
-        return {
-            "status": "synced",
-            "added": result.added,
-            "updated": result.updated,
-            "removed": result.removed,
-            "skipped": result.skipped,
-            "total_remote": result.total_remote,
-            "errors": result.errors,
-        }
+        result = c.sync(store)
+        _events.emit("connector", "sync", name, f"+{result.added} ~{result.updated} -{result.removed}")
+        return {"status": "synced", **result.to_dict()}
 
-    @app.delete("/api/paperless")
-    async def paperless_remove(purge: bool = Query(False)):
-        pc = PaperlessConnector()
+    @app.post("/api/connectors/{name}/enable")
+    async def connector_enable(name: str, enabled: bool = Query(True)):
+        c = _get_connector(name)
+        c.set_enabled(enabled)
+        return {"status": "updated", "enabled": enabled}
+
+    @app.delete("/api/connectors/{name}")
+    async def connector_remove(name: str, purge: bool = Query(False)):
+        c = _get_connector(name)
         purged = 0
         if purge:
             store = _get_memory_store()
-            purged = pc.purge(store)
-        pc.remove()
+            purged = c.purge(store)
+        c.remove()
+        _events.emit("connector", "remove", name, f"purged={purged}")
         return {"status": "removed", "purged_memories": purged}
 
     return app
