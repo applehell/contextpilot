@@ -5,7 +5,7 @@ import sqlite3
 from pathlib import Path
 from typing import Optional
 
-SCHEMA_VERSION = 9
+SCHEMA_VERSION = 10
 
 MIGRATIONS = {
     1: [
@@ -206,6 +206,29 @@ MIGRATIONS = {
         # -- auto-detected relations flag --
         """ALTER TABLE memory_relations ADD COLUMN auto INTEGER NOT NULL DEFAULT 0""",
         """ALTER TABLE memory_relations ADD COLUMN confidence REAL NOT NULL DEFAULT 1.0""",
+    ],
+    10: [
+        # -- pinned memories --
+        """ALTER TABLE memories ADD COLUMN pinned INTEGER NOT NULL DEFAULT 0""",
+        """CREATE INDEX IF NOT EXISTS idx_memories_pinned ON memories(pinned DESC, key)""",
+        # -- trash (soft delete) --
+        """CREATE TABLE IF NOT EXISTS memory_trash (
+            key TEXT PRIMARY KEY,
+            value TEXT NOT NULL,
+            tags TEXT NOT NULL DEFAULT '[]',
+            metadata TEXT NOT NULL DEFAULT '{}',
+            created_at REAL NOT NULL,
+            deleted_at REAL NOT NULL
+        )""",
+        """CREATE INDEX IF NOT EXISTS idx_trash_deleted ON memory_trash(deleted_at)""",
+        # -- memory templates (creation presets) --
+        """CREATE TABLE IF NOT EXISTS memory_presets (
+            name TEXT PRIMARY KEY,
+            key_prefix TEXT NOT NULL DEFAULT '',
+            default_tags TEXT NOT NULL DEFAULT '[]',
+            description TEXT NOT NULL DEFAULT '',
+            created_at REAL NOT NULL
+        )""",
     ],
 }
 

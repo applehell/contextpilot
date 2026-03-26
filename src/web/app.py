@@ -189,7 +189,7 @@ def _get_profile_dir() -> Path:
 def create_app(db_path: Optional[Path] = None) -> FastAPI:
     _init_db(db_path)
 
-    app = FastAPI(title="Context Pilot", version="3.1.0")
+    app = FastAPI(title="Context Pilot", version="3.2.0")
 
     app.mount("/static", StaticFiles(directory=str(WEB_DIR / "static")), name="static")
     templates = Jinja2Templates(directory=str(WEB_DIR / "templates"))
@@ -426,7 +426,7 @@ def create_app(db_path: Optional[Path] = None) -> FastAPI:
         memories = store.list(limit=page_size, offset=offset, source=source, sort=sort, order=order)
         total = store.count(source=source)
         return {
-            "memories": [m.to_dict() for m in memories],
+            "memories": [{**m.to_dict(), "tokens": TokenBudget.estimate(m.value), "bytes": len(m.value.encode("utf-8"))} for m in memories],
             "total": total,
             "page": page,
             "page_size": page_size,
@@ -455,7 +455,7 @@ def create_app(db_path: Optional[Path] = None) -> FastAPI:
         total = len(total_results)
         _events.emit("memory", "search", q or "(all)", f"{total} results" + (f", source={source}" if source else ""))
         return {
-            "memories": [m.to_dict() for m in results],
+            "memories": [{**m.to_dict(), "tokens": TokenBudget.estimate(m.value), "bytes": len(m.value.encode("utf-8"))} for m in results],
             "total": total,
             "page": page,
             "page_size": page_size,
@@ -473,7 +473,9 @@ def create_app(db_path: Optional[Path] = None) -> FastAPI:
     @app.post("/api/memories", status_code=201)
     async def set_memory(req: MemoryIn):
         store = _get_memory_store()
-        store.set(Memory(key=req.key, value=req.value, tags=req.tags))
+        m = Memory(key=req.key, value=req.value, tags=req.tags)
+        store.set(m)
+        _index_single(m)
         _events.emit("memory", "create", req.key, f"tags={req.tags}")
         return {"status": "saved", "key": req.key}
 
@@ -487,7 +489,9 @@ def create_app(db_path: Optional[Path] = None) -> FastAPI:
         # Save version before overwriting
         from src.storage.versions import VersionStore
         VersionStore(_db).record(key, old.value, old.tags, old.metadata, changed_by="web")
-        store.set(Memory(key=key, value=req.value, tags=req.tags))
+        m = Memory(key=key, value=req.value, tags=req.tags)
+        store.set(m)
+        _index_single(m)
         _events.emit("memory", "update", key)
         return {"status": "updated", "key": key}
 
@@ -496,6 +500,7 @@ def create_app(db_path: Optional[Path] = None) -> FastAPI:
         store = _get_memory_store()
         try:
             store.delete(key)
+            _remove_from_index(key)
             _events.emit("memory", "delete", key)
             return {"status": "deleted", "key": key}
         except KeyError as e:
@@ -513,6 +518,276 @@ def create_app(db_path: Optional[Path] = None) -> FastAPI:
                 pass
         _events.emit("memory", "bulk-delete", f"{deleted} memories")
         return {"status": "deleted", "count": deleted}
+
+    @app.post("/api/memories/suggest-tags")
+    async def suggest_tags(request: Request):
+        body = await request.json()
+        text = f"{body.get('key', '')} {body.get('value', '')}"
+        from src.core.embeddings import _tokenize
+        words = _tokenize(text)
+        if not words:
+            return {"tags": []}
+        store = _get_memory_store()
+        all_tags = set()
+        tag_scores: Dict[str, int] = {}
+        for m in store.list():
+            for tag in m.tags:
+                all_tags.add(tag)
+                tag_words = set(_tokenize(f"{m.key} {m.value}"))
+                overlap = len(set(words) & tag_words)
+                if overlap > 0:
+                    tag_scores[tag] = tag_scores.get(tag, 0) + overlap
+        ranked = sorted(tag_scores.items(), key=lambda x: -x[1])
+        return {"tags": [t for t, _ in ranked[:5]]}
+
+    # --- Pinning ---
+
+    @app.post("/api/memories/{key:path}/pin")
+    async def pin_memory(key: str, pinned: bool = Query(True)):
+        store = _get_memory_store()
+        try:
+            store.get(key)
+        except KeyError:
+            raise HTTPException(404, f"Memory '{key}' not found")
+        store.pin(key, pinned)
+        _events.emit("memory", "pin" if pinned else "unpin", key)
+        return {"status": "ok", "pinned": pinned}
+
+    # --- Trash ---
+
+    @app.get("/api/trash")
+    async def list_trash():
+        store = _get_memory_store()
+        return store.trash_list()
+
+    @app.post("/api/trash/{key:path}/restore")
+    async def restore_from_trash(key: str):
+        store = _get_memory_store()
+        try:
+            store.trash_restore(key)
+            _events.emit("memory", "restore", key)
+            return {"status": "restored", "key": key}
+        except KeyError as e:
+            raise HTTPException(404, str(e))
+
+    @app.delete("/api/trash/{key:path}")
+    async def purge_from_trash(key: str):
+        store = _get_memory_store()
+        store.trash_purge(key)
+        return {"status": "purged", "key": key}
+
+    @app.delete("/api/trash")
+    async def empty_trash():
+        store = _get_memory_store()
+        count = store.trash_purge()
+        return {"status": "emptied", "count": count}
+
+    # --- Bulk Tag Operations ---
+
+    @app.post("/api/memories/bulk-tags")
+    async def bulk_tag_memories(request: Request):
+        body = await request.json()
+        keys = body.get("keys", [])
+        add_tags = body.get("add", [])
+        remove_tags = body.get("remove", [])
+        store = _get_memory_store()
+        updated = 0
+        for key in keys:
+            try:
+                m = store.get(key)
+                changed = False
+                for t in add_tags:
+                    if t not in m.tags:
+                        m.tags.append(t)
+                        changed = True
+                for t in remove_tags:
+                    if t in m.tags:
+                        m.tags.remove(t)
+                        changed = True
+                if changed:
+                    store.set(m)
+                    updated += 1
+            except KeyError:
+                pass
+        _events.emit("memory", "bulk-tags", f"{updated} updated, +{add_tags} -{remove_tags}")
+        return {"status": "ok", "updated": updated}
+
+    # --- Memory Presets (Creation Templates) ---
+
+    @app.get("/api/memory-presets")
+    async def list_memory_presets():
+        try:
+            rows = _db.conn.execute("SELECT name, key_prefix, default_tags, description, created_at FROM memory_presets ORDER BY name").fetchall()
+            return [{"name": r["name"], "key_prefix": r["key_prefix"], "default_tags": json.loads(r["default_tags"]),
+                     "description": r["description"]} for r in rows]
+        except Exception:
+            return []
+
+    @app.post("/api/memory-presets", status_code=201)
+    async def save_memory_preset(request: Request):
+        body = await request.json()
+        name = body.get("name", "").strip()
+        if not name:
+            raise HTTPException(400, "Name required")
+        _db.conn.execute(
+            "INSERT OR REPLACE INTO memory_presets (name, key_prefix, default_tags, description, created_at) VALUES (?, ?, ?, ?, ?)",
+            (name, body.get("key_prefix", ""), json.dumps(body.get("default_tags", [])),
+             body.get("description", ""), time.time()),
+        )
+        _db.conn.commit()
+        return {"status": "saved", "name": name}
+
+    @app.delete("/api/memory-presets/{name}")
+    async def delete_memory_preset(name: str):
+        _db.conn.execute("DELETE FROM memory_presets WHERE name = ?", (name,))
+        _db.conn.commit()
+        return {"status": "deleted"}
+
+    # --- JSON Import ---
+
+    @app.post("/api/import/json")
+    async def import_json(file: UploadFile = File(...)):
+        content = await file.read()
+        store = _get_memory_store()
+        try:
+            count = store.import_json(content.decode("utf-8"), merge=True)
+            _events.emit("import", "json", file.filename or "upload", f"{count} memories")
+            return {"status": "imported", "count": count, "filename": file.filename}
+        except Exception as e:
+            raise HTTPException(400, f"Invalid JSON: {e}")
+
+    # --- Global Search ---
+
+    @app.get("/api/global-search")
+    async def global_search(q: str = Query("", min_length=1)):
+        results: Dict[str, list] = {"memories": [], "templates": [], "connectors": [], "folders": []}
+        ql = q.lower()
+        store = _get_memory_store()
+        for m in store.search(q, limit=10):
+            results["memories"].append({"key": m.key, "preview": m.value[:100], "type": "memory"})
+        from src.storage.templates import TemplateStore as _TS
+        for t in _TS(_db).list():
+            if ql in t.name.lower() or ql in t.description.lower():
+                results["templates"].append({"name": t.name, "description": t.description, "type": "template"})
+        for c in _get_connectors().list():
+            status = c.get_status()
+            if ql in status.get("name", "").lower() or ql in status.get("display_name", "").lower():
+                results["connectors"].append({"name": status["name"], "display_name": status.get("display_name", ""), "type": "connector"})
+        fm = FolderManager(_get_profile_dir())
+        for f in fm.list():
+            if ql in f.name.lower() or ql in f.path.lower():
+                results["folders"].append({"name": f.name, "path": f.path, "type": "folder"})
+        return results
+
+    # --- Connector Health Check ---
+
+    @app.get("/api/connectors/health")
+    async def connectors_health():
+        results = []
+        for c in _get_connectors().list():
+            status = c.get_status()
+            health = {"name": status["name"], "display_name": status.get("display_name", ""),
+                       "configured": status.get("configured", False), "enabled": status.get("enabled", False)}
+            if status.get("configured"):
+                try:
+                    test = c.test_connection()
+                    health["reachable"] = test.get("ok", False)
+                    health["detail"] = test.get("message", "")
+                except Exception as e:
+                    health["reachable"] = False
+                    health["detail"] = str(e)
+            else:
+                health["reachable"] = None
+                health["detail"] = "not configured"
+            results.append(health)
+        return results
+
+    # --- Dashboard Statistics ---
+
+    @app.get("/api/dashboard/stats")
+    async def dashboard_stats():
+        store = _get_memory_store()
+        memories = store.list()
+        now = time.time()
+        day_ago = now - 86400
+        week_ago = now - 604800
+
+        tag_counts: Dict[str, int] = {}
+        size_dist = {"small": 0, "medium": 0, "large": 0}
+        new_today = 0
+        updated_today = 0
+        new_this_week = 0
+        total_tokens = 0
+        for m in memories:
+            tokens = TokenBudget.estimate(m.value)
+            total_tokens += tokens
+            if tokens < 100:
+                size_dist["small"] += 1
+            elif tokens < 500:
+                size_dist["medium"] += 1
+            else:
+                size_dist["large"] += 1
+            for t in m.tags:
+                tag_counts[t] = tag_counts.get(t, 0) + 1
+            if m.created_at > day_ago:
+                new_today += 1
+            elif m.updated_at > day_ago:
+                updated_today += 1
+            if m.created_at > week_ago or m.updated_at > week_ago:
+                new_this_week += 1
+
+        top_tags = sorted(tag_counts.items(), key=lambda x: -x[1])[:10]
+        return {
+            "total": len(memories),
+            "total_tokens": total_tokens,
+            "new_today": new_today,
+            "updated_today": updated_today,
+            "new_this_week": new_this_week,
+            "pinned": sum(1 for m in memories if m.pinned),
+            "size_distribution": size_dist,
+            "top_tags": [{"tag": t, "count": c} for t, c in top_tags],
+            "trash_count": len(store.trash_list()),
+        }
+
+    # --- Scheduled Reports ---
+
+    @app.post("/api/reports/summary")
+    async def generate_summary_report():
+        store = _get_memory_store()
+        memories = store.list()
+        now = time.time()
+        day_ago = now - 86400
+
+        new_memories = [m for m in memories if m.created_at > day_ago]
+        updated_memories = [m for m in memories if m.updated_at > day_ago and m.created_at <= day_ago]
+
+        lines = [f"Context Pilot Report ({time.strftime('%Y-%m-%d %H:%M')})", ""]
+        lines.append(f"Total: {len(memories)} memories")
+        lines.append(f"New today: {len(new_memories)}")
+        lines.append(f"Updated today: {len(updated_memories)}")
+
+        if new_memories:
+            lines.append("\nNew:")
+            for m in new_memories[:10]:
+                lines.append(f"  + {m.key}")
+        if updated_memories:
+            lines.append("\nUpdated:")
+            for m in updated_memories[:10]:
+                lines.append(f"  ~ {m.key}")
+
+        report = "\n".join(lines)
+
+        from src.core.webhooks import WebhookManager
+        wm = WebhookManager(_get_profile_dir())
+        sent = 0
+        for wh in wm.list():
+            try:
+                wm.send(wh.name, report)
+                sent += 1
+            except Exception:
+                pass
+
+        return {"report": report, "webhooks_sent": sent}
 
     @app.get("/api/export-memories")
     async def export_memories(tag: str = Query("")):
@@ -1196,7 +1471,7 @@ def create_app(db_path: Optional[Path] = None) -> FastAPI:
     async def memory_versions(key: str, limit: int = Query(20, ge=1, le=100)):
         vs = VersionStore(_db)
         versions = vs.history(key, limit)
-        return [{"id": v.id, "value": v.value[:500], "tags": v.tags,
+        return [{"id": v.id, "value": v.value, "tags": v.tags,
                  "changed_by": v.changed_by, "created_at": v.created_at} for v in versions]
 
     # --- Memory Relations ---
@@ -1314,6 +1589,39 @@ def create_app(db_path: Optional[Path] = None) -> FastAPI:
         return {"content": content, "memory_count": len(memories),
                 "token_count": TokenBudget.estimate(content)}
 
+    @app.get("/api/export-markdown")
+    async def export_markdown(tags: str = Query(""), key_prefix: str = Query("")):
+        store = _get_memory_store()
+        memories = store.list()
+
+        if tags:
+            tag_list = [t.strip() for t in tags.split(",") if t.strip()]
+            memories = [m for m in memories if any(t in m.tags for t in tag_list)]
+        if key_prefix:
+            memories = [m for m in memories if m.key.startswith(key_prefix)]
+
+        grouped: Dict[str, list] = {}
+        for m in sorted(memories, key=lambda x: x.key):
+            group = m.tags[0] if m.tags else "Untagged"
+            grouped.setdefault(group, []).append(m)
+
+        lines = ["# Context Pilot — Knowledge Export", ""]
+        lines.append(f"*{len(memories)} memories exported*\n")
+        for group, mems in sorted(grouped.items()):
+            lines.append(f"## {group}\n")
+            for m in mems:
+                lines.append(f"### {m.key}\n")
+                tag_str = " ".join(f"`{t}`" for t in m.tags)
+                if tag_str:
+                    lines.append(f"Tags: {tag_str}\n")
+                lines.append(m.value)
+                lines.append("")
+            lines.append("---\n")
+
+        content = "\n".join(lines)
+        return {"content": content, "memory_count": len(memories),
+                "token_count": TokenBudget.estimate(content)}
+
     # --- Duplicate Detection ---
 
     @app.get("/api/duplicates")
@@ -1405,7 +1713,7 @@ def create_app(db_path: Optional[Path] = None) -> FastAPI:
 
     # --- Semantic Search ---
 
-    from src.core.embeddings import index_memories as _index_memories, semantic_search as _semantic_search, get_backend as _embed_backend
+    from src.core.embeddings import index_memories as _index_memories, semantic_search as _semantic_search, get_backend as _embed_backend, index_single_memory as _index_single, remove_from_index as _remove_from_index
 
     @app.post("/api/embeddings/index")
     async def index_embeddings():
@@ -1499,6 +1807,65 @@ def create_app(db_path: Optional[Path] = None) -> FastAPI:
         c.remove()
         _events.emit("connector", "remove", name, f"purged={purged}")
         return {"status": "removed", "purged_memories": purged}
+
+    # --- Email Connector Account Management ---
+
+    @app.get("/api/connectors/email/accounts")
+    async def email_accounts():
+        c = _get_connector("email")
+        accounts = c._get_accounts()
+        # Mask passwords
+        safe = []
+        for acc in accounts:
+            a = dict(acc)
+            if a.get("password"):
+                a["password"] = "********"
+            safe.append(a)
+        return safe
+
+    @app.post("/api/connectors/email/accounts")
+    async def add_email_account(request: Request):
+        c = _get_connector("email")
+        body = await request.json()
+        required = ["name", "host", "user", "password"]
+        for f in required:
+            if not body.get(f):
+                raise HTTPException(400, f"'{f}' is required")
+        acc = {
+            "name": body["name"],
+            "host": body["host"],
+            "port": int(body.get("port", 993)),
+            "user": body["user"],
+            "password": body["password"],
+            "ssl": body.get("ssl", True),
+            "folders": body.get("folders", ["INBOX"]),
+            "tags": body.get("tags", ["email"]),
+        }
+        accounts = c._get_accounts()
+        # Replace if name exists
+        accounts = [a for a in accounts if a.get("name") != acc["name"]]
+        accounts.append(acc)
+        c._config["accounts"] = accounts
+        c._config["_configured"] = True
+        c._config["_enabled"] = True
+        c._save()
+        _events.emit("connector", "add-account", "email", acc["name"])
+        return {"status": "added", "name": acc["name"], "total": len(accounts)}
+
+    @app.delete("/api/connectors/email/accounts/{account_name}")
+    async def remove_email_account(account_name: str):
+        c = _get_connector("email")
+        accounts = c._get_accounts()
+        before = len(accounts)
+        accounts = [a for a in accounts if a.get("name") != account_name]
+        if len(accounts) == before:
+            raise HTTPException(404, f"Account '{account_name}' not found")
+        c._config["accounts"] = accounts
+        if not accounts:
+            c._config["_configured"] = False
+        c._save()
+        _events.emit("connector", "remove-account", "email", account_name)
+        return {"status": "removed", "name": account_name, "remaining": len(accounts)}
 
     return app
 

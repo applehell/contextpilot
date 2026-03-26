@@ -6,7 +6,7 @@
     <title>Context Pilot</title>
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="/static/style.css?v=14">
+    <link rel="stylesheet" href="/static/style.css?v=16">
     <script src="https://unpkg.com/vis-network@9.1.9/standalone/umd/vis-network.min.js"></script>
     <link rel="stylesheet" href="https://unpkg.com/easymde@2.18.0/dist/easymde.min.css">
     <script src="https://unpkg.com/easymde@2.18.0/dist/easymde.min.js"></script>
@@ -53,10 +53,11 @@
             </div>
             <div>
                 <h1>Context Pilot <span id="app-version" style="font-size:11px;font-weight:400;color:var(--text-muted);vertical-align:middle;"></span></h1>
-                <p class="subtitle">Knowledge management for AI</p>
+                <p class="subtitle">Next level knowledge management for AI</p>
             </div>
         </div>
         <div id="profile-bar">
+            <button class="theme-toggle" id="theme-toggle" onclick="toggleTheme()" title="Toggle dark/light mode">&#9789;</button>
             <span>Profile:</span>
             <select id="profile-select" onchange="switchProfile()" style="width:auto;min-width:140px;"></select>
             <button class="btn btn-small" onclick="showNewProfileDialog()">+</button>
@@ -90,6 +91,29 @@
                 <div class="status-card"><div class="card-title">MCP</div><div class="card-value" id="dash-mcp-status">--</div><div class="card-detail" id="dash-mcp-detail"></div></div>
                 <div class="status-card"><div class="card-title">Connectors</div><div class="card-value" id="dash-connectors">--</div><div class="card-detail" id="dash-connectors-detail">configured</div></div>
                 <div class="status-card"><div class="card-title">Scheduler</div><div class="card-value" id="dash-scheduler">--</div><div class="card-detail" id="dash-scheduler-detail"></div></div>
+                <div class="status-card"><div class="card-title">Trash</div><div class="card-value" id="dash-trash">0</div><div class="card-detail"><a href="#" onclick="showTrash();return false;" style="font-size:11px;color:var(--accent);">View trash</a></div></div>
+                <div class="status-card"><div class="card-title">Today</div><div class="card-value" id="dash-new-today">--</div><div class="card-detail" id="dash-new-today-detail">new + updated</div></div>
+            </div>
+
+            <div class="panel" style="margin-top:16px;">
+                <div style="display:flex;justify-content:space-between;align-items:center;">
+                    <h2>Statistics</h2>
+                    <button class="btn btn-small" onclick="loadDashboardStats()">Refresh</button>
+                </div>
+                <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:16px;">
+                    <div>
+                        <label>Top Tags</label>
+                        <div id="dash-top-tags" style="margin-top:4px;"></div>
+                    </div>
+                    <div>
+                        <label>Size Distribution</label>
+                        <div id="dash-size-dist" style="margin-top:4px;"></div>
+                    </div>
+                    <div>
+                        <label>Connector Health</label>
+                        <div id="dash-connector-health" style="margin-top:4px;"></div>
+                    </div>
+                </div>
             </div>
 
             <div class="panel" style="margin-top:16px;">
@@ -98,6 +122,7 @@
                     <label class="btn btn-small" style="cursor:pointer">CLAUDE.md <input type="file" accept=".md" style="display:none" data-import="claude-md"></label>
                     <label class="btn btn-small" style="cursor:pointer">Copilot.md <input type="file" accept=".md" style="display:none" data-import="copilot-md"></label>
                     <label class="btn btn-small" style="cursor:pointer">SQLite .db <input type="file" accept=".db,.sqlite" style="display:none" data-import="sqlite"></label>
+                    <label class="btn btn-small" style="cursor:pointer">JSON <input type="file" accept=".json" style="display:none" data-import="json"></label>
                 </div>
                 <div id="import-status" style="font-size:12px;color:var(--text-muted);margin-top:8px;"></div>
             </div>
@@ -138,14 +163,14 @@
 
         <!-- Memories -->
         <section id="tab-memories" class="tab-content">
-            <div class="panel">
-                <h2>Memories</h2>
-                <div class="form-row inline">
-                    <input type="text" id="memory-search" placeholder="Search..." oninput="searchMemories()">
-                    <select id="memory-source-filter" onchange="loadMemories()" style="width:auto;min-width:120px;">
+            <!-- Search & Filter Bar -->
+            <div class="panel" style="padding:12px 16px;">
+                <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
+                    <input type="text" id="memory-search" placeholder="Search memories..." oninput="searchMemories()" style="flex:1;min-width:180px;">
+                    <select id="memory-source-filter" onchange="loadMemories()" style="width:auto;min-width:100px;">
                         <option value="">All Sources</option>
                     </select>
-                    <select id="memory-tag-filter" onchange="filterByTag()" style="width:auto;min-width:120px;">
+                    <select id="memory-tag-filter" onchange="filterByTag()" style="width:auto;min-width:100px;">
                         <option value="">All Tags</option>
                     </select>
                     <label style="display:inline;cursor:pointer;font-size:12px;white-space:nowrap;">
@@ -153,22 +178,53 @@
                     </label>
                     <button class="btn btn-small" onclick="rebuildIndex()" title="Rebuild embedding index">Index</button>
                 </div>
-                <div class="form-row inline">
-                    <input type="text" id="memory-key" placeholder="Key">
-                    <input type="text" id="memory-value" placeholder="Value">
-                    <input type="text" id="memory-tags" placeholder="Tags (comma-separated)">
-                    <button class="btn btn-primary" onclick="saveNewMemory()">Save</button>
+            </div>
+
+            <!-- New Memory (collapsible) -->
+            <details class="panel" style="padding:0;">
+                <summary style="padding:12px 16px;cursor:pointer;font-size:13px;font-weight:600;color:var(--text-secondary);user-select:none;">+ New Memory</summary>
+                <div style="padding:0 16px 16px;">
+                    <div class="form-row inline">
+                        <input type="text" id="memory-key" placeholder="Key" oninput="suggestTags()">
+                        <input type="text" id="memory-value" placeholder="Value" oninput="suggestTags()">
+                        <input type="text" id="memory-tags" placeholder="Tags (comma-separated)">
+                        <button class="btn btn-primary" onclick="saveNewMemory()">Save</button>
+                    </div>
+                    <div id="tag-suggestions" class="tag-suggestions" style="display:none;"></div>
+                    <div id="memory-presets" class="tag-suggestions" style="display:none;margin:4px 0;"></div>
                 </div>
-                <div style="display:flex;justify-content:space-between;align-items:center;margin:8px 0;">
+            </details>
+
+            <!-- Toolbar & List -->
+            <div class="panel">
+                <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:6px;">
                     <span id="memory-count" style="font-size:12px;color:var(--text-muted);"></span>
-                    <div style="display:flex;gap:6px;">
+                    <div style="display:flex;gap:4px;align-items:center;flex-wrap:wrap;">
+                        <select id="memory-sort" onchange="loadMemories()" style="width:auto;padding:3px 6px;font-size:11px;" title="Sort by">
+                            <option value="key">A-Z</option>
+                            <option value="updated" selected>Updated</option>
+                            <option value="created">Created</option>
+                            <option value="size">Size</option>
+                        </select>
+                        <select id="memory-order" onchange="loadMemories()" style="width:auto;padding:3px 6px;font-size:11px;">
+                            <option value="asc">Asc</option>
+                            <option value="desc" selected>Desc</option>
+                        </select>
+                        <select id="page-size-select" onchange="changePageSize()" style="width:auto;padding:3px 6px;font-size:11px;" title="Per page">
+                            <option value="25">25</option>
+                            <option value="50" selected>50</option>
+                            <option value="100">100</option>
+                            <option value="200">200</option>
+                        </select>
+                        <span style="color:var(--border);font-size:12px;">|</span>
                         <button class="btn btn-small" id="bulk-toggle-btn" onclick="toggleBulkMode()">Select</button>
                         <button class="btn btn-small btn-danger" id="bulk-delete-btn" style="display:none" onclick="bulkDeleteSelected()">Delete</button>
+                        <button class="btn btn-small" id="bulk-tag-btn" style="display:none" onclick="showBulkTagDialog()">Tag</button>
                         <button class="btn btn-small" onclick="exportMemories()">Export</button>
                     </div>
                 </div>
-                <div id="memory-list"></div>
-                <div id="pagination" style="display:flex;justify-content:center;align-items:center;gap:12px;margin-top:12px;"></div>
+                <div id="memory-list" style="margin-top:8px;"></div>
+                <div id="pagination" style="display:flex;justify-content:center;align-items:center;gap:8px;margin-top:12px;"></div>
             </div>
         </section>
 
@@ -267,6 +323,7 @@
                     <div style="display:flex;gap:8px;align-items:center;">
                         <input type="text" id="export-tags" placeholder="Filter by tags (comma-separated)" style="width:200px;padding:4px 8px;font-size:12px;">
                         <button class="btn btn-small btn-primary" onclick="exportClaudeMd()">Export CLAUDE.md</button>
+                        <button class="btn btn-small" onclick="exportMarkdown()">Export Markdown</button>
                     </div>
                 </div>
                 <div id="export-result"></div>
@@ -314,9 +371,17 @@
         </div>
     </div>
 
+    <!-- Global Search -->
+    <div class="global-search-overlay" id="global-search-overlay">
+        <div class="global-search-box">
+            <input type="text" id="global-search-input" placeholder="Search memories, templates, connectors..." oninput="globalSearch()">
+            <div class="global-search-results" id="global-search-results"></div>
+        </div>
+    </div>
+
     <div id="progress-toast"></div>
 
-    <script src="/static/app.js?v=14"></script>
+    <script src="/static/app.js?v=16"></script>
     <script>init();</script>
 </body>
 </html>

@@ -248,6 +248,22 @@ def index_memories(memories: list) -> Dict[str, int]:
     return {"indexed": indexed, "skipped": skipped, "total": len(memories), "backend": _backend}
 
 
+def index_single_memory(memory) -> None:
+    """Index or re-index a single memory (after create/update)."""
+    store = _get_store()
+    text = f"{memory.key} {' '.join(memory.tags)} {memory.value}"
+    content_hash = hashlib.sha256(text.encode()).hexdigest()[:16]
+    if store.has(memory.key, content_hash):
+        return
+    vec = embed_text(text)
+    store.store(memory.key, content_hash, vec)
+
+
+def remove_from_index(key: str) -> None:
+    """Remove a memory from the embedding index."""
+    _get_store().remove(key)
+
+
 def semantic_search(query: str, limit: int = 10) -> List[Tuple[str, float]]:
     """Search memories by semantic similarity. Returns [(key, score), ...]."""
     store = _get_store()

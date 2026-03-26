@@ -3,7 +3,7 @@
 let debounceTimers = {};
 let bulkMode = false;
 let currentPage = 1;
-const PAGE_SIZE = 50;
+let PAGE_SIZE = 50;
 let blockIndex = 1;
 let graphNetwork = null;
 let graphDataCache = null;
@@ -28,17 +28,103 @@ function init() {
         input.addEventListener('change', () => importFile(input, input.dataset.import));
     });
 
+    initTheme();
+    initKeyboardShortcuts();
     startup();
+}
+
+// ═══════════════════════════════════════════════════════════════
+// DARK MODE
+// ═══════════════════════════════════════════════════════════════
+
+function initTheme() {
+    const saved = localStorage.getItem('cp-theme');
+    if (saved === 'dark' || (!saved && window.matchMedia('(prefers-color-scheme: dark)').matches)) {
+        document.documentElement.setAttribute('data-theme', 'dark');
+    }
+    updateThemeIcon();
+}
+
+function toggleTheme() {
+    const isDark = document.documentElement.getAttribute('data-theme') === 'dark';
+    if (isDark) {
+        document.documentElement.removeAttribute('data-theme');
+        localStorage.setItem('cp-theme', 'light');
+    } else {
+        document.documentElement.setAttribute('data-theme', 'dark');
+        localStorage.setItem('cp-theme', 'dark');
+    }
+    updateThemeIcon();
+}
+
+function updateThemeIcon() {
+    const btn = document.getElementById('theme-toggle');
+    if (!btn) return;
+    const isDark = document.documentElement.getAttribute('data-theme') === 'dark';
+    btn.innerHTML = isDark ? '&#9788;' : '&#9789;';
+    btn.title = isDark ? 'Switch to light mode' : 'Switch to dark mode';
+}
+
+// ═══════════════════════════════════════════════════════════════
+// KEYBOARD SHORTCUTS
+// ═══════════════════════════════════════════════════════════════
+
+function initKeyboardShortcuts() {
+    document.addEventListener('keydown', e => {
+        const modal = document.getElementById('modal-overlay');
+        const isModalOpen = modal && modal.classList.contains('active');
+        const isInput = ['INPUT', 'TEXTAREA', 'SELECT'].includes(document.activeElement?.tagName);
+
+        // Escape — close global search or modal
+        if (e.key === 'Escape') {
+            const gs = document.getElementById('global-search-overlay');
+            if (gs && gs.classList.contains('active')) {
+                closeGlobalSearch();
+                e.preventDefault();
+                return;
+            }
+            if (isModalOpen) {
+                closeModal();
+                e.preventDefault();
+                return;
+            }
+        }
+
+        // Ctrl+K / Cmd+K — open global search
+        if ((e.ctrlKey || e.metaKey) && e.key === 'k') {
+            e.preventDefault();
+            openGlobalSearch();
+            return;
+        }
+
+        // Shortcuts only when not in an input
+        if (isInput || isModalOpen) return;
+
+        // N — new memory
+        if (e.key === 'n') {
+            e.preventDefault();
+            showTab('memories', null);
+            setTimeout(() => document.getElementById('memory-key')?.focus(), 100);
+        }
+
+        // 1-7 — tab navigation
+        const tabKeys = { '1': 'dashboard', '2': 'memories', '3': 'skills', '4': 'graph', '5': 'secrets', '6': 'sources', '7': 'assembler' };
+        if (tabKeys[e.key]) {
+            e.preventDefault();
+            showTab(tabKeys[e.key], null);
+        }
+    });
 }
 
 async function startup() {
     const status = document.getElementById('startup-status');
     const bar = document.getElementById('startup-bar');
     const steps = [
-        ['Connecting event stream...', 20, () => connectSSE()],
-        ['Loading version...', 35, () => loadVersion()],
+        ['Connecting event stream...', 15, () => connectSSE()],
+        ['Loading version...', 30, () => loadVersion()],
         ['Loading profiles...', 50, () => loadProfiles()],
-        ['Loading dashboard...', 75, () => loadDashboard()],
+        ['Loading dashboard...', 70, () => loadDashboard()],
+        ['Building search index...', 90, () => rebuildIndex({silent: true})],
         ['Ready', 100, () => {}],
     ];
 
@@ -285,6 +371,86 @@ async function loadDashboard() {
             mcpDetail.textContent = 'Not registered in Claude';
         }
     } catch (e) {}
+
+    loadDashboardStats();
+}
+
+async function loadDashboardStats() {
+    try {
+        const res = await fetch('/api/dashboard/stats');
+        const d = await res.json();
+
+        // New today / this week
+        const newEl = document.getElementById('dash-new-today');
+        if (newEl) {
+            const totalToday = d.new_today + (d.updated_today || 0);
+            newEl.textContent = totalToday;
+        }
+        const weekEl = document.getElementById('dash-new-today-detail');
+        if (weekEl) { weekEl.textContent = `${d.new_today} new, ${d.updated_today || 0} updated`; }
+        const trashEl = document.getElementById('dash-trash');
+        if (trashEl) { trashEl.textContent = d.trash_count; }
+
+        // Top tags chart
+        const tagsEl = document.getElementById('dash-top-tags');
+        if (tagsEl && d.top_tags.length) {
+            const maxCount = d.top_tags[0].count;
+            tagsEl.innerHTML = d.top_tags.map(t => {
+                const pct = Math.round((t.count / maxCount) * 100);
+                return `<div style="display:flex;align-items:center;gap:6px;margin-bottom:3px;">
+                    <span style="font-size:11px;min-width:70px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${escapeHtml(t.tag)}</span>
+                    <div style="flex:1;height:6px;background:var(--surface-alt);border-radius:3px;overflow:hidden;">
+                        <div style="width:${pct}%;height:100%;background:var(--accent);border-radius:3px;"></div>
+                    </div>
+                    <span style="font-size:10px;color:var(--text-muted);min-width:20px;text-align:right;">${t.count}</span>
+                </div>`;
+            }).join('');
+        } else if (tagsEl) {
+            tagsEl.innerHTML = '<span class="muted">No tags yet</span>';
+        }
+
+        // Size distribution
+        const sizeEl = document.getElementById('dash-size-dist');
+        if (sizeEl) {
+            const total = d.size_distribution.small + d.size_distribution.medium + d.size_distribution.large;
+            if (total > 0) {
+                sizeEl.innerHTML = ['small', 'medium', 'large'].map(s => {
+                    const count = d.size_distribution[s];
+                    const pct = Math.round((count / total) * 100);
+                    const colors = {small: 'var(--success)', medium: 'var(--warning)', large: 'var(--accent)'};
+                    const labels = {small: '<100 tok', medium: '100-500', large: '500+'};
+                    return `<div style="display:flex;align-items:center;gap:6px;margin-bottom:3px;">
+                        <span style="font-size:11px;min-width:60px;">${labels[s]}</span>
+                        <div style="flex:1;height:6px;background:var(--surface-alt);border-radius:3px;overflow:hidden;">
+                            <div style="width:${pct}%;height:100%;background:${colors[s]};border-radius:3px;"></div>
+                        </div>
+                        <span style="font-size:10px;color:var(--text-muted);">${count}</span>
+                    </div>`;
+                }).join('');
+            }
+        }
+    } catch (e) { console.error('Stats load failed:', e); }
+
+    // Connector health
+    try {
+        const hRes = await fetch('/api/connectors/health');
+        const health = await hRes.json();
+        const hEl = document.getElementById('dash-connector-health');
+        if (hEl) {
+            if (health.length === 0) {
+                hEl.innerHTML = '<span class="muted">No connectors</span>';
+            } else {
+                hEl.innerHTML = health.map(c => {
+                    const dotClass = c.reachable === true ? 'ok' : c.reachable === false ? 'fail' : 'unknown';
+                    return `<div style="font-size:12px;margin-bottom:3px;">
+                        <span class="health-dot ${dotClass}"></span>
+                        ${escapeHtml(c.display_name || c.name)}
+                        <span style="color:var(--text-muted);font-size:10px;">${escapeHtml(c.detail || '')}</span>
+                    </div>`;
+                }).join('');
+            }
+        }
+    } catch (e) {}
 }
 
 // ═══════════════════════════════════════════════════════════════
@@ -383,22 +549,30 @@ async function loadSkills() {
 async function loadMemories() {
     botBusy();
     const source = document.getElementById('memory-source-filter')?.value || '';
+    const sort = document.getElementById('memory-sort')?.value || 'updated';
+    const order = document.getElementById('memory-order')?.value || 'desc';
     try {
-        const [memRes, tagRes, srcRes] = await Promise.all([
-            fetch(`/api/memories?page=${currentPage}&page_size=${PAGE_SIZE}&source=${encodeURIComponent(source)}&sort=updated&order=desc`),
-            fetch('/api/memory-tags'),
-            fetch('/api/memories/sources'),
-        ]);
+        const memRes = await fetch(`/api/memories?page=${currentPage}&page_size=${PAGE_SIZE}&source=${encodeURIComponent(source)}&sort=${sort}&order=${order}`);
         const data = await memRes.json();
-        const tags = await tagRes.json();
-        const sources = await srcRes.json();
         renderMemories(data.memories);
-        renderTagFilter(tags);
-        renderSourceFilter(sources, source);
         renderPagination(data);
         const countEl = document.getElementById('memory-count');
         if (countEl) countEl.textContent = `${data.total} memories (page ${data.page}/${data.pages})`;
-    } catch (e) { console.error(e); } finally { botIdle(); }
+    } catch (e) { console.error('loadMemories failed:', e); } finally { botIdle(); }
+    // Load filters and presets independently (non-blocking)
+    try {
+        const tagRes = await fetch('/api/memory-tags');
+        renderTagFilter(await tagRes.json());
+    } catch (e) {}
+    try {
+        const srcRes = await fetch('/api/memories/sources');
+        const source2 = document.getElementById('memory-source-filter')?.value || '';
+        renderSourceFilter(await srcRes.json(), source2);
+    } catch (e) {}
+    try {
+        const presetRes = await fetch('/api/memory-presets');
+        if (presetRes.ok) renderPresets(await presetRes.json());
+    } catch (e) {}
 }
 
 function renderTagFilter(tags) {
@@ -430,10 +604,15 @@ function renderSourceFilter(sources, current) {
 
 function renderPagination(data) {
     const el = document.getElementById('pagination');
-    if (!el || data.pages <= 1) { if (el) el.innerHTML = ''; return; }
+    if (!el) return;
+    if (data.pages <= 1) { el.innerHTML = ''; return; }
+
+    const from = (data.page - 1) * data.page_size + 1;
+    const to = Math.min(data.page * data.page_size, data.total);
 
     let html = '';
-    html += `<button class="btn btn-small" ${data.page <= 1 ? 'disabled' : ''} onclick="goToPage(${data.page - 1})">Prev</button>`;
+    html += `<button class="btn btn-small" ${data.page <= 1 ? 'disabled' : ''} onclick="goToPage(1)" title="First">&laquo;</button>`;
+    html += `<button class="btn btn-small" ${data.page <= 1 ? 'disabled' : ''} onclick="goToPage(${data.page - 1})">&lsaquo;</button>`;
 
     const start = Math.max(1, data.page - 2);
     const end = Math.min(data.pages, data.page + 2);
@@ -441,8 +620,9 @@ function renderPagination(data) {
         html += `<button class="btn btn-small ${i === data.page ? 'btn-primary' : ''}" onclick="goToPage(${i})">${i}</button>`;
     }
 
-    html += `<button class="btn btn-small" ${data.page >= data.pages ? 'disabled' : ''} onclick="goToPage(${data.page + 1})">Next</button>`;
-    html += `<span style="font-size:11px;color:var(--text-muted);">${data.total} total</span>`;
+    html += `<button class="btn btn-small" ${data.page >= data.pages ? 'disabled' : ''} onclick="goToPage(${data.page + 1})">&rsaquo;</button>`;
+    html += `<button class="btn btn-small" ${data.page >= data.pages ? 'disabled' : ''} onclick="goToPage(${data.pages})" title="Last">&raquo;</button>`;
+    html += `<span style="font-size:11px;color:var(--text-muted);">${from}-${to} of ${data.total}</span>`;
     el.innerHTML = html;
 }
 
@@ -450,6 +630,12 @@ function goToPage(page) {
     currentPage = page;
     const q = document.getElementById('memory-search').value.trim();
     if (q) { filterByTag(); } else { loadMemories(); }
+}
+
+function changePageSize() {
+    PAGE_SIZE = parseInt(document.getElementById('page-size-select')?.value || '50');
+    currentPage = 1;
+    loadMemories();
 }
 
 async function filterByTag() {
@@ -472,7 +658,7 @@ async function filterByTag() {
 function renderMemories(data) {
     const list = document.getElementById('memory-list');
 
-    if (data.length === 0) {
+    if (!data || data.length === 0) {
         list.innerHTML = '<div class="empty-state">No memories found.</div>';
         return;
     }
@@ -494,32 +680,47 @@ function renderMemories(data) {
         const ts = m.updated_at || m.created_at;
         if (ts) {
             const delta = now - ts;
-            if (delta < 3600) age = `${Math.floor(delta / 60)}m ago`;
-            else if (delta < 86400) age = `${Math.floor(delta / 3600)}h ago`;
-            else age = `${Math.floor(delta / 86400)}d ago`;
+            if (delta < 3600) age = Math.floor(delta / 60) + 'm ago';
+            else if (delta < 86400) age = Math.floor(delta / 3600) + 'h ago';
+            else age = Math.floor(delta / 86400) + 'd ago';
         }
 
         const stateClass = isNew ? ' new' : isModified ? ' updated' : '';
-        const cbHtml = bulkMode ? `<input type="checkbox" class="bulk-cb" data-key="${escapeAttr(m.key)}">` : '';
-        const tagsHtml = m.tags.length
-            ? m.tags.map(t => `<span class="tag" onclick="event.stopPropagation();clickTag('${escapeAttr(t)}')">#${escapeHtml(t)}</span>`).join(' ')
+        const cbHtml = bulkMode ? '<input type="checkbox" class="bulk-cb" data-key="' + escapeAttr(m.key) + '" onclick="event.stopPropagation()">' : '';
+        const tagsHtml = (m.tags || []).length
+            ? m.tags.map(t => '<span class="tag" onclick="event.stopPropagation();clickTag(\'' + escapeAttr(t) + '\')">#' + escapeHtml(t) + '</span>').join(' ')
             : '';
 
-        return `<div class="memory-item${stateClass}" onclick="viewMemory('${escapeAttr(m.key)}')">
-            ${cbHtml}
-            <div class="main">
-                <div class="key">${badge}${escapeHtml(m.key)}</div>
-                <div class="preview">${escapeHtml((m.value || '').substring(0, 150))}</div>
-                <div class="meta">
-                    ${tagsHtml}
-                    ${age ? '<span class="age">' + age + '</span>' : ''}
-                </div>
-            </div>
-            <div class="actions" onclick="event.stopPropagation()">
-                <button class="btn btn-small" onclick="editMemory('${escapeAttr(m.key)}')">Edit</button>
-                <button class="btn btn-small btn-danger" onclick="deleteMemory('${escapeAttr(m.key)}')">Del</button>
-            </div>
-        </div>`;
+        const pinned = m.pinned || false;
+        const pinIcon = pinned ? '<span class="pin-badge" title="Pinned">P</span>' : '';
+
+        // Size info
+        const tokens = m.tokens || 0;
+        const bytes = m.bytes || 0;
+        let sizeStr = '';
+        if (tokens > 0) {
+            const byteLabel = bytes >= 1024 ? (bytes / 1024).toFixed(1) + ' KB' : bytes + ' B';
+            sizeStr = '<span class="token-count">' + tokens + ' tok / ' + byteLabel + '</span>';
+        }
+
+        const ek = escapeAttr(m.key);
+
+        return '<div class="memory-item' + stateClass + '" onclick="viewMemory(\'' + ek + '\')">'
+            + cbHtml
+            + '<div class="main">'
+            + '<div class="key">' + pinIcon + badge + escapeHtml(m.key) + '</div>'
+            + '<div class="preview">' + escapeHtml((m.value || '').substring(0, 120)) + '</div>'
+            + '<div class="meta">'
+            + tagsHtml
+            + sizeStr
+            + (age ? ' <span class="age">' + age + '</span>' : '')
+            + '</div>'
+            + '</div>'
+            + '<div class="actions" onclick="event.stopPropagation()">'
+            + '<button class="btn btn-small" onclick="togglePin(\'' + ek + '\',' + !pinned + ')" title="' + (pinned ? 'Unpin' : 'Pin') + '">' + (pinned ? 'Unpin' : 'Pin') + '</button>'
+            + '<button class="btn btn-small btn-danger" onclick="deleteMemory(\'' + ek + '\')">Del</button>'
+            + '</div>'
+            + '</div>';
     }).join('');
 }
 
@@ -565,6 +766,7 @@ async function viewMemory(key) {
             <label>Content</label>
             <div class="md-preview">${rendered}</div>
         `, `
+            <button class="btn" onclick="showVersions('${escapeAttr(m.key)}')">History</button>
             <button class="btn btn-primary" onclick="editMemory('${escapeAttr(m.key)}')">Edit</button>
             <button class="btn" onclick="closeModal()">Close</button>
         `);
@@ -718,15 +920,54 @@ async function semanticSearch() {
     finally { botIdle(); }
 }
 
-async function rebuildIndex() {
-    const tid = showToast('Building search index', 'Computing embeddings...');
-    botBusy();
+async function rebuildIndex({silent = false} = {}) {
+    const tid = silent ? null : showToast('Building search index', 'Computing embeddings...');
+    if (!silent) botBusy();
     try {
         const res = await fetch('/api/embeddings/index', { method: 'POST' });
         const d = await res.json();
-        completeToast(tid, `${d.indexed} indexed, ${d.skipped} skipped (${d.backend})`, false);
-    } catch (e) { completeToast(tid, 'Failed: ' + e.message, true); }
-    finally { botIdle(); }
+        if (tid) completeToast(tid, `${d.indexed} indexed, ${d.skipped} skipped (${d.backend})`, false);
+    } catch (e) {
+        if (tid) completeToast(tid, 'Failed: ' + e.message, true);
+        console.error('rebuildIndex failed:', e);
+    }
+    finally { if (!silent) botIdle(); }
+}
+
+// ═══════════════════════════════════════════════════════════════
+// SMART TAG SUGGESTIONS
+// ═══════════════════════════════════════════════════════════════
+
+async function suggestTags() {
+    clearTimeout(debounceTimers['tagSuggest']);
+    debounceTimers['tagSuggest'] = setTimeout(async () => {
+        const key = document.getElementById('memory-key').value.trim();
+        const value = document.getElementById('memory-value').value.trim();
+        const container = document.getElementById('tag-suggestions');
+        if (!key && !value) { container.style.display = 'none'; return; }
+        try {
+            const res = await fetch('/api/memories/suggest-tags', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({key, value})
+            });
+            const d = await res.json();
+            if (d.tags.length === 0) { container.style.display = 'none'; return; }
+            container.style.display = 'flex';
+            container.innerHTML = d.tags.map(t =>
+                `<span class="tag-suggestion" onclick="addSuggestedTag('${escapeAttr(t)}')">#${escapeHtml(t)}</span>`
+            ).join('');
+        } catch (e) { container.style.display = 'none'; }
+    }, 600);
+}
+
+function addSuggestedTag(tag) {
+    const input = document.getElementById('memory-tags');
+    const current = input.value.split(',').map(t => t.trim()).filter(Boolean);
+    if (!current.includes(tag)) {
+        current.push(tag);
+        input.value = current.join(', ');
+    }
 }
 
 function clickTag(tag) {
@@ -746,6 +987,7 @@ function clickTag(tag) {
 function toggleBulkMode() {
     bulkMode = !bulkMode;
     document.getElementById('bulk-delete-btn').style.display = bulkMode ? '' : 'none';
+    document.getElementById('bulk-tag-btn').style.display = bulkMode ? '' : 'none';
     document.getElementById('bulk-toggle-btn').textContent = bulkMode ? 'Cancel' : 'Select';
     loadMemories();
 }
@@ -1662,6 +1904,7 @@ function renderConnectorPanel(c) {
 }
 
 function showConnectorSetup(name) {
+    if (name === 'email') { showEmailSetup(); return; }
     fetch(`/api/connectors/${encodeURIComponent(name)}`).then(r => r.json()).then(c => {
         const fields = c.schema.map(f => {
             const val = c.config[f.name] || f.default || '';
@@ -1771,6 +2014,128 @@ async function removeConnector(name) {
         await fetch(`/api/connectors/${encodeURIComponent(name)}?purge=${purge}`, { method: 'DELETE' });
         loadConnectors();
     } catch (e) { console.error(e); }
+}
+
+// ═══════════════════════════════════════════════════════════════
+// EMAIL CONNECTOR SETUP
+// ═══════════════════════════════════════════════════════════════
+
+async function showEmailSetup() {
+    let accounts = [];
+    let connectorInfo = {};
+    try {
+        const [accRes, cRes] = await Promise.all([
+            fetch('/api/connectors/email/accounts'),
+            fetch('/api/connectors/email'),
+        ]);
+        accounts = await accRes.json();
+        connectorInfo = await cRes.json();
+    } catch (e) { console.error(e); }
+
+    const maxEmails = connectorInfo.config?.max_emails || 50;
+    const sinceDays = connectorInfo.config?.since_days || 30;
+    const maxBody = connectorInfo.config?.max_body_length || 2000;
+
+    const accountListHtml = accounts.length > 0
+        ? accounts.map(a => `<div class="memory-item" style="cursor:default;padding:8px 12px;">
+            <div class="main">
+                <div class="key">${escapeHtml(a.name)}</div>
+                <div class="preview">${escapeHtml(a.user)} @ ${escapeHtml(a.host)}:${a.port} | Folders: ${escapeHtml((a.folders || []).join(', '))} | Tags: ${escapeHtml((a.tags || []).join(', '))}</div>
+            </div>
+            <div class="actions" onclick="event.stopPropagation()">
+                <button class="btn btn-small btn-danger" onclick="removeEmailAccount('${escapeAttr(a.name)}')">Del</button>
+            </div>
+        </div>`).join('')
+        : '<p class="muted">No accounts configured. Add one below.</p>';
+
+    openModal('Email (IMAP) Setup', `
+        <label>Accounts</label>
+        <div id="email-account-list" style="margin-bottom:16px;">${accountListHtml}</div>
+
+        <div style="border:1px solid var(--border);border-radius:var(--radius);padding:12px;margin-bottom:16px;">
+            <div style="font-size:12px;font-weight:600;margin-bottom:8px;">Add Account</div>
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;">
+                <div><label>Name *</label><input type="text" id="email-acc-name" placeholder="e.g. Work, Private"></div>
+                <div><label>IMAP Host *</label><input type="text" id="email-acc-host" placeholder="imap.gmail.com"></div>
+                <div><label>User *</label><input type="text" id="email-acc-user" placeholder="user@example.com"></div>
+                <div><label>Password *</label><input type="text" id="email-acc-pass" placeholder="App password"></div>
+                <div><label>Port</label><input type="number" id="email-acc-port" value="993"></div>
+                <div><label>Folders (comma-sep.)</label><input type="text" id="email-acc-folders" value="INBOX" placeholder="INBOX, Sent"></div>
+                <div><label>Tags (comma-sep.)</label><input type="text" id="email-acc-tags" placeholder="email, work"></div>
+                <div style="display:flex;align-items:flex-end;"><button class="btn btn-primary btn-small" id="email-add-btn" style="width:100%;">Add Account</button></div>
+            </div>
+        </div>
+
+        <div style="border:1px solid var(--border);border-radius:var(--radius);padding:12px;">
+            <div style="font-size:12px;font-weight:600;margin-bottom:8px;">Sync Settings</div>
+            <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;">
+                <div><label>Max emails/folder</label><input type="number" id="email-max" value="${maxEmails}"></div>
+                <div><label>Since (days)</label><input type="number" id="email-days" value="${sinceDays}"></div>
+                <div><label>Max body length</label><input type="number" id="email-body" value="${maxBody}"></div>
+            </div>
+        </div>
+    `, `
+        <button class="btn btn-primary" id="email-save-settings">Save Settings</button>
+        <button class="btn" onclick="closeModal()">Close</button>
+    `);
+
+    document.getElementById('email-add-btn').addEventListener('click', addEmailAccount);
+    document.getElementById('email-save-settings').addEventListener('click', saveEmailSettings);
+}
+
+async function addEmailAccount() {
+    const name = document.getElementById('email-acc-name').value.trim();
+    const host = document.getElementById('email-acc-host').value.trim();
+    const user = document.getElementById('email-acc-user').value.trim();
+    const password = document.getElementById('email-acc-pass').value.trim();
+    if (!name || !host || !user || !password) { alert('Name, Host, User and Password are required.'); return; }
+
+    const port = parseInt(document.getElementById('email-acc-port').value) || 993;
+    const folders = document.getElementById('email-acc-folders').value.split(',').map(f => f.trim()).filter(Boolean);
+    const tags = document.getElementById('email-acc-tags').value.split(',').map(t => t.trim()).filter(Boolean);
+
+    const tid = showToast('Adding email account', name);
+    try {
+        const res = await fetch('/api/connectors/email/accounts', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({ name, host, port, user, password, ssl: port === 993, folders, tags })
+        });
+        if (res.ok) {
+            const d = await res.json();
+            completeToast(tid, `Added (${d.total} accounts total)`, false);
+            showEmailSetup(); // reload modal
+        } else {
+            const d = await res.json();
+            completeToast(tid, d.detail || 'Failed', true);
+        }
+    } catch (e) { completeToast(tid, 'Error: ' + e.message, true); }
+}
+
+async function removeEmailAccount(name) {
+    if (!confirm(`Remove account "${name}"?`)) return;
+    try {
+        await fetch(`/api/connectors/email/accounts/${encodeURIComponent(name)}`, { method: 'DELETE' });
+        showEmailSetup(); // reload
+        loadConnectors();
+    } catch (e) { console.error(e); }
+}
+
+async function saveEmailSettings() {
+    const values = {
+        max_emails: parseInt(document.getElementById('email-max').value) || 50,
+        since_days: parseInt(document.getElementById('email-days').value) || 30,
+        max_body_length: parseInt(document.getElementById('email-body').value) || 2000,
+    };
+    try {
+        await fetch('/api/connectors/email', {
+            method: 'PUT',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify(values)
+        });
+        closeModal();
+        loadConnectors();
+    } catch (e) { alert('Error: ' + e.message); }
 }
 
 // ═══════════════════════════════════════════════════════════════
@@ -2008,6 +2373,7 @@ async function loadTemplates() {
             </div>
             <div class="actions" style="display:flex;flex-direction:column;gap:4px;">
                 <button class="btn btn-small btn-primary" onclick="assembleTemplate('${escapeAttr(t.name)}')">Assemble</button>
+                <button class="btn btn-small" onclick="editTemplate('${escapeAttr(t.name)}')">Edit</button>
                 <button class="btn btn-small btn-danger" onclick="deleteTemplate('${escapeAttr(t.name)}')">Delete</button>
             </div>
         </div>`).join('');
@@ -2059,6 +2425,32 @@ async function assembleTemplate(name) {
         completeToast(tid, `${d.used_tokens}/${d.budget} tokens, ${d.included}/${d.total_matching} memories`, false);
     } catch (e) { completeToast(tid, 'Failed: ' + e.message, true); }
     finally { botIdle(); }
+}
+
+async function editTemplate(name) {
+    try {
+        const res = await fetch('/api/templates');
+        const templates = await res.json();
+        const t = templates.find(x => x.name === name);
+        if (!t) return;
+
+        openModal('Edit Template: ' + name, `
+            <label>Name</label>
+            <input type="text" id="tpl-name" value="${escapeHtml(t.name)}" readonly style="background:var(--surface-alt);cursor:not-allowed;">
+            <label>Description</label>
+            <input type="text" id="tpl-desc" value="${escapeHtml(t.description || '')}">
+            <label>Tag filter (comma-separated, empty = all)</label>
+            <input type="text" id="tpl-tags" value="${escapeHtml(t.tag_filter.join(', '))}">
+            <label>Key prefix filter (empty = all)</label>
+            <input type="text" id="tpl-prefix" value="${escapeHtml(t.key_filter || '')}">
+            <label>Token budget</label>
+            <input type="number" id="tpl-budget" value="${t.budget}" min="100">
+        `, `
+            <button class="btn btn-primary" id="tpl-save-btn">Save</button>
+            <button class="btn" onclick="closeModal()">Cancel</button>
+        `);
+        document.getElementById('tpl-save-btn').addEventListener('click', submitTemplate);
+    } catch (e) { console.error(e); }
 }
 
 async function deleteTemplate(name) {
@@ -2188,6 +2580,406 @@ async function removeWebhook(name) {
     if (!confirm(`Remove webhook "${name}"?`)) return;
     await fetch(`/api/webhooks/${encodeURIComponent(name)}`, { method: 'DELETE' });
     loadWebhooks();
+}
+
+// ═══════════════════════════════════════════════════════════════
+// VERSION HISTORY & DIFF VIEW
+// ═══════════════════════════════════════════════════════════════
+
+async function showVersions(key) {
+    try {
+        const [memRes, verRes] = await Promise.all([
+            fetch(memoryUrl(key)),
+            fetch(`/api/memories/${encodeURIComponent(key)}/versions`)
+        ]);
+        const current = await memRes.json();
+        const versions = await verRes.json();
+
+        if (versions.length === 0) {
+            openModal('History: ' + key, '<p class="muted">No version history available.</p>',
+                `<button class="btn" onclick="viewMemory('${escapeAttr(key)}')">Back</button>`);
+            return;
+        }
+
+        const versionList = versions.map((v, i) => {
+            const date = new Date(v.created_at * 1000).toLocaleString();
+            const preview = (v.value || '').substring(0, 80);
+            return `<div class="version-item" onclick="showDiff('${escapeAttr(key)}', ${i})" id="ver-${i}">
+                <div style="display:flex;justify-content:space-between;">
+                    <span style="font-weight:600;font-size:12px;">v${versions.length - i}</span>
+                    <span class="version-meta">${escapeHtml(date)}${v.changed_by ? ' by ' + escapeHtml(v.changed_by) : ''}</span>
+                </div>
+                <div class="version-preview">${escapeHtml(preview)}</div>
+            </div>`;
+        }).join('');
+
+        openModal('History: ' + key, `
+            <div style="display:grid;grid-template-columns:1fr 1.5fr;gap:16px;min-height:300px;">
+                <div>
+                    <label>Versions (click to compare with current)</label>
+                    <div style="max-height:400px;overflow-y:auto;">${versionList}</div>
+                </div>
+                <div>
+                    <label>Diff</label>
+                    <div id="diff-output" class="diff-container">
+                        <div class="diff-header">Select a version to see changes</div>
+                    </div>
+                </div>
+            </div>
+        `, `<button class="btn" onclick="viewMemory('${escapeAttr(key)}')">Back</button>`);
+
+        // Store data for diff
+        window._versionData = { current, versions };
+    } catch (e) { console.error(e); }
+}
+
+function showDiff(key, versionIndex) {
+    const { current, versions } = window._versionData;
+    const old = versions[versionIndex];
+
+    // Highlight selected
+    document.querySelectorAll('.version-item').forEach(el => el.classList.remove('selected'));
+    document.getElementById('ver-' + versionIndex)?.classList.add('selected');
+
+    const oldLines = (old.value || '').split('\n');
+    const newLines = (current.value || '').split('\n');
+    const diff = computeDiff(oldLines, newLines);
+
+    const date = new Date(old.created_at * 1000).toLocaleString();
+    const header = `v${versions.length - versionIndex} (${date}) → current`;
+
+    const diffEl = document.getElementById('diff-output');
+    diffEl.innerHTML = `<div class="diff-header">${escapeHtml(header)}</div>` +
+        diff.map(line => {
+            if (line.startsWith('+')) return `<div class="diff-line diff-add">${escapeHtml(line)}</div>`;
+            if (line.startsWith('-')) return `<div class="diff-line diff-del">${escapeHtml(line)}</div>`;
+            return `<div class="diff-line diff-ctx">${escapeHtml(line)}</div>`;
+        }).join('');
+}
+
+function computeDiff(oldLines, newLines) {
+    // Simple line-based diff (LCS approach)
+    const m = oldLines.length, n = newLines.length;
+    // For very large texts, fall back to simple comparison
+    if (m + n > 2000) {
+        const result = [];
+        oldLines.forEach(l => result.push('- ' + l));
+        newLines.forEach(l => result.push('+ ' + l));
+        return result;
+    }
+
+    // Build LCS table
+    const dp = Array(m + 1).fill(null).map(() => Array(n + 1).fill(0));
+    for (let i = 1; i <= m; i++) {
+        for (let j = 1; j <= n; j++) {
+            dp[i][j] = oldLines[i-1] === newLines[j-1]
+                ? dp[i-1][j-1] + 1
+                : Math.max(dp[i-1][j], dp[i][j-1]);
+        }
+    }
+
+    // Backtrack
+    const result = [];
+    let i = m, j = n;
+    while (i > 0 || j > 0) {
+        if (i > 0 && j > 0 && oldLines[i-1] === newLines[j-1]) {
+            result.unshift('  ' + oldLines[i-1]);
+            i--; j--;
+        } else if (j > 0 && (i === 0 || dp[i][j-1] >= dp[i-1][j])) {
+            result.unshift('+ ' + newLines[j-1]);
+            j--;
+        } else {
+            result.unshift('- ' + oldLines[i-1]);
+            i--;
+        }
+    }
+    return result;
+}
+
+// ═══════════════════════════════════════════════════════════════
+// MARKDOWN EXPORT
+// ═══════════════════════════════════════════════════════════════
+
+async function exportMarkdown() {
+    const tags = document.getElementById('export-tags').value.trim();
+    const tid = showToast('Exporting Markdown', 'Generating...');
+    try {
+        let url = '/api/export-markdown';
+        if (tags) url += '?tags=' + encodeURIComponent(tags);
+        const res = await fetch(url);
+        const d = await res.json();
+        const blob = new Blob([d.content], { type: 'text/markdown' });
+        const a = document.createElement('a');
+        a.href = URL.createObjectURL(blob);
+        a.download = 'context-pilot-export.md';
+        a.click();
+        URL.revokeObjectURL(a.href);
+        completeToast(tid, `${d.memory_count} memories, ${d.token_count} tokens`, false);
+    } catch (e) {
+        completeToast(tid, 'Failed: ' + e.message, true);
+    }
+}
+
+// ═══════════════════════════════════════════════════════════════
+// PINNING
+// ═══════════════════════════════════════════════════════════════
+
+async function togglePin(key, pinned) {
+    try {
+        await fetch(`/api/memories/${encodeURIComponent(key)}/pin?pinned=${pinned}`, { method: 'POST' });
+        loadMemories();
+    } catch (e) { console.error(e); }
+}
+
+// ═══════════════════════════════════════════════════════════════
+// TRASH
+// ═══════════════════════════════════════════════════════════════
+
+async function showTrash() {
+    try {
+        const res = await fetch('/api/trash');
+        const items = await res.json();
+
+        if (items.length === 0) {
+            openModal('Trash', '<p class="muted">Trash is empty.</p>',
+                '<button class="btn" onclick="closeModal()">Close</button>');
+            return;
+        }
+
+        const listHtml = items.map(m => {
+            const date = new Date(m.deleted_at * 1000).toLocaleString();
+            return `<div class="memory-item trash-item" style="cursor:default;">
+                <div class="main">
+                    <div class="key">${escapeHtml(m.key)}</div>
+                    <div class="preview">${escapeHtml((m.value || '').substring(0, 100))}</div>
+                    <div class="meta"><span class="age">deleted ${date}</span></div>
+                </div>
+                <div class="actions" style="display:flex;gap:4px;">
+                    <button class="btn btn-small" onclick="restoreFromTrash('${escapeAttr(m.key)}')">Restore</button>
+                    <button class="btn btn-small btn-danger" onclick="purgeFromTrash('${escapeAttr(m.key)}')">Purge</button>
+                </div>
+            </div>`;
+        }).join('');
+
+        openModal('Trash', `
+            <div style="margin-bottom:8px;font-size:12px;color:var(--text-muted);">${items.length} items in trash</div>
+            <div style="max-height:50vh;overflow-y:auto;">${listHtml}</div>
+        `, `
+            <button class="btn btn-danger" onclick="emptyTrash()">Empty Trash</button>
+            <button class="btn" onclick="closeModal()">Close</button>
+        `);
+    } catch (e) { console.error(e); }
+}
+
+async function restoreFromTrash(key) {
+    try {
+        await fetch(`/api/trash/${encodeURIComponent(key)}/restore`, { method: 'POST' });
+        showTrash();
+        loadMemories();
+    } catch (e) { console.error(e); }
+}
+
+async function purgeFromTrash(key) {
+    if (!confirm(`Permanently delete "${key}"?`)) return;
+    try {
+        await fetch(`/api/trash/${encodeURIComponent(key)}`, { method: 'DELETE' });
+        showTrash();
+    } catch (e) { console.error(e); }
+}
+
+async function emptyTrash() {
+    if (!confirm('Permanently delete all items in trash?')) return;
+    try {
+        await fetch('/api/trash', { method: 'DELETE' });
+        closeModal();
+    } catch (e) { console.error(e); }
+}
+
+// ═══════════════════════════════════════════════════════════════
+// BULK TAG OPERATIONS
+// ═══════════════════════════════════════════════════════════════
+
+function showBulkTagDialog() {
+    const checked = document.querySelectorAll('.bulk-cb:checked');
+    if (checked.length === 0) { alert('No memories selected.'); return; }
+    const keys = Array.from(checked).map(cb => cb.dataset.key);
+
+    openModal(`Tag ${keys.length} memories`, `
+        <label>Add tags (comma-separated)</label>
+        <input type="text" id="bulk-add-tags" placeholder="e.g. important, reviewed">
+        <label>Remove tags (comma-separated)</label>
+        <input type="text" id="bulk-remove-tags" placeholder="e.g. draft, temp">
+    `, `
+        <button class="btn btn-primary" id="bulk-tag-submit">Apply</button>
+        <button class="btn" onclick="closeModal()">Cancel</button>
+    `);
+    document.getElementById('bulk-tag-submit').addEventListener('click', () => submitBulkTags(keys));
+}
+
+async function submitBulkTags(keys) {
+    const addTags = document.getElementById('bulk-add-tags').value.split(',').map(t => t.trim()).filter(Boolean);
+    const removeTags = document.getElementById('bulk-remove-tags').value.split(',').map(t => t.trim()).filter(Boolean);
+    if (addTags.length === 0 && removeTags.length === 0) { alert('Enter tags to add or remove.'); return; }
+
+    const tid = showToast('Bulk tagging', `${keys.length} memories...`);
+    try {
+        const res = await fetch('/api/memories/bulk-tags', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({ keys, add: addTags, remove: removeTags })
+        });
+        const d = await res.json();
+        completeToast(tid, `${d.updated} updated`, false);
+        closeModal();
+        loadMemories();
+    } catch (e) { completeToast(tid, 'Failed', true); }
+}
+
+// ═══════════════════════════════════════════════════════════════
+// MEMORY PRESETS
+// ═══════════════════════════════════════════════════════════════
+
+function renderPresets(presets) {
+    const el = document.getElementById('memory-presets');
+    if (!el) return;
+    if (presets.length === 0) { el.style.display = 'none'; return; }
+    el.style.display = 'flex';
+    el.innerHTML = presets.map(p =>
+        `<span class="preset-chip" onclick="applyPreset('${escapeAttr(p.name)}', '${escapeAttr(p.key_prefix)}', '${escapeAttr(p.default_tags.join(', '))}')">
+            ${escapeHtml(p.name)}
+        </span>`
+    ).join('') + ' <span class="preset-chip" onclick="showPresetManager()" style="color:var(--accent);">+ Manage</span>';
+}
+
+function applyPreset(name, prefix, tags) {
+    const keyEl = document.getElementById('memory-key');
+    const tagEl = document.getElementById('memory-tags');
+    if (prefix && keyEl) keyEl.value = prefix;
+    if (tags && tagEl) tagEl.value = tags;
+    keyEl?.focus();
+}
+
+async function showPresetManager() {
+    try {
+        const res = await fetch('/api/memory-presets');
+        const presets = await res.json();
+        const listHtml = presets.map(p => `<div class="memory-item" style="cursor:default;">
+            <div class="main">
+                <div class="key">${escapeHtml(p.name)}</div>
+                <div class="preview">prefix: ${escapeHtml(p.key_prefix || '-')} | tags: ${escapeHtml(p.default_tags.join(', ') || '-')}</div>
+            </div>
+            <div class="actions">
+                <button class="btn btn-small btn-danger" onclick="deletePreset('${escapeAttr(p.name)}')">Del</button>
+            </div>
+        </div>`).join('') || '<p class="muted">No presets. Create one below.</p>';
+
+        openModal('Memory Presets', `
+            <div style="max-height:200px;overflow-y:auto;margin-bottom:16px;">${listHtml}</div>
+            <label>New Preset Name</label>
+            <input type="text" id="preset-name" placeholder="e.g. Device, Script, Password">
+            <label>Key Prefix</label>
+            <input type="text" id="preset-prefix" placeholder="e.g. devices/, scripts/">
+            <label>Default Tags (comma-separated)</label>
+            <input type="text" id="preset-tags" placeholder="e.g. smarthome, config">
+        `, `
+            <button class="btn btn-primary" id="preset-save-btn">Save</button>
+            <button class="btn" onclick="closeModal()">Close</button>
+        `);
+        document.getElementById('preset-save-btn').addEventListener('click', savePreset);
+    } catch (e) { console.error(e); }
+}
+
+async function savePreset() {
+    const name = document.getElementById('preset-name').value.trim();
+    if (!name) { alert('Name required.'); return; }
+    const body = {
+        name,
+        key_prefix: document.getElementById('preset-prefix').value.trim(),
+        default_tags: document.getElementById('preset-tags').value.split(',').map(t => t.trim()).filter(Boolean),
+    };
+    try {
+        await fetch('/api/memory-presets', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(body) });
+        closeModal();
+        loadMemories();
+    } catch (e) { alert('Error: ' + e.message); }
+}
+
+async function deletePreset(name) {
+    await fetch(`/api/memory-presets/${encodeURIComponent(name)}`, { method: 'DELETE' });
+    showPresetManager();
+}
+
+// ═══════════════════════════════════════════════════════════════
+// GLOBAL SEARCH
+// ═══════════════════════════════════════════════════════════════
+
+function openGlobalSearch() {
+    const overlay = document.getElementById('global-search-overlay');
+    overlay.classList.add('active');
+    const input = document.getElementById('global-search-input');
+    input.value = '';
+    input.focus();
+    document.getElementById('global-search-results').innerHTML = '';
+
+    overlay.addEventListener('click', e => {
+        if (e.target === overlay) closeGlobalSearch();
+    });
+}
+
+function closeGlobalSearch() {
+    document.getElementById('global-search-overlay').classList.remove('active');
+}
+
+async function globalSearch() {
+    const q = document.getElementById('global-search-input').value.trim();
+    const el = document.getElementById('global-search-results');
+    if (!q) { el.innerHTML = ''; return; }
+
+    clearTimeout(debounceTimers['globalSearch']);
+    debounceTimers['globalSearch'] = setTimeout(async () => {
+        try {
+            const res = await fetch(`/api/global-search?q=${encodeURIComponent(q)}`);
+            const d = await res.json();
+            let items = [];
+            d.memories.forEach(m => items.push({ type: 'memory', label: m.key, detail: m.preview }));
+            d.templates.forEach(t => items.push({ type: 'template', label: t.name, detail: t.description }));
+            d.connectors.forEach(c => items.push({ type: 'connector', label: c.display_name || c.name, detail: '' }));
+            d.folders.forEach(f => items.push({ type: 'folder', label: f.name, detail: f.path }));
+
+            if (items.length === 0) {
+                el.innerHTML = '<div style="padding:16px;text-align:center;color:var(--text-muted);">No results</div>';
+                return;
+            }
+
+            el.innerHTML = items.map(item => `<div class="global-search-item" onclick="globalSearchSelect('${escapeAttr(item.type)}', '${escapeAttr(item.label)}')">
+                <span class="global-search-type">${item.type}</span>
+                <div style="flex:1;min-width:0;">
+                    <div style="font-weight:500;">${escapeHtml(item.label)}</div>
+                    ${item.detail ? '<div style="font-size:11px;color:var(--text-muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">' + escapeHtml(item.detail) + '</div>' : ''}
+                </div>
+            </div>`).join('');
+        } catch (e) { console.error(e); }
+    }, 300);
+}
+
+function globalSearchSelect(type, label) {
+    closeGlobalSearch();
+    if (type === 'memory') { showTab('memories', null); setTimeout(() => { document.getElementById('memory-search').value = label; searchMemories(); }, 100); }
+    else if (type === 'template') { showTab('assembler', null); }
+    else if (type === 'connector' || type === 'folder') { showTab('sources', null); }
+}
+
+// ═══════════════════════════════════════════════════════════════
+// SCHEDULED REPORTS
+// ═══════════════════════════════════════════════════════════════
+
+async function sendReport() {
+    const tid = showToast('Generating report', 'Sending via webhooks...');
+    try {
+        const res = await fetch('/api/reports/summary', { method: 'POST' });
+        const d = await res.json();
+        completeToast(tid, `Report sent to ${d.webhooks_sent} webhook(s)`, false);
+    } catch (e) { completeToast(tid, 'Failed: ' + e.message, true); }
 }
 
 // ═══════════════════════════════════════════════════════════════
