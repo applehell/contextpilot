@@ -262,8 +262,7 @@ label {
 .memory-item .key { font-weight: 600; font-size: 13px; color: var(--text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .memory-item .preview { font-size: 12px; color: var(--text-secondary); margin-top: 1px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .memory-item .meta { display: flex; gap: 6px; align-items: center; margin-top: 3px; flex-wrap: wrap; }
-.memory-item .actions { display: flex; gap: 2px; flex-shrink: 0; opacity: 0.4; transition: opacity 0.15s; }
-.memory-item:hover .actions { opacity: 1; }
+.memory-item .actions { display: flex; gap: 4px; flex-shrink: 0; }
 
 .badge {
     display: inline-block;

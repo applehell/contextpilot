@@ -718,6 +718,7 @@ function renderMemories(data) {
             + '</div>'
             + '<div class="actions" onclick="event.stopPropagation()">'
             + '<button class="btn btn-small" onclick="togglePin(\'' + ek + '\',' + !pinned + ')" title="' + (pinned ? 'Unpin' : 'Pin') + '">' + (pinned ? 'Unpin' : 'Pin') + '</button>'
+            + '<button class="btn btn-small" onclick="editMemory(\'' + ek + '\')">Edit</button>'
             + '<button class="btn btn-small btn-danger" onclick="deleteMemory(\'' + ek + '\')">Del</button>'
             + '</div>'
             + '</div>';
