@@ -5,7 +5,7 @@ import sqlite3
 from pathlib import Path
 from typing import Optional
 
-SCHEMA_VERSION = 11
+SCHEMA_VERSION = 12
 
 MIGRATIONS = {
     1: [
@@ -235,6 +235,15 @@ MIGRATIONS = {
         """ALTER TABLE memories ADD COLUMN expires_at REAL DEFAULT NULL""",
         """CREATE INDEX IF NOT EXISTS idx_memories_expires ON memories(expires_at) WHERE expires_at IS NOT NULL""",
     ],
+    12: [
+        # -- cleanup: drop unused tables --
+        """DROP TABLE IF EXISTS skill_budget_allocation""",
+        """DROP TABLE IF EXISTS skill_profiles""",
+        # -- remove redundant index (prefix of idx_sbr_score) --
+        """DROP INDEX IF EXISTS idx_sbr_skill""",
+        # -- run incremental vacuum to reclaim free pages --
+        """PRAGMA incremental_vacuum""",
+    ],
 }
 
 
@@ -250,6 +259,7 @@ class Database:
         self._conn.execute("PRAGMA journal_mode=WAL")
         self._conn.execute("PRAGMA foreign_keys=ON")
         self._conn.row_factory = sqlite3.Row
+        self._enable_auto_vacuum()
         self._migrate()
 
     @property
@@ -258,6 +268,13 @@ class Database:
 
     def close(self) -> None:
         self._conn.close()
+
+    def _enable_auto_vacuum(self) -> None:
+        """Enable incremental auto_vacuum if not already set. Requires VACUUM once."""
+        mode = self._conn.execute("PRAGMA auto_vacuum").fetchone()[0]
+        if mode != 2:  # 0=none, 1=full, 2=incremental
+            self._conn.execute("PRAGMA auto_vacuum = INCREMENTAL")
+            self._conn.execute("VACUUM")
 
     def _current_version(self) -> int:
         try:

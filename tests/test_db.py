@@ -79,7 +79,9 @@ class TestMigration:
         assert "block_usage" in tables
         assert "assembly_feedback" in tables
         assert "block_weights" in tables
-        assert "skill_profiles" in tables
+        # v12: skill_profiles and skill_budget_allocation dropped
+        assert "skill_profiles" not in tables
+        assert "skill_budget_allocation" not in tables
         db.close()
 
     def test_migration_from_v2_to_current(self, tmp_path: Path) -> None:

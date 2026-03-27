@@ -920,7 +920,7 @@ function renderMemories(data) {
             : '';
 
         const pinned = m.pinned || false;
-        const pinIcon = pinned ? '<span class="pin-badge" title="Pinned">P</span>' : '';
+        const pinIcon = pinned ? '<span class="pin-badge" title="Pinned"><svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor" stroke="none"><path d="M16 2L20.58 6.58C21.37 7.37 21.37 8.63 20.58 9.42L17 13L17 17L15 19L12 16L7.5 20.5L6.08 19.08L10 15.17L7 12L5 14L3 12L9 6L12.58 3.42C13.37 2.63 14.63 2.63 15.42 3.42L16 2Z"/></svg></span>' : '';
 
         // Lifetime indicator
         let lifetimeHtml = '';
@@ -949,9 +949,12 @@ function renderMemories(data) {
         }
 
         const ek = escapeAttr(m.key);
+        const chevron = '<svg class="mem-chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 18l6-6-6-6"/></svg>';
 
-        return '<div class="memory-item' + stateClass + (m.expires_at && m.ttl_label === 'expired' ? ' expired' : '') + '" onclick="viewMemory(\'' + ek + '\')">'
+        return '<div class="memory-item' + stateClass + (m.expires_at && m.ttl_label === 'expired' ? ' expired' : '') + '" data-key="' + escapeHtml(m.key) + '">'
+            + '<div class="mem-header" onclick="toggleAccordion(this)">'
             + cbHtml
+            + chevron
             + '<div class="main">'
             + '<div class="key">' + pinIcon + badge + escapeHtml(m.key) + '</div>'
             + '<div class="preview">' + escapeHtml((m.value || '').substring(0, 120)) + '</div>'
@@ -963,12 +966,90 @@ function renderMemories(data) {
             + '</div>'
             + '</div>'
             + '<div class="actions" onclick="event.stopPropagation()">'
-            + '<button class="btn btn-small" onclick="togglePin(\'' + ek + '\',' + !pinned + ')" title="' + (pinned ? 'Unpin' : 'Pin') + '">' + (pinned ? 'Unpin' : 'Pin') + '</button>'
-            + '<button class="btn btn-small" onclick="editMemory(\'' + ek + '\')">Edit</button>'
-            + '<button class="btn btn-small btn-danger" onclick="deleteMemory(\'' + ek + '\')">Del</button>'
+            + '<button class="btn btn-icon' + (pinned ? ' btn-icon-active' : '') + '" onclick="togglePin(\'' + ek + '\',' + !pinned + ')" title="' + (pinned ? 'Unpin' : 'Pin') + '"><svg width="14" height="14" viewBox="0 0 24 24" fill="' + (pinned ? 'currentColor' : 'none') + '" stroke="currentColor" stroke-width="2"><path d="M12 2L15.09 8.26L22 9.27L17 14.14L18.18 21.02L12 17.77L5.82 21.02L7 14.14L2 9.27L8.91 8.26L12 2Z"/></svg></button>'
+            + '<button class="btn btn-icon" onclick="editMemory(\'' + ek + '\')" title="Edit"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg></button>'
+            + '<button class="btn btn-icon btn-icon-danger" onclick="deleteMemory(\'' + ek + '\')" title="Delete"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg></button>'
             + '</div>'
+            + '</div>'
+            + '<div class="mem-body" id="mem-body-' + ek + '"></div>'
             + '</div>';
     }).join('');
+}
+
+// --- Accordion & Sidebar ---
+
+async function toggleAccordion(headerEl) {
+    const item = headerEl.closest('.memory-item');
+    const key = item.dataset.key;
+    const isExpanded = item.classList.contains('expanded');
+
+    // Collapse all others
+    document.querySelectorAll('.memory-item.expanded').forEach(el => {
+        if (el !== item) el.classList.remove('expanded');
+    });
+
+    if (isExpanded) {
+        item.classList.remove('expanded');
+        return;
+    }
+
+    item.classList.add('expanded');
+    const body = item.querySelector('.mem-body');
+
+    // Load content if not already loaded
+    if (!body.dataset.loaded) {
+        body.innerHTML = '<div style="padding:12px;color:var(--text-muted);font-size:12px;">Loading...</div>';
+        try {
+            const url = memoryUrl(key);
+            console.log('Accordion fetch:', url);
+            const res = await fetch(url);
+            if (!res.ok) {
+                body.innerHTML = '<div style="padding:12px;color:var(--danger);font-size:12px;">HTTP ' + res.status + '</div>';
+                return;
+            }
+            const m = await res.json();
+            const val = m.value || '';
+
+            let rendered;
+            try {
+                rendered = typeof EasyMDE !== 'undefined'
+                    ? EasyMDE.prototype.markdown(val)
+                    : '<pre>' + escapeHtml(val) + '</pre>';
+            } catch (_) {
+                rendered = '<pre>' + escapeHtml(val) + '</pre>';
+            }
+
+            const tagsHtml = (m.tags || []).length
+                ? m.tags.map(t => '<span class="tag" onclick="event.stopPropagation();clickTag(\'' + escapeAttr(t) + '\')">#' + escapeHtml(t) + '</span>').join(' ')
+                : '';
+
+            let ttlHtml = '';
+            if (m.expires_at) {
+                const ttlLabel = m.ttl_label || 'unknown';
+                const color = ttlLabel === 'expired' ? 'var(--danger)' : m.expires_at - Date.now()/1000 < 86400 ? 'var(--warning)' : 'var(--text-muted)';
+                ttlHtml = '<div style="margin-top:8px;padding:6px 10px;background:var(--bg);border-radius:4px;font-size:11px;border-left:3px solid ' + color + ';">TTL: <strong>' + ttlLabel + '</strong> remaining</div>';
+            }
+
+            const ek = escapeAttr(m.key);
+            body.innerHTML = '<div class="mem-body-content">' + rendered + '</div>'
+                + (tagsHtml ? '<div style="margin-top:8px;">' + tagsHtml + '</div>' : '')
+                + ttlHtml
+                + '<div class="mem-body-actions">'
+                + '<button class="btn btn-small" onclick="showVersions(\'' + ek + '\')">History</button>'
+                + '<button class="btn btn-small btn-primary" onclick="editMemory(\'' + ek + '\')">Edit</button>'
+                + '<button class="btn btn-small" onclick="viewMemory(\'' + ek + '\')">Full View</button>'
+                + '</div>';
+            body.dataset.loaded = '1';
+        } catch (e) {
+            console.error('Accordion load error:', key, e);
+            body.innerHTML = '<div style="padding:12px;color:var(--danger);font-size:12px;">Error: ' + escapeHtml(String(e)) + '</div>';
+        }
+    }
+}
+
+function toggleMemSidebar() {
+    const sidebar = document.getElementById('mem-sidebar');
+    sidebar.classList.toggle('collapsed');
 }
 
 // --- Memory CRUD ---
@@ -1017,13 +1098,19 @@ async function viewMemory(key) {
             </div>`;
         }
 
+        const pinned = m.pinned || false;
+        const pinBtnClass = pinned ? ' btn-icon-active' : '';
+        const pinFill = pinned ? 'currentColor' : 'none';
+
         openModal(m.key, `
-            <label>Tags</label>
-            <div style="margin-bottom:16px;">${tagsHtml}</div>
+            <div class="view-meta-bar">
+                <div class="view-tags">${tagsHtml}</div>
+                ${m.expires_at ? '<span class="lifetime-indicator ' + (m.ttl_label === 'expired' ? 'lifetime-expired' : 'lifetime-limited') + '">' + (m.ttl_label || '') + '</span>' : '<span class="lifetime-indicator lifetime-permanent">&#8734;</span>'}
+            </div>
             ${ttlHtml}
-            <label>Content</label>
             <div class="md-preview">${rendered}</div>
         `, `
+            <button class="btn btn-icon${pinBtnClass}" onclick="togglePin('${escapeAttr(m.key)}',${!pinned});closeModal();" title="${pinned ? 'Unpin' : 'Pin'}"><svg width="14" height="14" viewBox="0 0 24 24" fill="${pinFill}" stroke="currentColor" stroke-width="2"><path d="M12 2L15.09 8.26L22 9.27L17 14.14L18.18 21.02L12 17.77L5.82 21.02L7 14.14L2 9.27L8.91 8.26L12 2Z"/></svg></button>
             <button class="btn" onclick="showVersions('${escapeAttr(m.key)}')">History</button>
             <button class="btn btn-primary" onclick="editMemory('${escapeAttr(m.key)}')">Edit</button>
             <button class="btn" onclick="closeModal()">Close</button>
@@ -1039,22 +1126,32 @@ async function editMemory(key) {
         const m = await res.json();
 
         const currentTtlDays = m.metadata?.ttl_seconds ? (m.metadata.ttl_seconds / 86400) : '';
-        const ttlInfo = m.ttl_label ? `<span style="font-size:11px;color:var(--text-muted);margin-left:8px;">Current: ${m.ttl_label} remaining</span>` : '';
+        const ttlInfo = m.ttl_label ? `<span style="font-size:11px;color:var(--text-muted);">Currently: ${m.ttl_label} remaining</span>` : '';
         openModal('Edit: ' + m.key, `
-            <label>Key</label>
-            <input type="text" id="edit-key" value="${escapeHtml(m.key)}" readonly style="background:var(--surface-alt);cursor:not-allowed;">
-            <label>Value</label>
+            <div class="edit-key-display">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="var(--text-muted)" stroke-width="2" stroke-linecap="round"><path d="M21 2l-2 2m-7.61 7.61a5.5 5.5 0 1 1-7.778 7.778 5.5 5.5 0 0 1 7.777-7.777zm0 0L15.5 7.5m0 0l3 3L22 7l-3-3m-3.5 3.5L19 4"/></svg>
+                <span>${escapeHtml(m.key)}</span>
+            </div>
+            <label>Content</label>
             <textarea id="edit-value">${escapeHtml(m.value)}</textarea>
-            <label>Tags (comma-separated)</label>
-            <input type="text" id="edit-tags" value="${escapeHtml(m.tags.join(', '))}">
-            <label>TTL (auto-delete after)${ttlInfo}</label>
-            <div style="display:flex;gap:6px;align-items:center;">
-                <input type="number" id="edit-ttl" value="${currentTtlDays}" min="0" step="0.5" placeholder="No expiry" style="width:100px;">
-                <select id="edit-ttl-unit" style="width:auto;padding:6px 10px;">
-                    <option value="days">days</option>
-                    <option value="hours">hours</option>
-                </select>
-                ${m.expires_at ? '<button class="btn btn-small" onclick="document.getElementById(\'edit-ttl\').value=\'\'" style="font-size:11px;">Remove TTL</button>' : ''}
+            <div style="display:flex;gap:16px;flex-wrap:wrap;">
+                <div style="flex:1;min-width:200px;">
+                    <label>Tags (comma-separated)</label>
+                    <input type="text" id="edit-tags" value="${escapeHtml(m.tags.join(', '))}">
+                </div>
+                <div style="min-width:180px;">
+                    <label>TTL (auto-delete after)</label>
+                    <div style="display:flex;gap:6px;align-items:center;">
+                        <input type="number" id="edit-ttl" value="${currentTtlDays}" min="0" step="0.5" placeholder="No expiry" style="width:90px;">
+                        <select id="edit-ttl-unit" style="width:auto;padding:6px 10px;">
+                            <option value="days">days</option>
+                            <option value="hours">hours</option>
+                            <option value="minutes">minutes</option>
+                        </select>
+                        ${m.expires_at ? '<button class="btn btn-small" onclick="document.getElementById(\'edit-ttl\').value=\'\'" style="font-size:11px;">Remove</button>' : ''}
+                    </div>
+                    ${ttlInfo ? '<div style="margin-top:4px;">' + ttlInfo + '</div>' : ''}
+                </div>
             </div>
         `, `
             <button class="btn btn-primary" id="save-memory-btn">Save</button>
@@ -1130,34 +1227,72 @@ async function saveEditedMemory(key) {
     } catch (e) { completeToast(tid, 'Error: ' + e.message, true); }
 }
 
+function openNewMemoryModal() {
+    destroyEditor();
+    openModal('New Memory', `
+        <label>Key</label>
+        <input type="text" id="new-memory-key" placeholder="e.g. project/api-endpoint">
+        <label>Content</label>
+        <textarea id="new-memory-value" placeholder="Write your memory content here..."></textarea>
+        <div style="display:flex;gap:16px;flex-wrap:wrap;">
+            <div style="flex:1;min-width:200px;">
+                <label>Tags (comma-separated)</label>
+                <input type="text" id="new-memory-tags" placeholder="e.g. config, api, setup">
+            </div>
+            <div style="min-width:180px;">
+                <label>TTL (auto-delete after)</label>
+                <div style="display:flex;gap:6px;align-items:center;">
+                    <input type="number" id="new-memory-ttl" placeholder="No expiry" min="0" step="0.5" style="width:90px;">
+                    <select id="new-memory-ttl-unit" style="width:auto;padding:6px 10px;">
+                        <option value="days">days</option>
+                        <option value="hours">hours</option>
+                        <option value="minutes">minutes</option>
+                    </select>
+                </div>
+            </div>
+        </div>
+    `, `
+        <button class="btn btn-primary" id="save-new-memory-btn">Create Memory</button>
+        <button class="btn" onclick="closeModal()">Cancel</button>
+    `);
+
+    setTimeout(() => initEditor('new-memory-value'), 50);
+
+    document.getElementById('save-new-memory-btn').addEventListener('click', saveNewMemory);
+}
+
 async function saveNewMemory() {
-    const key = document.getElementById('memory-key').value.trim();
-    const value = document.getElementById('memory-value').value.trim();
+    const key = document.getElementById('new-memory-key').value.trim();
+    const value = activeEditor ? activeEditor.value() : document.getElementById('new-memory-value').value.trim();
     if (!key || !value) return;
-    const tagsStr = document.getElementById('memory-tags').value.trim();
+    const tagsStr = document.getElementById('new-memory-tags').value.trim();
     const tags = tagsStr ? tagsStr.split(',').map(t => t.trim()).filter(Boolean) : [];
-    const ttlEl = document.getElementById('memory-ttl');
+    const ttlEl = document.getElementById('new-memory-ttl');
     const ttlVal = ttlEl ? ttlEl.value : '';
     let ttl_seconds = null;
     if (ttlVal) {
         const num = parseFloat(ttlVal);
-        const unit = document.getElementById('memory-ttl-unit')?.value || 'days';
+        const unit = document.getElementById('new-memory-ttl-unit')?.value || 'days';
         if (num > 0) {
             ttl_seconds = unit === 'hours' ? num * 3600 : unit === 'minutes' ? num * 60 : num * 86400;
         }
     }
+    destroyEditor();
+    const tid = showToast('Creating memory', key);
     try {
-        await fetch('/api/memories', {
+        const res = await fetch('/api/memories', {
             method: 'POST',
             headers: {'Content-Type': 'application/json'},
             body: JSON.stringify({key, value, tags, ttl_seconds})
         });
-        document.getElementById('memory-key').value = '';
-        document.getElementById('memory-value').value = '';
-        document.getElementById('memory-tags').value = '';
-        if (ttlEl) ttlEl.value = '';
-        loadMemories();
-    } catch (e) { console.error(e); }
+        if (res.ok) {
+            completeToast(tid, 'Created', false);
+            closeModal();
+            loadMemories();
+        } else {
+            completeToast(tid, 'Create failed: ' + res.status, true);
+        }
+    } catch (e) { completeToast(tid, 'Error: ' + e.message, true); }
 }
 
 async function deleteMemory(key) {
@@ -1719,20 +1854,46 @@ async function loadProfiles() {
     try {
         const res = await fetch('/api/profiles');
         const d = await res.json();
+
+        // Header switcher
         const sel = document.getElementById('profile-select');
         sel.innerHTML = '';
         d.profiles.forEach(p => {
             const opt = document.createElement('option');
             opt.value = p.id;
-            opt.textContent = `${p.name} (${p.memory_count})`;
+            opt.textContent = p.name;
             if (p.is_active) opt.selected = true;
             sel.appendChild(opt);
         });
-        const active = d.profiles.find(p => p.is_active);
-        const notDefault = active && !active.is_default;
-        document.getElementById('profile-delete-btn').style.display = notDefault ? '' : 'none';
-        document.getElementById('profile-rename-btn').style.display = notDefault ? '' : 'none';
-        document.getElementById('profile-import-btn').style.display = d.profiles.length > 1 ? '' : 'none';
+
+        // Settings profile list
+        const listEl = document.getElementById('settings-profiles-list');
+        if (listEl) {
+            listEl.innerHTML = d.profiles.map(p => {
+                const active = p.is_active;
+                const isDefault = p.is_default;
+                const eid = escapeAttr(p.id);
+                return '<div class="profile-card' + (active ? ' profile-active' : '') + '">'
+                    + '<div class="profile-card-info">'
+                    + '<div class="profile-card-name">'
+                    + (active ? '<span class="profile-dot"></span>' : '')
+                    + escapeHtml(p.name)
+                    + (isDefault ? ' <span class="profile-badge">Default</span>' : '')
+                    + '</div>'
+                    + '<div class="profile-card-meta">'
+                    + p.memory_count + ' memories'
+                    + (p.description ? ' &mdash; ' + escapeHtml(p.description) : '')
+                    + '</div>'
+                    + '</div>'
+                    + '<div class="profile-card-actions">'
+                    + (!active ? '<button class="btn btn-small btn-primary" onclick="switchToProfile(\'' + eid + '\')">Switch</button>' : '')
+                    + (!isDefault ? '<button class="btn btn-small" onclick="renameProfile(\'' + eid + '\',\'' + escapeAttr(p.name) + '\',\'' + escapeAttr(p.description || '') + '\')">Rename</button>' : '')
+                    + (d.profiles.length > 1 ? '<button class="btn btn-small" onclick="showImportMemoriesDialogFor(\'' + eid + '\')">Import</button>' : '')
+                    + (!isDefault ? '<button class="btn btn-small btn-danger" onclick="deleteProfile(\'' + eid + '\',\'' + escapeAttr(p.name) + '\')">Delete</button>' : '')
+                    + '</div>'
+                    + '</div>';
+            }).join('');
+        }
     } catch (e) { console.error(e); }
 }
 
@@ -1859,34 +2020,67 @@ async function submitNewProfile() {
     } catch (e) { alert('Error: ' + e.message); }
 }
 
+async function switchToProfile(pid) {
+    const tid = showToast('Switching profile', 'Loading...');
+    try {
+        await fetch(`/api/profiles/${encodeURIComponent(pid)}/switch`, { method: 'POST' });
+        completeToast(tid, 'Switched', false);
+        loadProfiles();
+        const activeTab = document.querySelector('.tab.active');
+        if (activeTab) showTab(activeTab.dataset.tab, activeTab);
+    } catch (e) { completeToast(tid, 'Failed', true); }
+}
+
+async function renameProfile(pid, currentName, currentDesc) {
+    openModal('Rename Profile', `
+        <label>Name</label>
+        <input type="text" id="rename-profile-name" value="${escapeHtml(currentName)}">
+        <label>Description</label>
+        <input type="text" id="rename-profile-desc" value="${escapeHtml(currentDesc)}" placeholder="Optional description">
+    `, `
+        <button class="btn btn-primary" id="rename-profile-submit">Save</button>
+        <button class="btn" onclick="closeModal()">Cancel</button>
+    `);
+    document.getElementById('rename-profile-submit').addEventListener('click', async () => {
+        const newName = document.getElementById('rename-profile-name').value.trim();
+        const desc = document.getElementById('rename-profile-desc').value.trim();
+        if (!newName) return;
+        try {
+            const res = await fetch(`/api/profiles/${encodeURIComponent(pid)}?new_name=${encodeURIComponent(newName)}&description=${encodeURIComponent(desc)}`, { method: 'PUT' });
+            if (res.ok) { closeModal(); loadProfiles(); }
+            else { const d = await res.json(); alert(d.detail || 'Error'); }
+        } catch (e) { console.error(e); }
+    });
+}
+
+function showImportMemoriesDialogFor(pid) {
+    showImportMemoriesDialog();
+}
+
+async function deleteProfile(pid, name) {
+    if (!confirm(`Delete profile "${name}"? All memories will be lost!`)) return;
+    const tid = showToast('Deleting profile', name);
+    try {
+        await fetch(`/api/profiles/${encodeURIComponent(pid)}`, { method: 'DELETE' });
+        completeToast(tid, 'Deleted', false);
+        loadProfiles();
+        loadDashboard();
+    } catch (e) { completeToast(tid, 'Failed', true); }
+}
+
+// Keep legacy functions as aliases
 async function renameActiveProfile() {
     const pid = document.getElementById('profile-select').value;
     const sel = document.getElementById('profile-select');
-    const currentName = sel.options[sel.selectedIndex]?.textContent.replace(/\s*\(\d+\)$/, '') || '';
-    const newName = prompt('New name:', currentName);
-    if (!newName || newName === currentName) return;
-    const desc = prompt('Description (optional):', '') || '';
-    try {
-        const res = await fetch(`/api/profiles/${encodeURIComponent(pid)}?new_name=${encodeURIComponent(newName)}&description=${encodeURIComponent(desc)}`, { method: 'PUT' });
-        if (res.ok) {
-            loadProfiles();
-        } else {
-            const d = await res.json();
-            alert(d.detail || 'Error');
-        }
-    } catch (e) { console.error(e); }
+    const currentName = sel.options[sel.selectedIndex]?.textContent || '';
+    renameProfile(pid, currentName, '');
 }
 
 async function deleteActiveProfile() {
     const pid = document.getElementById('profile-select').value;
     const sel = document.getElementById('profile-select');
-    const name = sel.options[sel.selectedIndex]?.textContent.replace(/\s*\(\d+\)$/, '') || pid;
-    if (!confirm(`Delete profile "${name}"? All memories will be lost!`)) return;
-    try {
-        await fetch(`/api/profiles/${encodeURIComponent(pid)}`, { method: 'DELETE' });
-        loadProfiles();
-        loadDashboard();
-    } catch (e) { console.error(e); }
+    const name = sel.options[sel.selectedIndex]?.textContent || pid;
+    deleteProfile(pid, name);
 }
 
 // ═══════════════════════════════════════════════════════════════
@@ -3448,7 +3642,7 @@ async function loadDbStats() {
         el.innerHTML = `
             <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:8px;">
                 <div class="status-card" style="padding:10px;"><div class="card-title" style="font-size:10px;">Data Dir</div><div style="font-size:11px;word-break:break-all;color:var(--text-secondary);">${escapeHtml(d.data_dir)}</div></div>
-                <div class="status-card" style="padding:10px;"><div class="card-title" style="font-size:10px;">DB Size</div><div class="card-value" style="font-size:18px;">${d.db_size_mb} MB</div></div>
+                <div class="status-card" style="padding:10px;"><div class="card-title" style="font-size:10px;">DB Size</div><div class="card-value" style="font-size:18px;">${d.db_size_mb} MB</div>${d.embeddings_size_mb ? '<div style="font-size:10px;color:var(--text-muted);margin-top:2px;">Embeddings: ' + d.embeddings_size_mb + ' MB</div>' : ''}</div>
                 <div class="status-card" style="padding:10px;"><div class="card-title" style="font-size:10px;">Memories</div><div class="card-value" style="font-size:18px;">${d.memory_count}</div></div>
                 <div class="status-card" style="padding:10px;"><div class="card-title" style="font-size:10px;">Schema</div><div class="card-value" style="font-size:18px;">v${d.schema_version}</div></div>
                 <div class="status-card" style="padding:10px;"><div class="card-title" style="font-size:10px;">Fragmentation</div><div class="card-value" style="font-size:18px;">${d.fragmentation_pct}%</div></div>

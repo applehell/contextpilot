@@ -243,9 +243,14 @@ def create_app(db_path: Optional[Path] = None) -> FastAPI:
 
         data_dir = Path(os.environ.get("CONTEXTPILOT_DATA_DIR", str(Path.home() / ".contextpilot")))
         db_size = 0
+        embeddings_size = 0
         if data_dir.exists():
             for f in data_dir.rglob("*.db"):
-                db_size += f.stat().st_size
+                sz = f.stat().st_size
+                if "embedding" in f.name.lower():
+                    embeddings_size += sz
+                else:
+                    db_size += sz
         disk = shutil.disk_usage(str(data_dir)) if data_dir.exists() else None
 
         return {
@@ -276,6 +281,7 @@ def create_app(db_path: Optional[Path] = None) -> FastAPI:
             "storage": {
                 "db_size_bytes": db_size,
                 "db_size_mb": round(db_size / (1024 * 1024), 2),
+                "embeddings_size_mb": round(embeddings_size / (1024 * 1024), 2),
                 "disk_free_gb": round(disk.free / (1024**3), 2) if disk else None,
                 "disk_total_gb": round(disk.total / (1024**3), 2) if disk else None,
             },
@@ -1232,8 +1238,13 @@ def create_app(db_path: Optional[Path] = None) -> FastAPI:
         store = _get_memory_store()
         data_dir = Path(os.environ.get("CONTEXTPILOT_DATA_DIR", str(Path.home() / ".contextpilot")))
         db_size = 0
+        embeddings_size = 0
         for f in data_dir.rglob("*.db"):
-            db_size += f.stat().st_size
+            sz = f.stat().st_size
+            if "embedding" in f.name.lower():
+                embeddings_size += sz
+            else:
+                db_size += sz
         disk = shutil.disk_usage(str(data_dir)) if data_dir.exists() else None
         page_count = db.conn.execute("PRAGMA page_count").fetchone()[0]
         page_size = db.conn.execute("PRAGMA page_size").fetchone()[0]
@@ -1242,6 +1253,7 @@ def create_app(db_path: Optional[Path] = None) -> FastAPI:
             "data_dir": str(data_dir),
             "db_size_bytes": db_size,
             "db_size_mb": round(db_size / 1048576, 2),
+            "embeddings_size_mb": round(embeddings_size / 1048576, 2),
             "page_count": page_count,
             "page_size": page_size,
             "freelist_pages": freelist,
