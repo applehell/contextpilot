@@ -5,7 +5,7 @@ import sqlite3
 from pathlib import Path
 from typing import Optional
 
-SCHEMA_VERSION = 10
+SCHEMA_VERSION = 11
 
 MIGRATIONS = {
     1: [
@@ -229,6 +229,11 @@ MIGRATIONS = {
             description TEXT NOT NULL DEFAULT '',
             created_at REAL NOT NULL
         )""",
+    ],
+    11: [
+        # -- memory TTL (time-to-live) --
+        """ALTER TABLE memories ADD COLUMN expires_at REAL DEFAULT NULL""",
+        """CREATE INDEX IF NOT EXISTS idx_memories_expires ON memories(expires_at) WHERE expires_at IS NOT NULL""",
     ],
 }
 

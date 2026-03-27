@@ -117,6 +117,7 @@ class MemoryIn(BaseModel):
     key: str
     value: str
     tags: List[str] = []
+    ttl_seconds: Optional[float] = None
 
 
 class FeedbackIn(BaseModel):
@@ -189,7 +190,7 @@ def _get_profile_dir() -> Path:
 def create_app(db_path: Optional[Path] = None) -> FastAPI:
     _init_db(db_path)
 
-    app = FastAPI(title="Context Pilot", version="3.2.0")
+    app = FastAPI(title="Context Pilot", version="3.3.0")
 
     app.mount("/static", StaticFiles(directory=str(WEB_DIR / "static")), name="static")
     templates = Jinja2Templates(directory=str(WEB_DIR / "templates"))
@@ -462,6 +463,31 @@ def create_app(db_path: Optional[Path] = None) -> FastAPI:
             "pages": max(1, (total + page_size - 1) // page_size),
         }
 
+    @app.get("/api/memories/expiring")
+    async def expiring_memories(hours: float = Query(24.0, ge=1)):
+        store = _get_memory_store()
+        memories = store.expiring_soon(within_hours=hours)
+        return [m.to_dict() for m in memories]
+
+    @app.get("/api/memories/ttl-stats")
+    async def ttl_stats():
+        store = _get_memory_store()
+        expired = store.expired_count()
+        expiring_24h = len(store.expiring_soon(24))
+        expiring_7d = len(store.expiring_soon(168))
+        total_with_ttl = 0
+        if store._has_expires_column():
+            row = store._db.conn.execute(
+                "SELECT count(*) FROM memories WHERE expires_at IS NOT NULL"
+            ).fetchone()
+            total_with_ttl = row[0] if row else 0
+        return {
+            "total_with_ttl": total_with_ttl,
+            "expired": expired,
+            "expiring_24h": expiring_24h,
+            "expiring_7d": expiring_7d,
+        }
+
     @app.get("/api/memories/{key:path}")
     async def get_memory(key: str):
         store = _get_memory_store()
@@ -473,7 +499,13 @@ def create_app(db_path: Optional[Path] = None) -> FastAPI:
     @app.post("/api/memories", status_code=201)
     async def set_memory(req: MemoryIn):
         store = _get_memory_store()
-        m = Memory(key=req.key, value=req.value, tags=req.tags)
+        expires_at = None
+        metadata: Dict[str, Any] = {}
+        if req.ttl_seconds and req.ttl_seconds > 0:
+            expires_at = time.time() + req.ttl_seconds
+            metadata["ttl_seconds"] = req.ttl_seconds
+        m = Memory(key=req.key, value=req.value, tags=req.tags,
+                   metadata=metadata, expires_at=expires_at)
         store.set(m)
         _index_single(m)
         _events.emit("memory", "create", req.key, f"tags={req.tags}")
@@ -486,11 +518,23 @@ def create_app(db_path: Optional[Path] = None) -> FastAPI:
             old = store.get(key)
         except KeyError:
             raise HTTPException(404, f"Memory '{key}' not found.")
-        # Save version before overwriting
         from src.storage.versions import VersionStore
         VersionStore(_db).record(key, old.value, old.tags, old.metadata, changed_by="web")
-        m = Memory(key=key, value=req.value, tags=req.tags)
-        store.set(m)
+        expires_at = old.expires_at
+        metadata = old.metadata.copy()
+        if req.ttl_seconds is not None:
+            if req.ttl_seconds > 0:
+                expires_at = time.time() + req.ttl_seconds
+                metadata["ttl_seconds"] = req.ttl_seconds
+            else:
+                expires_at = None
+                metadata.pop("ttl_seconds", None)
+        elif old.metadata.get("ttl_seconds"):
+            # Reset TTL on update
+            expires_at = time.time() + old.metadata["ttl_seconds"]
+        m = Memory(key=key, value=req.value, tags=req.tags,
+                   metadata=metadata, expires_at=expires_at)
+        store.set(m, reset_ttl=False)
         _index_single(m)
         _events.emit("memory", "update", key)
         return {"status": "updated", "key": key}
@@ -518,6 +562,29 @@ def create_app(db_path: Optional[Path] = None) -> FastAPI:
                 pass
         _events.emit("memory", "bulk-delete", f"{deleted} memories")
         return {"status": "deleted", "count": deleted}
+
+    # --- Memory TTL ---
+
+    @app.post("/api/memories/{key:path}/ttl")
+    async def set_memory_ttl(key: str, request: Request):
+        store = _get_memory_store()
+        body = await request.json()
+        ttl_seconds = body.get("ttl_seconds")
+        try:
+            store.get(key)
+        except KeyError:
+            raise HTTPException(404, f"Memory '{key}' not found.")
+        store.set_ttl(key, ttl_seconds)
+        _events.emit("memory", "ttl", key, f"ttl={ttl_seconds}")
+        return {"status": "updated", "key": key, "ttl_seconds": ttl_seconds}
+
+    @app.post("/api/memories/cleanup-expired")
+    async def cleanup_expired():
+        store = _get_memory_store()
+        count = store.cleanup_expired()
+        if count > 0:
+            _events.emit("memory", "ttl-cleanup", f"{count} expired memories removed")
+        return {"status": "cleaned", "removed": count}
 
     @app.post("/api/memories/suggest-tags")
     async def suggest_tags(request: Request):
@@ -957,6 +1024,28 @@ def create_app(db_path: Optional[Path] = None) -> FastAPI:
             for e in entries
         ]
 
+    # --- Setup Status ---
+
+    @app.get("/api/setup-status")
+    async def setup_status():
+        pm = ProfileManager()
+        profiles = pm.list()
+        store = _get_memory_store()
+        memory_count = len(store.list())
+        connectors = ConnectorRegistry.instance(_get_profile_dir())
+        configured_connectors = [c.name for c in connectors.list() if c.configured]
+        folders = FolderManager(_get_profile_dir())
+        folder_sources = folders.list()
+        return {
+            "profiles": [p.name for p in profiles],
+            "profile_count": len(profiles),
+            "memory_count": memory_count,
+            "configured_connectors": configured_connectors,
+            "folder_count": len(folder_sources),
+            "data_dir": str(_DATA_DIR),
+            "is_fresh": memory_count == 0 and len(configured_connectors) == 0 and len(folder_sources) == 0,
+        }
+
     # --- Dashboard ---
 
     @app.get("/api/dashboard")
@@ -1105,6 +1194,71 @@ def create_app(db_path: Optional[Path] = None) -> FastAPI:
             "registered": is_registered(),
             "config": config,
         }
+
+    @app.post("/api/mcp/register")
+    async def mcp_register(request: Request):
+        from src.core.claude_config import register_mcp
+        body = await request.json()
+        port = int(body.get("port", 8400))
+        transport = body.get("transport", "sse")
+        register_mcp(port=port, transport=transport)
+        _events.emit("system", "mcp-register", f"port={port} transport={transport}")
+        return {"status": "registered", "port": port, "transport": transport}
+
+    @app.post("/api/mcp/deregister")
+    async def mcp_deregister():
+        from src.core.claude_config import deregister_mcp
+        deregister_mcp()
+        _events.emit("system", "mcp-deregister", "removed from ~/.claude.json")
+        return {"status": "deregistered"}
+
+    @app.post("/api/maintenance/vacuum")
+    async def db_vacuum():
+        _get_db().conn.execute("VACUUM")
+        _events.emit("system", "vacuum", "database compacted")
+        return {"status": "vacuumed"}
+
+    @app.post("/api/maintenance/rebuild-fts")
+    async def rebuild_fts():
+        _get_db().conn.execute("INSERT INTO memories_fts(memories_fts) VALUES ('rebuild')")
+        _get_db().conn.commit()
+        _events.emit("system", "rebuild-fts", "search index rebuilt")
+        return {"status": "rebuilt"}
+
+    @app.get("/api/maintenance/db-stats")
+    async def db_stats():
+        import shutil
+        db = _get_db()
+        store = _get_memory_store()
+        data_dir = Path(os.environ.get("CONTEXTPILOT_DATA_DIR", str(Path.home() / ".contextpilot")))
+        db_size = 0
+        for f in data_dir.rglob("*.db"):
+            db_size += f.stat().st_size
+        disk = shutil.disk_usage(str(data_dir)) if data_dir.exists() else None
+        page_count = db.conn.execute("PRAGMA page_count").fetchone()[0]
+        page_size = db.conn.execute("PRAGMA page_size").fetchone()[0]
+        freelist = db.conn.execute("PRAGMA freelist_count").fetchone()[0]
+        return {
+            "data_dir": str(data_dir),
+            "db_size_bytes": db_size,
+            "db_size_mb": round(db_size / 1048576, 2),
+            "page_count": page_count,
+            "page_size": page_size,
+            "freelist_pages": freelist,
+            "fragmentation_pct": round(freelist / max(page_count, 1) * 100, 1),
+            "disk_total_gb": round(disk.total / 1073741824, 1) if disk else None,
+            "disk_free_gb": round(disk.free / 1073741824, 1) if disk else None,
+            "disk_used_pct": round((disk.total - disk.free) / disk.total * 100, 1) if disk else None,
+            "memory_count": store.count(),
+            "schema_version": db.conn.execute("PRAGMA user_version").fetchone()[0],
+        }
+
+    @app.post("/api/maintenance/trash-cleanup")
+    async def trash_cleanup(days: int = Query(30, ge=1)):
+        store = _get_memory_store()
+        removed = store.trash_cleanup(days=days)
+        _events.emit("system", "trash-cleanup", f"{removed} old trash entries removed (>{days}d)")
+        return {"status": "cleaned", "removed": removed}
 
     # --- Import ---
 
@@ -1866,6 +2020,15 @@ def create_app(db_path: Optional[Path] = None) -> FastAPI:
         c._save()
         _events.emit("connector", "remove-account", "email", account_name)
         return {"status": "removed", "name": account_name, "remaining": len(accounts)}
+
+    # Cleanup expired memories on startup
+    try:
+        store = _get_memory_store()
+        expired = store.cleanup_expired()
+        if expired > 0:
+            _events.emit("system", "ttl-cleanup", f"{expired} expired memories removed at startup")
+    except Exception:
+        pass
 
     return app
 

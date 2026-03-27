@@ -6,7 +6,7 @@
     <title>Context Pilot</title>
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="/static/style.css?v=17">
+    <link rel="stylesheet" href="/static/style.css?v=24">
     <script src="https://unpkg.com/vis-network@9.1.9/standalone/umd/vis-network.min.js"></script>
     <link rel="stylesheet" href="https://unpkg.com/easymde@2.18.0/dist/easymde.min.css">
     <script src="https://unpkg.com/easymde@2.18.0/dist/easymde.min.js"></script>
@@ -29,6 +29,256 @@
                 <li>Detect sensitive data and intelligently assemble context</li>
             </ul>
             <button class="btn btn-primary" id="welcome-dismiss-btn" style="padding:10px 32px;font-size:14px;">Get Started</button>
+        </div>
+    </div>
+
+    <!-- Setup Wizard -->
+    <div class="wizard-overlay" id="wizard-overlay">
+        <div class="wizard-container">
+            <div class="wizard-progress">
+                <div class="wizard-progress-track">
+                    <div class="wizard-progress-fill" id="wizard-progress-fill"></div>
+                </div>
+            </div>
+            <div class="wizard-steps-dots" id="wizard-dots"></div>
+
+            <div class="wizard-body" id="wizard-body">
+                <!-- Step 0: Welcome -->
+                <div class="wizard-step active" data-wizard-step="0">
+                    <div style="text-align:center;padding-top:16px;">
+                        <div class="bot-orb-large speaking" style="margin-bottom:24px;">
+                            <div class="orb-ring"></div>
+                            <div class="orb"></div>
+                        </div>
+                        <h2>Welcome to Context Pilot</h2>
+                        <p class="wizard-desc">Your knowledge management hub for AI workflows. Let's set everything up in a few quick steps.</p>
+                        <div class="wizard-features" style="text-align:left;">
+                            <div class="wizard-feature-card">
+                                <div class="wizard-feature-icon">&#128218;</div>
+                                <div><h4>Memories</h4><p>Store, search and organize knowledge with full-text search</p></div>
+                            </div>
+                            <div class="wizard-feature-card">
+                                <div class="wizard-feature-icon">&#128268;</div>
+                                <div><h4>Connectors</h4><p>Sync from Paperless, Gitea, Home Assistant, Email and more</p></div>
+                            </div>
+                            <div class="wizard-feature-card">
+                                <div class="wizard-feature-icon">&#128200;</div>
+                                <div><h4>Knowledge Graph</h4><p>Visualize connections between your memories</p></div>
+                            </div>
+                            <div class="wizard-feature-card">
+                                <div class="wizard-feature-icon">&#129302;</div>
+                                <div><h4>MCP Server</h4><p>Connect Claude Code directly to your knowledge base</p></div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Step 1: Storage -->
+                <div class="wizard-step" data-wizard-step="1">
+                    <div class="wizard-step-icon">&#128451;</div>
+                    <h2>Storage</h2>
+                    <p class="wizard-desc">Context Pilot stores all data in a local SQLite database. The data directory is already configured.</p>
+                    <div class="wizard-info">
+                        <div class="wizard-info-icon">&#128193;</div>
+                        <div>
+                            <strong>Data directory:</strong><br>
+                            <code id="wizard-data-dir">~/.contextpilot</code><br>
+                            <span style="font-size:11px;color:var(--text-muted);">Set via <code>CONTEXTPILOT_DATA_DIR</code> env variable or defaults to <code>~/.contextpilot</code></span>
+                        </div>
+                    </div>
+                    <div class="wizard-info">
+                        <div class="wizard-info-icon">&#128450;</div>
+                        <div>
+                            <strong>What's stored here:</strong><br>
+                            SQLite databases (memories, FTS index, embeddings), profile configs, connector settings, folder sources, webhook configs.
+                            Everything is file-based — easy to back up and migrate.
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Step 2: Profile -->
+                <div class="wizard-step" data-wizard-step="2">
+                    <div class="wizard-step-icon">&#128100;</div>
+                    <h2>Your First Profile</h2>
+                    <p class="wizard-desc">Profiles keep your data completely isolated. Each profile gets its own database, connectors, and folder sources. You can create more later.</p>
+                    <div class="wizard-input-group">
+                        <label>Profile Name</label>
+                        <input type="text" id="wizard-profile-name" placeholder="e.g. Work, Personal, Homelab..." value="default">
+                        <div class="wizard-input-hint">The "default" profile already exists. Enter a new name to create an additional one.</div>
+                    </div>
+                    <div class="wizard-info">
+                        <div class="wizard-info-icon">&#128161;</div>
+                        <div>
+                            <strong>What's isolated per profile:</strong><br>
+                            Memories &amp; tags, connector configs, folder sources, webhooks, embeddings, templates, and the knowledge graph.
+                            Switch profiles instantly from the header dropdown.
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Step 3: Connectors -->
+                <div class="wizard-step" data-wizard-step="3">
+                    <div class="wizard-step-icon">&#128268;</div>
+                    <h2>Source Connectors</h2>
+                    <p class="wizard-desc">Connectors automatically sync knowledge from external services into your memory database. Configure them later under Sources.</p>
+                    <div class="wizard-connector-list" id="wizard-connectors">
+                        <div class="wizard-connector">
+                            <div class="wizard-connector-icon">&#128194;</div>
+                            <div>
+                                <div class="wizard-connector-name">Folder Mapping</div>
+                                <div class="wizard-connector-desc">Index local files (PDF, Markdown, code) as memories</div>
+                            </div>
+                            <div class="wizard-connector-badge">Built-in</div>
+                        </div>
+                        <div class="wizard-connector">
+                            <div class="wizard-connector-icon">&#128196;</div>
+                            <div>
+                                <div class="wizard-connector-name">Paperless-ngx</div>
+                                <div class="wizard-connector-desc">Sync OCR'd documents with tag filtering</div>
+                            </div>
+                            <div class="wizard-connector-badge">REST API</div>
+                        </div>
+                        <div class="wizard-connector">
+                            <div class="wizard-connector-icon">&#127968;</div>
+                            <div>
+                                <div class="wizard-connector-name">Home Assistant</div>
+                                <div class="wizard-connector-desc">Import entities, automations, and device states</div>
+                            </div>
+                            <div class="wizard-connector-badge">REST API</div>
+                        </div>
+                        <div class="wizard-connector">
+                            <div class="wizard-connector-icon">&#128231;</div>
+                            <div>
+                                <div class="wizard-connector-name">Email (IMAP)</div>
+                                <div class="wizard-connector-desc">Sync emails from multiple accounts as memories</div>
+                            </div>
+                            <div class="wizard-connector-badge">IMAP</div>
+                        </div>
+                        <div class="wizard-connector">
+                            <div class="wizard-connector-icon">&#128025;</div>
+                            <div>
+                                <div class="wizard-connector-name">Gitea</div>
+                                <div class="wizard-connector-desc">Import issues, repos, and wiki content</div>
+                            </div>
+                            <div class="wizard-connector-badge">REST API</div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Step 4: Assembler -->
+                <div class="wizard-step" data-wizard-step="4">
+                    <div class="wizard-step-icon">&#9881;</div>
+                    <h2>Context Assembler</h2>
+                    <p class="wizard-desc">The assembler intelligently selects and compresses memories to fit within a token budget — perfect for feeding context to AI models.</p>
+                    <div class="wizard-pipeline">
+                        <div class="wizard-pipeline-stage">
+                            <div class="wizard-pipeline-box"><span>&#128218;</span>Memories</div>
+                        </div>
+                        <div class="wizard-pipeline-arrow">&#10142;</div>
+                        <div class="wizard-pipeline-stage">
+                            <div class="wizard-pipeline-box"><span>&#127919;</span>Relevance</div>
+                        </div>
+                        <div class="wizard-pipeline-arrow">&#10142;</div>
+                        <div class="wizard-pipeline-stage">
+                            <div class="wizard-pipeline-box"><span>&#128230;</span>Compress</div>
+                        </div>
+                        <div class="wizard-pipeline-arrow">&#10142;</div>
+                        <div class="wizard-pipeline-stage">
+                            <div class="wizard-pipeline-box"><span>&#128640;</span>Context</div>
+                        </div>
+                    </div>
+                    <div class="wizard-info">
+                        <div class="wizard-info-icon">&#128161;</div>
+                        <div>
+                            <strong>How it works:</strong><br>
+                            1. Memories are scored by relevance (tags, recency, usage)<br>
+                            2. Top memories are selected within your token budget<br>
+                            3. Smart compressors (bullet, code, YAML, mermaid) shrink content<br>
+                            4. The result is a perfectly sized context block for your AI
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Step 5: Memories -->
+                <div class="wizard-step" data-wizard-step="5">
+                    <div class="wizard-step-icon">&#128218;</div>
+                    <h2>Managing Memories</h2>
+                    <p class="wizard-desc">Memories are the building blocks of your knowledge base. Each memory has a key, value, and optional tags.</p>
+                    <div class="wizard-features">
+                        <div class="wizard-feature-card">
+                            <div class="wizard-feature-icon">&#10133;</div>
+                            <div><h4>Create</h4><p>Add memories manually or import from CLAUDE.md, Copilot.md, SQLite, JSON</p></div>
+                        </div>
+                        <div class="wizard-feature-card">
+                            <div class="wizard-feature-icon">&#128269;</div>
+                            <div><h4>Search</h4><p>Full-text search (FTS5) and optional semantic search with embeddings</p></div>
+                        </div>
+                        <div class="wizard-feature-card">
+                            <div class="wizard-feature-icon">&#127991;</div>
+                            <div><h4>Tags</h4><p>Organize with tags, filter by tag, bulk-tag selections</p></div>
+                        </div>
+                        <div class="wizard-feature-card">
+                            <div class="wizard-feature-icon">&#128274;</div>
+                            <div><h4>Secrets Scanner</h4><p>Detect API keys, passwords, and sensitive data automatically</p></div>
+                        </div>
+                        <div class="wizard-feature-card">
+                            <div class="wizard-feature-icon">&#128259;</div>
+                            <div><h4>Versioning</h4><p>Track changes with diff view, restore previous versions</p></div>
+                        </div>
+                        <div class="wizard-feature-card">
+                            <div class="wizard-feature-icon">&#128229;</div>
+                            <div><h4>Export</h4><p>Export as JSON, CLAUDE.md, or Markdown for external use</p></div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Step 6: Finish -->
+                <div class="wizard-step" data-wizard-step="6">
+                    <div style="text-align:center;padding-top:24px;">
+                        <div class="wizard-finish-orb">
+                            <div class="orb-ring"></div>
+                            <div class="orb"></div>
+                            <div class="wizard-particles">
+                                <div class="wizard-particle"></div>
+                                <div class="wizard-particle"></div>
+                                <div class="wizard-particle"></div>
+                                <div class="wizard-particle"></div>
+                                <div class="wizard-particle"></div>
+                                <div class="wizard-particle"></div>
+                            </div>
+                        </div>
+                        <h2>You're All Set!</h2>
+                        <p class="wizard-desc">Context Pilot is ready to use. Start by importing some knowledge or creating your first memory.</p>
+                        <div class="wizard-features" style="text-align:left;max-width:420px;margin:0 auto;">
+                            <div class="wizard-feature-card">
+                                <div class="wizard-feature-icon">&#128218;</div>
+                                <div><h4>Create a memory</h4><p>Go to Memories tab and add your first entry</p></div>
+                            </div>
+                            <div class="wizard-feature-card">
+                                <div class="wizard-feature-icon">&#128229;</div>
+                                <div><h4>Import knowledge</h4><p>Upload CLAUDE.md or connect a source</p></div>
+                            </div>
+                            <div class="wizard-feature-card">
+                                <div class="wizard-feature-icon">&#128268;</div>
+                                <div><h4>Configure connectors</h4><p>Set up Paperless, Gitea, or folder sync</p></div>
+                            </div>
+                            <div class="wizard-feature-card">
+                                <div class="wizard-feature-icon">&#129302;</div>
+                                <div><h4>Connect Claude Code</h4><p>MCP Server runs on port 8400 automatically</p></div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="wizard-footer">
+                <span class="wizard-step-label" id="wizard-step-label">Step 1 of 7</span>
+                <div class="wizard-btns">
+                    <button class="wizard-btn-skip" id="wizard-skip-btn" onclick="wizardSkip()">Skip setup</button>
+                    <button class="wizard-btn wizard-btn-secondary" id="wizard-back-btn" onclick="wizardBack()" style="display:none;">Back</button>
+                    <button class="wizard-btn wizard-btn-primary" id="wizard-next-btn" onclick="wizardNext()">Get Started</button>
+                </div>
+            </div>
         </div>
     </div>
 
@@ -62,10 +312,6 @@
             <select id="profile-select" onchange="switchProfile()" style="width:auto;min-width:140px;"></select>
             <button class="btn btn-small" onclick="showNewProfileDialog()">+</button>
             <button class="btn btn-small" onclick="showImportMemoriesDialog()" id="profile-import-btn" style="display:none">Import</button>
-            <button class="btn btn-small" onclick="exportActiveProfile()" id="profile-export-btn" style="display:none">Export</button>
-            <label class="btn btn-small" style="cursor:pointer;margin:0;" id="profile-import-zip-btn">
-                ZIP <input type="file" accept=".zip" style="display:none" onchange="importProfileZip(this)">
-            </label>
             <button class="btn btn-small" onclick="renameActiveProfile()" id="profile-rename-btn" style="display:none">Rename</button>
             <button class="btn btn-small btn-danger" onclick="deleteActiveProfile()" id="profile-delete-btn" style="display:none">Del</button>
         </div>
@@ -79,6 +325,7 @@
         <button class="tab" data-tab="secrets">Secrets</button>
         <button class="tab" data-tab="sources">Sources</button>
         <button class="tab" data-tab="assembler">Assembler</button>
+        <button class="tab" data-tab="settings">Settings</button>
     </nav>
 
     <main>
@@ -93,6 +340,7 @@
                 <div class="status-card"><div class="card-title">Scheduler</div><div class="card-value" id="dash-scheduler">--</div><div class="card-detail" id="dash-scheduler-detail"></div></div>
                 <div class="status-card"><div class="card-title">Trash</div><div class="card-value" id="dash-trash">0</div><div class="card-detail"><a href="#" onclick="showTrash();return false;" style="font-size:11px;color:var(--accent);">View trash</a></div></div>
                 <div class="status-card"><div class="card-title">Today</div><div class="card-value" id="dash-new-today">--</div><div class="card-detail" id="dash-new-today-detail">new + updated</div></div>
+                <div class="status-card" id="dash-expiring-card" style="display:none;"><div class="card-title">Expiring</div><div class="card-value" id="dash-expiring" style="color:var(--warning);">--</div><div class="card-detail"><a href="#" onclick="showExpiringMemories();return false;" style="font-size:11px;color:var(--warning);">View expiring</a></div></div>
             </div>
 
             <div class="panel" style="margin-top:16px;">
@@ -173,6 +421,13 @@
                     <select id="memory-tag-filter" onchange="filterByTag()" style="width:auto;min-width:100px;">
                         <option value="">All Tags</option>
                     </select>
+                    <select id="memory-lifetime-filter" onchange="loadMemories()" style="width:auto;min-width:100px;font-size:12px;">
+                        <option value="">All Lifetimes</option>
+                        <option value="permanent">Permanent</option>
+                        <option value="expiring">Expiring</option>
+                        <option value="urgent">Expiring &lt;24h</option>
+                        <option value="week">Expiring &lt;7d</option>
+                    </select>
                     <label style="display:inline;cursor:pointer;font-size:12px;white-space:nowrap;">
                         <input type="checkbox" id="semantic-toggle" onchange="searchMemories()"> Semantic
                     </label>
@@ -188,6 +443,12 @@
                         <input type="text" id="memory-key" placeholder="Key" oninput="suggestTags()">
                         <input type="text" id="memory-value" placeholder="Value" oninput="suggestTags()">
                         <input type="text" id="memory-tags" placeholder="Tags (comma-separated)">
+                        <input type="number" id="memory-ttl" placeholder="TTL" min="0" step="0.5" style="width:70px;" title="Auto-delete after N days/hours">
+                        <select id="memory-ttl-unit" style="width:auto;padding:6px;font-size:12px;" title="TTL unit">
+                            <option value="days">d</option>
+                            <option value="hours">h</option>
+                            <option value="minutes">m</option>
+                        </select>
                         <button class="btn btn-primary" onclick="saveNewMemory()">Save</button>
                     </div>
                     <div id="tag-suggestions" class="tag-suggestions" style="display:none;"></div>
@@ -205,6 +466,7 @@
                             <option value="updated" selected>Updated</option>
                             <option value="created">Created</option>
                             <option value="size">Size</option>
+                            <option value="expires">Expires</option>
                         </select>
                         <select id="memory-order" onchange="loadMemories()" style="width:auto;padding:3px 6px;font-size:11px;">
                             <option value="asc">Asc</option>
@@ -220,6 +482,7 @@
                         <button class="btn btn-small" id="bulk-toggle-btn" onclick="toggleBulkMode()">Select</button>
                         <button class="btn btn-small btn-danger" id="bulk-delete-btn" style="display:none" onclick="bulkDeleteSelected()">Delete</button>
                         <button class="btn btn-small" id="bulk-tag-btn" style="display:none" onclick="showBulkTagDialog()">Tag</button>
+                        <button class="btn btn-small" id="bulk-ttl-btn" style="display:none" onclick="showBulkTTLDialog()">TTL</button>
                         <button class="btn btn-small" onclick="exportMemories()">Export</button>
                     </div>
                 </div>
@@ -357,6 +620,89 @@
                 <pre id="compress-preview" style="white-space:pre-wrap;font-size:12px;max-height:300px;overflow-y:auto;background:var(--surface-alt);padding:12px;border-radius:6px;"></pre>
             </div>
         </section>
+
+        <!-- Settings -->
+        <section id="tab-settings" class="tab-content">
+            <!-- MCP Server -->
+            <div class="panel">
+                <div style="display:flex;justify-content:space-between;align-items:center;">
+                    <h2>MCP Server</h2>
+                    <div id="settings-mcp-actions" style="display:flex;gap:8px;"></div>
+                </div>
+                <div id="settings-mcp-status"></div>
+            </div>
+
+            <!-- Data Management -->
+            <div class="panel">
+                <h2>Data Management</h2>
+                <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px;margin-top:12px;">
+                    <div class="status-card" style="cursor:default;">
+                        <div class="card-title">Import Memories</div>
+                        <div style="display:flex;flex-direction:column;gap:6px;margin-top:8px;">
+                            <label class="btn btn-small" style="cursor:pointer;text-align:center;">CLAUDE.md <input type="file" accept=".md" style="display:none" data-import="claude-md"></label>
+                            <label class="btn btn-small" style="cursor:pointer;text-align:center;">Copilot.md <input type="file" accept=".md" style="display:none" data-import="copilot-md"></label>
+                            <label class="btn btn-small" style="cursor:pointer;text-align:center;">SQLite .db <input type="file" accept=".db,.sqlite" style="display:none" data-import="sqlite"></label>
+                            <label class="btn btn-small" style="cursor:pointer;text-align:center;">JSON <input type="file" accept=".json" style="display:none" data-import="json"></label>
+                        </div>
+                    </div>
+                    <div class="status-card" style="cursor:default;">
+                        <div class="card-title">Export Memories</div>
+                        <div style="display:flex;flex-direction:column;gap:6px;margin-top:8px;">
+                            <button class="btn btn-small" onclick="exportMemories()">Export JSON</button>
+                            <button class="btn btn-small" onclick="exportClaudeMd()">Export CLAUDE.md</button>
+                            <button class="btn btn-small" onclick="exportMarkdown()">Export Markdown</button>
+                        </div>
+                    </div>
+                    <div class="status-card" style="cursor:default;">
+                        <div class="card-title">Profile Backup</div>
+                        <div style="display:flex;flex-direction:column;gap:6px;margin-top:8px;">
+                            <button class="btn btn-small" onclick="exportActiveProfile()">Export Profile ZIP</button>
+                            <label class="btn btn-small" style="cursor:pointer;text-align:center;">Import Profile ZIP <input type="file" accept=".zip" style="display:none" onchange="importProfileZip(this)"></label>
+                        </div>
+                        <p style="font-size:11px;color:var(--text-muted);margin-top:8px;">ZIP contains DB, connectors, folders, webhooks. Full profile backup &amp; restore.</p>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Database -->
+            <div class="panel">
+                <div style="display:flex;justify-content:space-between;align-items:center;">
+                    <h2>Database</h2>
+                    <button class="btn btn-small" onclick="loadDbStats()">Refresh</button>
+                </div>
+                <div id="settings-db-stats" style="margin-top:12px;"></div>
+                <div style="display:flex;gap:8px;margin-top:16px;flex-wrap:wrap;">
+                    <button class="btn btn-small" onclick="vacuumDb()">Compact Database</button>
+                    <button class="btn btn-small" onclick="rebuildFts()">Rebuild Search Index</button>
+                    <button class="btn btn-small" onclick="cleanupTrash()">Cleanup Trash (30d+)</button>
+                    <button class="btn btn-small" onclick="cleanupExpired()">Cleanup Expired Memories</button>
+                </div>
+            </div>
+
+            <!-- Scheduler -->
+            <div class="panel">
+                <div style="display:flex;justify-content:space-between;align-items:center;">
+                    <h2>Auto-Sync Scheduler</h2>
+                    <div id="settings-scheduler-actions" style="display:flex;gap:8px;"></div>
+                </div>
+                <div id="settings-scheduler-status" style="margin-top:8px;"></div>
+            </div>
+
+            <!-- System Info -->
+            <div class="panel">
+                <h2>System</h2>
+                <div id="settings-system-info" style="margin-top:8px;"></div>
+            </div>
+
+            <!-- Danger Zone -->
+            <div class="panel" style="border:1px solid var(--danger);border-radius:var(--radius);">
+                <h2 style="color:var(--danger);">Danger Zone</h2>
+                <div style="display:flex;gap:8px;margin-top:12px;flex-wrap:wrap;">
+                    <button class="btn btn-small btn-danger" onclick="purgeAllTrash()">Purge All Trash</button>
+                    <button class="btn btn-small btn-danger" onclick="deleteAllMemories()">Delete All Memories</button>
+                </div>
+            </div>
+        </section>
     </main>
 
     <!-- Modal -->
@@ -381,7 +727,7 @@
 
     <div id="progress-toast"></div>
 
-    <script src="/static/app.js?v=17"></script>
+    <script src="/static/app.js?v=24"></script>
     <script>init();</script>
 </body>
 </html>

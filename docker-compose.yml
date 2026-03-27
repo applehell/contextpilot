@@ -1,7 +1,7 @@
 services:
   context-pilot:
+    image: <server-ip>:3300/constantin/context-pilot:latest
     build: .
-    image: context-pilot:latest
     container_name: context-pilot
     restart: unless-stopped
     ports:

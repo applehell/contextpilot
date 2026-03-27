@@ -83,6 +83,16 @@ class SyncScheduler:
         except Exception as e:
             results["connectors"]["_error"] = str(e)
 
+        # Cleanup expired TTL memories
+        try:
+            store = self._get_store()
+            expired_count = store.cleanup_expired()
+            if expired_count > 0:
+                results["ttl_cleanup"] = expired_count
+                self._events.emit("scheduler", "ttl-cleanup", f"{expired_count} expired memories removed")
+        except Exception as e:
+            results["ttl_cleanup_error"] = str(e)
+
         self._last_run = time.time()
         return results
 

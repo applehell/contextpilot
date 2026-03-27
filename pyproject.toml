@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "context-pilot"
-version = "3.2.0"
+version = "3.3.0"
 description = "Smart context and memory management for AI models — Web App + MCP Server"
 requires-python = ">=3.11"
 dependencies = [

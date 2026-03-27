@@ -108,7 +108,7 @@ function initKeyboardShortcuts() {
         }
 
         // 1-7 — tab navigation
-        const tabKeys = { '1': 'dashboard', '2': 'memories', '3': 'skills', '4': 'graph', '5': 'secrets', '6': 'sources', '7': 'assembler' };
+        const tabKeys = { '1': 'dashboard', '2': 'memories', '3': 'skills', '4': 'graph', '5': 'secrets', '6': 'sources', '7': 'assembler', '8': 'settings' };
         if (tabKeys[e.key]) {
             e.preventDefault();
             showTab(tabKeys[e.key], null);
@@ -142,7 +142,9 @@ async function startup() {
         setTimeout(() => loader.remove(), 400);
     }
 
-    checkWelcome();
+    // Show setup wizard for fresh installs, otherwise show welcome
+    const wizardShown = await checkSetupWizard();
+    if (!wizardShown) checkWelcome();
 }
 
 function checkWelcome() {
@@ -179,6 +181,166 @@ function showWelcomeForNewProfile(profileName) {
 }
 
 // ═══════════════════════════════════════════════════════════════
+// SETUP WIZARD
+// ═══════════════════════════════════════════════════════════════
+
+const WIZARD_TOTAL_STEPS = 7;
+let wizardCurrentStep = 0;
+
+async function checkSetupWizard() {
+    if (localStorage.getItem('cp-setup-complete')) return false;
+    try {
+        const res = await fetch('/api/setup-status');
+        const data = await res.json();
+        if (!data.is_fresh) {
+            localStorage.setItem('cp-setup-complete', '1');
+            return false;
+        }
+        showWizard(data);
+        return true;
+    } catch (e) {
+        console.error('Setup status check failed:', e);
+        return false;
+    }
+}
+
+function showWizard(setupData) {
+    const overlay = document.getElementById('wizard-overlay');
+    if (!overlay) return;
+
+    // Set data dir
+    const dirEl = document.getElementById('wizard-data-dir');
+    if (dirEl && setupData.data_dir) dirEl.textContent = setupData.data_dir;
+
+    // Build dots
+    const dotsContainer = document.getElementById('wizard-dots');
+    dotsContainer.innerHTML = '';
+    for (let i = 0; i < WIZARD_TOTAL_STEPS; i++) {
+        const dot = document.createElement('div');
+        dot.className = 'wizard-dot' + (i === 0 ? ' active' : '');
+        dot.dataset.step = i;
+        dotsContainer.appendChild(dot);
+    }
+
+    wizardCurrentStep = 0;
+    updateWizardUI();
+    requestAnimationFrame(() => overlay.classList.add('active'));
+}
+
+function updateWizardUI() {
+    const fill = document.getElementById('wizard-progress-fill');
+    const pct = ((wizardCurrentStep) / (WIZARD_TOTAL_STEPS - 1)) * 100;
+    fill.style.width = pct + '%';
+
+    document.querySelectorAll('.wizard-dot').forEach((dot, i) => {
+        dot.className = 'wizard-dot';
+        if (i < wizardCurrentStep) dot.classList.add('done');
+        if (i === wizardCurrentStep) dot.classList.add('active');
+    });
+
+    const label = document.getElementById('wizard-step-label');
+    const stepNames = ['Welcome', 'Storage', 'Profile', 'Connectors', 'Assembler', 'Memories', 'Finish'];
+    label.textContent = stepNames[wizardCurrentStep] + ' \u2014 Step ' + (wizardCurrentStep + 1) + ' of ' + WIZARD_TOTAL_STEPS;
+
+    const backBtn = document.getElementById('wizard-back-btn');
+    const nextBtn = document.getElementById('wizard-next-btn');
+    const skipBtn = document.getElementById('wizard-skip-btn');
+
+    backBtn.style.display = wizardCurrentStep > 0 ? '' : 'none';
+    skipBtn.style.display = wizardCurrentStep < WIZARD_TOTAL_STEPS - 1 ? '' : 'none';
+
+    if (wizardCurrentStep === 0) {
+        nextBtn.textContent = 'Get Started';
+    } else if (wizardCurrentStep === WIZARD_TOTAL_STEPS - 1) {
+        nextBtn.textContent = 'Launch Context Pilot';
+    } else {
+        nextBtn.textContent = 'Continue';
+    }
+}
+
+function wizardGoToStep(target) {
+    const steps = document.querySelectorAll('.wizard-step');
+    const current = steps[wizardCurrentStep];
+    const next = steps[target];
+    if (!current || !next) return;
+
+    const goingForward = target > wizardCurrentStep;
+
+    current.classList.remove('active');
+    current.classList.add(goingForward ? 'exit-left' : '');
+    current.style.transform = goingForward ? 'translateX(-60px)' : 'translateX(60px)';
+    current.style.opacity = '0';
+
+    next.style.transform = goingForward ? 'translateX(60px)' : 'translateX(-60px)';
+    next.style.opacity = '0';
+    next.classList.remove('exit-left');
+
+    requestAnimationFrame(() => {
+        next.classList.add('active');
+        next.style.transform = 'translateX(0)';
+        next.style.opacity = '1';
+    });
+
+    wizardCurrentStep = target;
+    updateWizardUI();
+}
+
+async function wizardNext() {
+    if (wizardCurrentStep === 2) {
+        await wizardCreateProfile();
+    }
+
+    if (wizardCurrentStep < WIZARD_TOTAL_STEPS - 1) {
+        wizardGoToStep(wizardCurrentStep + 1);
+    } else {
+        wizardFinish();
+    }
+}
+
+function wizardBack() {
+    if (wizardCurrentStep > 0) {
+        wizardGoToStep(wizardCurrentStep - 1);
+    }
+}
+
+async function wizardCreateProfile() {
+    const nameInput = document.getElementById('wizard-profile-name');
+    const name = (nameInput?.value || '').trim();
+    if (!name || name.toLowerCase() === 'default') return;
+
+    try {
+        await fetch('/api/profiles', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({name: name}),
+        });
+        await fetch('/api/profiles/' + encodeURIComponent(name) + '/switch', {method: 'POST'});
+    } catch (e) {
+        console.error('Profile creation failed:', e);
+    }
+}
+
+function wizardSkip() {
+    wizardFinish();
+}
+
+function wizardFinish() {
+    localStorage.setItem('cp-setup-complete', '1');
+    localStorage.setItem('cp-welcome-v2', '1');
+    const overlay = document.getElementById('wizard-overlay');
+    if (overlay) {
+        overlay.style.opacity = '0';
+        overlay.style.transition = 'opacity 0.4s ease';
+        setTimeout(() => {
+            overlay.classList.remove('active');
+            overlay.remove();
+        }, 400);
+    }
+    loadProfiles();
+    loadDashboard();
+}
+
+// ═══════════════════════════════════════════════════════════════
 // TABS
 // ═══════════════════════════════════════════════════════════════
 
@@ -211,6 +373,7 @@ function showTab(name, clickedBtn) {
     if (name === 'secrets') loadSecrets();
     if (name === 'sources') { loadScheduler(); loadConnectors(); loadFolders(); loadWebhooks(); }
     if (name === 'assembler') loadTemplates();
+    if (name === 'settings') loadSettings();
 }
 
 // ═══════════════════════════════════════════════════════════════
@@ -368,14 +531,59 @@ async function loadDashboard() {
         } else {
             mcpEl.textContent = 'OFF';
             mcpEl.className = 'card-value red';
-            mcpDetail.textContent = 'Not registered in Claude';
+            mcpDetail.innerHTML = '<a href="#" onclick="showTab(\'settings\');return false;" style="font-size:11px;color:var(--accent);">Register in Settings</a>';
+        }
+    } catch (e) {}
+
+    // TTL stats
+    try {
+        const ttlRes = await fetch('/api/memories/ttl-stats');
+        const ttl = await ttlRes.json();
+        const card = document.getElementById('dash-expiring-card');
+        if (ttl.total_with_ttl > 0 || ttl.expired > 0 || ttl.expiring_24h > 0) {
+            card.style.display = '';
+            const val = ttl.expired + ttl.expiring_24h;
+            document.getElementById('dash-expiring').textContent = val;
+            if (ttl.expired > 0) {
+                // Auto-cleanup expired
+                fetch('/api/memories/cleanup-expired', {method: 'POST'});
+            }
+        } else {
+            card.style.display = 'none';
         }
     } catch (e) {}
 
     loadDashboardStats();
 }
 
+async function showExpiringMemories() {
+    try {
+        const res = await fetch('/api/memories/expiring?hours=168');
+        const memories = await res.json();
+        if (!memories.length) {
+            openModal('Expiring Memories', '<p class="muted">No memories expiring in the next 7 days.</p>');
+            return;
+        }
+        const now = Date.now() / 1000;
+        const html = memories.map(m => {
+            const rem = m.expires_at - now;
+            const label = m.ttl_label || '?';
+            const urgent = rem < 86400;
+            return `<div class="memory-item" style="cursor:pointer;border-left:3px solid ${urgent ? 'var(--warning)' : 'var(--border)'};" onclick="closeModal();viewMemory('${escapeAttr(m.key)}')">
+                <div class="main">
+                    <div class="key"><span class="badge ${urgent ? 'badge-ttl-urgent' : 'badge-ttl'}">${label}</span> ${escapeHtml(m.key)}</div>
+                    <div class="preview">${escapeHtml((m.value||'').substring(0,80))}</div>
+                </div>
+            </div>`;
+        }).join('');
+        openModal(`Expiring Memories (${memories.length})`, html);
+    } catch (e) { console.error(e); }
+}
+
 async function loadDashboardStats() {
+    showSkeleton('dash-top-tags', {rows: 4, type: 'text'});
+    showSkeleton('dash-size-dist', {rows: 4, type: 'text'});
+    showSkeleton('dash-connector-health', {rows: 3, type: 'text'});
     try {
         const res = await fetch('/api/dashboard/stats');
         const d = await res.json();
@@ -530,6 +738,7 @@ function renderSkillCard(s) {
 }
 
 async function loadSkills() {
+    showSkeleton('skill-list', {rows: 3, type: 'list'});
     try {
         const res = await fetch('/api/skills');
         const skills = await res.json();
@@ -548,6 +757,7 @@ async function loadSkills() {
 
 async function loadMemories() {
     botBusy();
+    showSkeleton('memory-list', {rows: 6, type: 'list'});
     const source = document.getElementById('memory-source-filter')?.value || '';
     const sort = document.getElementById('memory-sort')?.value || 'updated';
     const order = document.getElementById('memory-order')?.value || 'desc';
@@ -666,7 +876,25 @@ function renderMemories(data) {
     const now = Date.now() / 1000;
     const RECENT = 86400;
 
-    list.innerHTML = data.map(m => {
+    // Client-side lifetime filter
+    const lifetimeFilter = document.getElementById('memory-lifetime-filter')?.value || '';
+    let filtered = data;
+    if (lifetimeFilter === 'permanent') {
+        filtered = data.filter(m => !m.expires_at);
+    } else if (lifetimeFilter === 'expiring') {
+        filtered = data.filter(m => m.expires_at && m.expires_at > now);
+    } else if (lifetimeFilter === 'urgent') {
+        filtered = data.filter(m => m.expires_at && m.expires_at > now && (m.expires_at - now) < 86400);
+    } else if (lifetimeFilter === 'week') {
+        filtered = data.filter(m => m.expires_at && m.expires_at > now && (m.expires_at - now) < 604800);
+    }
+
+    if (filtered.length === 0) {
+        list.innerHTML = '<div class="empty-state">No memories match the lifetime filter.</div>';
+        return;
+    }
+
+    list.innerHTML = filtered.map(m => {
         const isNew = m.created_at && (now - m.created_at) < RECENT;
         const isModified = !isNew && m.updated_at && m.created_at
             && Math.abs(m.updated_at - m.created_at) > 2
@@ -694,6 +922,23 @@ function renderMemories(data) {
         const pinned = m.pinned || false;
         const pinIcon = pinned ? '<span class="pin-badge" title="Pinned">P</span>' : '';
 
+        // Lifetime indicator
+        let lifetimeHtml = '';
+        if (m.expires_at) {
+            const ttlLabel = m.ttl_label || '';
+            if (ttlLabel === 'expired') {
+                lifetimeHtml = '<span class="lifetime-indicator lifetime-expired" title="Expired">EXP</span>';
+            } else {
+                const ttlRemaining = m.expires_at - now;
+                const isUrgent = ttlRemaining < 86400;
+                const isSoon = ttlRemaining < 86400 * 3;
+                const cls = isUrgent ? 'lifetime-urgent' : isSoon ? 'lifetime-soon' : 'lifetime-limited';
+                lifetimeHtml = '<span class="lifetime-indicator ' + cls + '" title="Expires in ' + ttlLabel + '">' + ttlLabel + '</span>';
+            }
+        } else {
+            lifetimeHtml = '<span class="lifetime-indicator lifetime-permanent" title="Permanent — no expiry">&#8734;</span>';
+        }
+
         // Size info
         const tokens = m.tokens || 0;
         const bytes = m.bytes || 0;
@@ -705,7 +950,7 @@ function renderMemories(data) {
 
         const ek = escapeAttr(m.key);
 
-        return '<div class="memory-item' + stateClass + '" onclick="viewMemory(\'' + ek + '\')">'
+        return '<div class="memory-item' + stateClass + (m.expires_at && m.ttl_label === 'expired' ? ' expired' : '') + '" onclick="viewMemory(\'' + ek + '\')">'
             + cbHtml
             + '<div class="main">'
             + '<div class="key">' + pinIcon + badge + escapeHtml(m.key) + '</div>'
@@ -714,6 +959,7 @@ function renderMemories(data) {
             + tagsHtml
             + sizeStr
             + (age ? ' <span class="age">' + age + '</span>' : '')
+            + ' ' + lifetimeHtml
             + '</div>'
             + '</div>'
             + '<div class="actions" onclick="event.stopPropagation()">'
@@ -761,9 +1007,20 @@ async function viewMemory(key) {
             ? EasyMDE.prototype.markdown(m.value)
             : '<pre>' + escapeHtml(m.value) + '</pre>';
 
+        let ttlHtml = '';
+        if (m.expires_at) {
+            const ttlLabel = m.ttl_label || 'unknown';
+            const color = ttlLabel === 'expired' ? 'var(--danger)' : m.expires_at - Date.now()/1000 < 86400 ? 'var(--warning)' : 'var(--text-muted)';
+            ttlHtml = `<div style="margin-bottom:12px;padding:8px 12px;background:var(--surface-alt);border-radius:6px;font-size:12px;border-left:3px solid ${color};">
+                TTL: <strong>${ttlLabel}</strong> remaining
+                ${m.metadata?.ttl_seconds ? ' (resets on update, period: ' + Math.round(m.metadata.ttl_seconds/86400*10)/10 + 'd)' : ''}
+            </div>`;
+        }
+
         openModal(m.key, `
             <label>Tags</label>
             <div style="margin-bottom:16px;">${tagsHtml}</div>
+            ${ttlHtml}
             <label>Content</label>
             <div class="md-preview">${rendered}</div>
         `, `
@@ -781,6 +1038,8 @@ async function editMemory(key) {
         if (!res.ok) return;
         const m = await res.json();
 
+        const currentTtlDays = m.metadata?.ttl_seconds ? (m.metadata.ttl_seconds / 86400) : '';
+        const ttlInfo = m.ttl_label ? `<span style="font-size:11px;color:var(--text-muted);margin-left:8px;">Current: ${m.ttl_label} remaining</span>` : '';
         openModal('Edit: ' + m.key, `
             <label>Key</label>
             <input type="text" id="edit-key" value="${escapeHtml(m.key)}" readonly style="background:var(--surface-alt);cursor:not-allowed;">
@@ -788,6 +1047,15 @@ async function editMemory(key) {
             <textarea id="edit-value">${escapeHtml(m.value)}</textarea>
             <label>Tags (comma-separated)</label>
             <input type="text" id="edit-tags" value="${escapeHtml(m.tags.join(', '))}">
+            <label>TTL (auto-delete after)${ttlInfo}</label>
+            <div style="display:flex;gap:6px;align-items:center;">
+                <input type="number" id="edit-ttl" value="${currentTtlDays}" min="0" step="0.5" placeholder="No expiry" style="width:100px;">
+                <select id="edit-ttl-unit" style="width:auto;padding:6px 10px;">
+                    <option value="days">days</option>
+                    <option value="hours">hours</option>
+                </select>
+                ${m.expires_at ? '<button class="btn btn-small" onclick="document.getElementById(\'edit-ttl\').value=\'\'" style="font-size:11px;">Remove TTL</button>' : ''}
+            </div>
         `, `
             <button class="btn btn-primary" id="save-memory-btn">Save</button>
             <button class="btn" id="cancel-memory-btn">Cancel</button>
@@ -833,13 +1101,24 @@ async function saveEditedMemory(key) {
     const value = activeEditor ? activeEditor.value() : document.getElementById('edit-value').value;
     const tagsStr = document.getElementById('edit-tags').value;
     const tags = tagsStr ? tagsStr.split(',').map(t => t.trim()).filter(Boolean) : [];
+    const ttlEl = document.getElementById('edit-ttl');
+    let ttl_seconds = null;
+    if (ttlEl) {
+        const num = parseFloat(ttlEl.value);
+        const unit = document.getElementById('edit-ttl-unit')?.value || 'days';
+        if (num > 0) {
+            ttl_seconds = unit === 'hours' ? num * 3600 : num * 86400;
+        } else if (ttlEl.value === '' || ttlEl.value === '0') {
+            ttl_seconds = 0; // explicitly remove TTL
+        }
+    }
     destroyEditor();
     const tid = showToast('Saving memory', key);
     try {
         const res = await fetch(memoryUrl(key), {
             method: 'PUT',
             headers: {'Content-Type': 'application/json'},
-            body: JSON.stringify({key, value, tags})
+            body: JSON.stringify({key, value, tags, ttl_seconds})
         });
         if (res.ok) {
             completeToast(tid, 'Saved', false);
@@ -857,15 +1136,26 @@ async function saveNewMemory() {
     if (!key || !value) return;
     const tagsStr = document.getElementById('memory-tags').value.trim();
     const tags = tagsStr ? tagsStr.split(',').map(t => t.trim()).filter(Boolean) : [];
+    const ttlEl = document.getElementById('memory-ttl');
+    const ttlVal = ttlEl ? ttlEl.value : '';
+    let ttl_seconds = null;
+    if (ttlVal) {
+        const num = parseFloat(ttlVal);
+        const unit = document.getElementById('memory-ttl-unit')?.value || 'days';
+        if (num > 0) {
+            ttl_seconds = unit === 'hours' ? num * 3600 : unit === 'minutes' ? num * 60 : num * 86400;
+        }
+    }
     try {
         await fetch('/api/memories', {
             method: 'POST',
             headers: {'Content-Type': 'application/json'},
-            body: JSON.stringify({key, value, tags})
+            body: JSON.stringify({key, value, tags, ttl_seconds})
         });
         document.getElementById('memory-key').value = '';
         document.getElementById('memory-value').value = '';
         document.getElementById('memory-tags').value = '';
+        if (ttlEl) ttlEl.value = '';
         loadMemories();
     } catch (e) { console.error(e); }
 }
@@ -989,6 +1279,8 @@ function toggleBulkMode() {
     bulkMode = !bulkMode;
     document.getElementById('bulk-delete-btn').style.display = bulkMode ? '' : 'none';
     document.getElementById('bulk-tag-btn').style.display = bulkMode ? '' : 'none';
+    const ttlBtn = document.getElementById('bulk-ttl-btn');
+    if (ttlBtn) ttlBtn.style.display = bulkMode ? '' : 'none';
     document.getElementById('bulk-toggle-btn').textContent = bulkMode ? 'Cancel' : 'Select';
     loadMemories();
 }
@@ -1009,6 +1301,60 @@ async function bulkDeleteSelected() {
         completeToast(tid, `${d.count} deleted`, false);
         loadMemories();
     } catch (e) { completeToast(tid, 'Failed', true); }
+}
+
+function showBulkTTLDialog() {
+    const checked = document.querySelectorAll('.bulk-cb:checked');
+    if (checked.length === 0) { alert('No memories selected.'); return; }
+    const count = checked.length;
+    openModal(`Set TTL for ${count} memories`, `
+        <p style="margin-bottom:16px;color:var(--text-secondary);">Set a lifetime for <strong>${count}</strong> selected memories. Leave empty to make permanent.</p>
+        <div style="display:flex;gap:8px;align-items:center;">
+            <input type="number" id="bulk-ttl-value" placeholder="Duration" min="0" step="1" style="width:120px;">
+            <select id="bulk-ttl-unit" style="width:auto;padding:8px 12px;">
+                <option value="days">days</option>
+                <option value="hours">hours</option>
+            </select>
+        </div>
+        <div style="margin-top:12px;display:flex;gap:8px;">
+            <button class="btn btn-small" onclick="document.getElementById('bulk-ttl-value').value='7'">7d</button>
+            <button class="btn btn-small" onclick="document.getElementById('bulk-ttl-value').value='30'">30d</button>
+            <button class="btn btn-small" onclick="document.getElementById('bulk-ttl-value').value='90'">90d</button>
+            <button class="btn btn-small" onclick="document.getElementById('bulk-ttl-value').value=''">Permanent</button>
+        </div>
+    `, `
+        <button class="btn btn-primary" onclick="bulkSetTTL()">Apply TTL</button>
+        <button class="btn" onclick="closeModal()">Cancel</button>
+    `);
+}
+
+async function bulkSetTTL() {
+    const checked = document.querySelectorAll('.bulk-cb:checked');
+    if (checked.length === 0) return;
+    const keys = Array.from(checked).map(cb => cb.dataset.key);
+    const numVal = parseFloat(document.getElementById('bulk-ttl-value').value);
+    const unit = document.getElementById('bulk-ttl-unit')?.value || 'days';
+    let ttl_seconds = null;
+    if (numVal > 0) {
+        ttl_seconds = unit === 'hours' ? numVal * 3600 : numVal * 86400;
+    } else {
+        ttl_seconds = 0; // remove TTL
+    }
+    closeModal();
+    const tid = showToast('Setting TTL', `${keys.length} memories...`);
+    let ok = 0;
+    for (const key of keys) {
+        try {
+            const res = await fetch(memoryUrl(key) + '/ttl', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({ttl_seconds})
+            });
+            if (res.ok) ok++;
+        } catch (e) {}
+    }
+    completeToast(tid, `TTL set on ${ok}/${keys.length} memories`, ok < keys.length);
+    loadMemories();
 }
 
 async function exportMemories() {
@@ -1387,7 +1733,6 @@ async function loadProfiles() {
         document.getElementById('profile-delete-btn').style.display = notDefault ? '' : 'none';
         document.getElementById('profile-rename-btn').style.display = notDefault ? '' : 'none';
         document.getElementById('profile-import-btn').style.display = d.profiles.length > 1 ? '' : 'none';
-        document.getElementById('profile-export-btn').style.display = '';
     } catch (e) { console.error(e); }
 }
 
@@ -1767,6 +2112,7 @@ const SEV_COLORS = {
 };
 
 async function loadSecrets() {
+    showSkeleton('secrets-list', {rows: 5, type: 'list'});
     const tid = showToast('Secret scan', 'Scanning all memories...');
     try {
         const res = await fetch('/api/sensitivity');
@@ -1844,6 +2190,7 @@ async function viewRedacted(key) {
 
 async function loadConnectors() {
     const el = document.getElementById('connectors-list');
+    showSkeleton('connectors-list', {rows: 4, type: 'list'});
     try {
         const res = await fetch('/api/connectors');
         const connectors = await res.json();
@@ -1879,11 +2226,13 @@ function renderConnectorPanel(c) {
             <button class="btn btn-small btn-danger" onclick="removeConnector('${escapeAttr(c.name)}')">Disconnect</button>
         `;
 
+        const ttlInfo = c.ttl_days ? `<span class="badge badge-ttl" style="font-size:10px;">TTL: ${c.ttl_days}d</span>` : '';
+
         statusHtml = `<div class="memory-item" style="cursor:default;">
             <div class="main">
                 <div class="key">
                     <span class="badge" style="background:var(--${statusClass}-light);color:var(--${statusClass});">${statusLabel}</span>
-                    ${escapeHtml(c.display_name)}
+                    ${escapeHtml(c.display_name)} ${ttlInfo}
                 </div>
                 <div class="meta">
                     <span class="age">${c.synced_count} items synced</span>
@@ -1915,7 +2264,10 @@ function showConnectorSetup(name) {
                 <input type="${inputType}" id="conn-${f.name}" placeholder="${escapeHtml(f.placeholder)}" value="${displayVal}">`;
         }).join('');
 
-        openModal(`${c.display_name} Setup`, fields, `
+        const ttlField = `<label>Memory TTL (auto-delete synced memories after N days, 0 = never)</label>
+            <input type="number" id="conn-ttl_days" placeholder="0 (permanent)" value="${c.ttl_days || ''}" min="0" step="1">`;
+
+        openModal(`${c.display_name} Setup`, fields + ttlField, `
             <button class="btn btn-primary" id="conn-save-btn">Save & Test</button>
             <button class="btn" onclick="closeModal()">Cancel</button>
         `);
@@ -1942,6 +2294,13 @@ async function submitConnectorSetup(name, connectorInfo) {
             return;
         }
         values[f.name] = val;
+    }
+
+    // Include TTL days
+    const ttlEl = document.getElementById('conn-ttl_days');
+    if (ttlEl) {
+        const ttlVal = parseInt(ttlEl.value) || 0;
+        values['ttl_days'] = ttlVal > 0 ? ttlVal : 0;
     }
 
     // If only updating non-password fields
@@ -2145,6 +2504,7 @@ async function saveEmailSettings() {
 
 async function loadFolders() {
     const el = document.getElementById('folder-list');
+    showSkeleton('folder-list', {rows: 2, type: 'list'});
     try {
         const res = await fetch('/api/folders');
         const folders = await res.json();
@@ -2984,6 +3344,262 @@ async function sendReport() {
 }
 
 // ═══════════════════════════════════════════════════════════════
+// SETTINGS
+// ═══════════════════════════════════════════════════════════════
+
+async function loadSettings() {
+    loadMcpSettings();
+    loadDbStats();
+    loadSchedulerSettings();
+    loadSystemInfo();
+}
+
+async function loadMcpSettings() {
+    showSkeleton('settings-mcp-status', {rows: 1, type: 'list'});
+    try {
+        const res = await fetch('/api/mcp-status');
+        const mcp = await res.json();
+        const el = document.getElementById('settings-mcp-status');
+        const actions = document.getElementById('settings-mcp-actions');
+
+        if (mcp.registered) {
+            const url = mcp.config?.url || 'unknown';
+            const type = mcp.config?.type || 'sse';
+            el.innerHTML = `
+                <div class="memory-item" style="cursor:default;border-left:3px solid var(--success);">
+                    <div class="main">
+                        <div class="key"><span class="badge" style="background:var(--success-light);color:var(--success);">registered</span> Context Pilot MCP</div>
+                        <div class="meta">
+                            <span class="age">Type: ${escapeHtml(type)}</span>
+                            <span class="age">URL: ${escapeHtml(url)}</span>
+                        </div>
+                    </div>
+                </div>`;
+            actions.innerHTML = `
+                <button class="btn btn-small btn-danger" onclick="mcpDeregister()">Deregister</button>`;
+        } else {
+            el.innerHTML = `
+                <div class="memory-item" style="cursor:default;border-left:3px solid var(--text-muted);">
+                    <div class="main">
+                        <div class="key"><span class="badge" style="background:var(--surface-alt);color:var(--text-muted);">not registered</span> MCP Server</div>
+                        <div class="meta"><span class="age">Not registered in ~/.claude.json. Register to connect Claude Code.</span></div>
+                    </div>
+                </div>`;
+            actions.innerHTML = `
+                <button class="btn btn-small btn-primary" onclick="showMcpRegisterDialog()">Register</button>`;
+        }
+    } catch (e) { console.error(e); }
+}
+
+function showMcpRegisterDialog() {
+    openModal('Register MCP Server', `
+        <p style="margin-bottom:16px;color:var(--text-secondary);">Register the Context Pilot MCP server in <code>~/.claude.json</code> so Claude Code can access your memories.</p>
+        <label>Port</label>
+        <input type="number" id="mcp-reg-port" value="8400" min="1" max="65535">
+        <label style="margin-top:12px;">Transport</label>
+        <select id="mcp-reg-transport" style="width:100%;">
+            <option value="sse">SSE (Server-Sent Events)</option>
+            <option value="streamable-http">Streamable HTTP</option>
+        </select>
+    `, `
+        <button class="btn btn-primary" onclick="mcpRegister()">Register</button>
+        <button class="btn" onclick="closeModal()">Cancel</button>
+    `);
+}
+
+async function mcpRegister() {
+    const port = parseInt(document.getElementById('mcp-reg-port').value) || 8400;
+    const transport = document.getElementById('mcp-reg-transport').value;
+    const tid = showToast('Registering MCP', `Port ${port}...`);
+    try {
+        const res = await fetch('/api/mcp/register', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({port, transport})
+        });
+        if (res.ok) {
+            completeToast(tid, 'MCP registered', false);
+            closeModal();
+            loadMcpSettings();
+            loadDashboard();
+        } else {
+            completeToast(tid, 'Failed', true);
+        }
+    } catch (e) { completeToast(tid, 'Error: ' + e.message, true); }
+}
+
+async function mcpDeregister() {
+    if (!confirm('Deregister MCP server from ~/.claude.json?')) return;
+    const tid = showToast('Deregistering MCP', '...');
+    try {
+        await fetch('/api/mcp/deregister', {method: 'POST'});
+        completeToast(tid, 'MCP deregistered', false);
+        loadMcpSettings();
+        loadDashboard();
+    } catch (e) { completeToast(tid, 'Error: ' + e.message, true); }
+}
+
+async function loadDbStats() {
+    showSkeleton('settings-db-stats', {rows: 6, type: 'cards'});
+    try {
+        const res = await fetch('/api/maintenance/db-stats');
+        const d = await res.json();
+        const el = document.getElementById('settings-db-stats');
+        el.innerHTML = `
+            <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:8px;">
+                <div class="status-card" style="padding:10px;"><div class="card-title" style="font-size:10px;">Data Dir</div><div style="font-size:11px;word-break:break-all;color:var(--text-secondary);">${escapeHtml(d.data_dir)}</div></div>
+                <div class="status-card" style="padding:10px;"><div class="card-title" style="font-size:10px;">DB Size</div><div class="card-value" style="font-size:18px;">${d.db_size_mb} MB</div></div>
+                <div class="status-card" style="padding:10px;"><div class="card-title" style="font-size:10px;">Memories</div><div class="card-value" style="font-size:18px;">${d.memory_count}</div></div>
+                <div class="status-card" style="padding:10px;"><div class="card-title" style="font-size:10px;">Schema</div><div class="card-value" style="font-size:18px;">v${d.schema_version}</div></div>
+                <div class="status-card" style="padding:10px;"><div class="card-title" style="font-size:10px;">Fragmentation</div><div class="card-value" style="font-size:18px;">${d.fragmentation_pct}%</div></div>
+                <div class="status-card" style="padding:10px;"><div class="card-title" style="font-size:10px;">Disk Free</div><div class="card-value" style="font-size:18px;">${d.disk_free_gb != null ? d.disk_free_gb + ' GB' : 'n/a'}</div></div>
+            </div>`;
+    } catch (e) { console.error(e); }
+}
+
+async function vacuumDb() {
+    const tid = showToast('Compacting database', '...');
+    try {
+        await fetch('/api/maintenance/vacuum', {method: 'POST'});
+        completeToast(tid, 'Database compacted', false);
+        loadDbStats();
+    } catch (e) { completeToast(tid, 'Failed', true); }
+}
+
+async function rebuildFts() {
+    const tid = showToast('Rebuilding search index', '...');
+    try {
+        await fetch('/api/maintenance/rebuild-fts', {method: 'POST'});
+        completeToast(tid, 'Search index rebuilt', false);
+    } catch (e) { completeToast(tid, 'Failed', true); }
+}
+
+async function cleanupTrash() {
+    const tid = showToast('Cleaning up trash', '...');
+    try {
+        const res = await fetch('/api/maintenance/trash-cleanup?days=30', {method: 'POST'});
+        const d = await res.json();
+        completeToast(tid, `${d.removed} old trash entries removed`, false);
+    } catch (e) { completeToast(tid, 'Failed', true); }
+}
+
+async function cleanupExpired() {
+    const tid = showToast('Cleaning expired memories', '...');
+    try {
+        const res = await fetch('/api/memories/cleanup-expired', {method: 'POST'});
+        const d = await res.json();
+        completeToast(tid, `${d.removed} expired memories removed`, false);
+        loadDbStats();
+    } catch (e) { completeToast(tid, 'Failed', true); }
+}
+
+async function purgeAllTrash() {
+    if (!confirm('Permanently delete ALL items in trash? This cannot be undone.')) return;
+    const tid = showToast('Purging trash', '...');
+    try {
+        const res = await fetch('/api/trash/purge', {method: 'DELETE'});
+        const d = await res.json();
+        completeToast(tid, `${d.purged || 0} items purged`, false);
+    } catch (e) { completeToast(tid, 'Failed', true); }
+}
+
+async function deleteAllMemories() {
+    const phrase = prompt('Type "DELETE ALL" to confirm deletion of ALL memories:');
+    if (phrase !== 'DELETE ALL') return;
+    const tid = showToast('Deleting all memories', '...');
+    try {
+        const store = await fetch('/api/memories?page_size=1');
+        const d = await store.json();
+        const total = d.total;
+        // Fetch all keys
+        const allRes = await fetch(`/api/memories?page_size=${total}`);
+        const all = await allRes.json();
+        const keys = all.memories.map(m => m.key);
+        await fetch('/api/memories/bulk-delete', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify(keys)
+        });
+        completeToast(tid, `${keys.length} memories deleted`, false);
+        loadDbStats();
+    } catch (e) { completeToast(tid, 'Failed', true); }
+}
+
+async function loadSchedulerSettings() {
+    showSkeleton('settings-scheduler-status', {rows: 1, type: 'list'});
+    try {
+        const res = await fetch('/api/scheduler');
+        const s = await res.json();
+        const el = document.getElementById('settings-scheduler-status');
+        const actions = document.getElementById('settings-scheduler-actions');
+        const lastRun = s.last_run ? new Date(s.last_run * 1000).toLocaleString() : 'never';
+
+        el.innerHTML = `
+            <div class="memory-item" style="cursor:default;border-left:3px solid ${s.running ? 'var(--success)' : 'var(--text-muted)'};">
+                <div class="main">
+                    <div class="key">
+                        <span class="badge" style="background:${s.running ? 'var(--success-light)' : 'var(--surface-alt)'};color:${s.running ? 'var(--success)' : 'var(--text-muted)'};">${s.running ? 'running' : 'stopped'}</span>
+                        Auto-Sync
+                    </div>
+                    <div class="meta">
+                        <span class="age">Interval: ${s.interval_minutes}m</span>
+                        <span class="age">Last run: ${lastRun}</span>
+                    </div>
+                </div>
+            </div>`;
+
+        if (s.running) {
+            actions.innerHTML = `
+                <button class="btn btn-small" onclick="schedulerRunNow()">Run Now</button>
+                <button class="btn btn-small btn-danger" onclick="schedulerStop()">Stop</button>`;
+        } else {
+            actions.innerHTML = `
+                <input type="number" id="sched-interval" value="30" min="1" max="1440" style="width:60px;padding:4px 8px;font-size:12px;" title="Interval in minutes">
+                <button class="btn btn-small btn-primary" onclick="schedulerStart()">Start</button>`;
+        }
+    } catch (e) { console.error(e); }
+}
+
+async function schedulerStart() {
+    const interval = parseInt(document.getElementById('sched-interval')?.value || '30');
+    await fetch(`/api/scheduler/start?interval=${interval}`, {method: 'POST'});
+    loadSchedulerSettings();
+}
+
+async function schedulerStop() {
+    await fetch('/api/scheduler/stop', {method: 'POST'});
+    loadSchedulerSettings();
+}
+
+async function schedulerRunNow() {
+    const tid = showToast('Running sync', '...');
+    try {
+        const res = await fetch('/api/scheduler/run-now', {method: 'POST'});
+        const d = await res.json();
+        completeToast(tid, 'Sync complete', false);
+        loadSchedulerSettings();
+    } catch (e) { completeToast(tid, 'Failed', true); }
+}
+
+async function loadSystemInfo() {
+    showSkeleton('settings-system-info', {rows: 6, type: 'cards'});
+    try {
+        const res = await fetch('/health');
+        const h = await res.json();
+        const el = document.getElementById('settings-system-info');
+        el.innerHTML = `
+            <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:8px;">
+                <div class="status-card" style="padding:10px;"><div class="card-title" style="font-size:10px;">Version</div><div class="card-value" style="font-size:16px;">${escapeHtml(h.version)}</div></div>
+                <div class="status-card" style="padding:10px;"><div class="card-title" style="font-size:10px;">Uptime</div><div class="card-value" style="font-size:16px;">${escapeHtml(h.uptime)}</div></div>
+                <div class="status-card" style="padding:10px;"><div class="card-title" style="font-size:10px;">Python</div><div class="card-value" style="font-size:16px;">${escapeHtml(h.python)}</div></div>
+                <div class="status-card" style="padding:10px;"><div class="card-title" style="font-size:10px;">Platform</div><div class="card-value" style="font-size:14px;">${escapeHtml(h.platform)}</div></div>
+                <div class="status-card" style="padding:10px;"><div class="card-title" style="font-size:10px;">PID</div><div class="card-value" style="font-size:16px;">${h.pid}</div></div>
+                <div class="status-card" style="padding:10px;"><div class="card-title" style="font-size:10px;">Requests</div><div class="card-value" style="font-size:16px;">${h.requests?.total || 0}</div></div>
+            </div>`;
+    } catch (e) { console.error(e); }
+}
+
+// ═══════════════════════════════════════════════════════════════
 // HELPERS
 // ═══════════════════════════════════════════════════════════════
 
@@ -3066,4 +3682,39 @@ function botIdle() {
         const bot = document.getElementById('header-bot');
         if (bot) bot.classList.remove('speaking');
     }, 400);
+}
+
+// Skeleton loading
+function showSkeleton(elementId, opts = {}) {
+    const el = document.getElementById(elementId);
+    if (!el) return;
+    const rows = opts.rows || 3;
+    const type = opts.type || 'list';
+    let html = '<div class="skeleton-container">';
+    if (type === 'cards') {
+        html += '<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:8px;">';
+        for (let i = 0; i < rows; i++) {
+            html += '<div class="skeleton skeleton-card"></div>';
+        }
+        html += '</div>';
+    } else if (type === 'list') {
+        for (let i = 0; i < rows; i++) {
+            const w = 40 + Math.random() * 50;
+            html += `<div class="skeleton-row">
+                <div class="skeleton skeleton-block" style="flex:1;"></div>
+            </div>`;
+        }
+    } else if (type === 'text') {
+        for (let i = 0; i < rows; i++) {
+            const w = 50 + Math.random() * 40;
+            html += `<div class="skeleton skeleton-line" style="width:${w}%;"></div>`;
+        }
+    }
+    html += '</div>';
+    el.innerHTML = html;
+}
+
+function contentLoaded(elementId) {
+    const el = document.getElementById(elementId);
+    if (el) el.classList.add('content-loaded');
 }

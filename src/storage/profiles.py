@@ -259,24 +259,58 @@ class ProfileManager:
         skipped = 0
 
         try:
-            rows = src_db.conn.execute(
-                "SELECT key, value, tags, metadata, created_at, updated_at FROM memories"
-            ).fetchall()
+            # Detect extra columns in source and target
+            src_cols = {r[1] for r in src_db.conn.execute("PRAGMA table_info(memories)").fetchall()}
+            tgt_cols = {r[1] for r in tgt_db.conn.execute("PRAGMA table_info(memories)").fetchall()}
+            has_pinned = "pinned" in src_cols and "pinned" in tgt_cols
+            has_expires = "expires_at" in src_cols and "expires_at" in tgt_cols
+
+            select_cols = "key, value, tags, metadata, created_at, updated_at"
+            if has_pinned:
+                select_cols += ", pinned"
+            if has_expires:
+                select_cols += ", expires_at"
+
+            rows = src_db.conn.execute(f"SELECT {select_cols} FROM memories").fetchall()
 
             for row in rows:
                 row_tags = _json.loads(row["tags"]) if row["tags"] else []
                 if tags and not any(t in row_tags for t in tags):
                     continue
 
+                pinned = row["pinned"] if has_pinned else 0
+                expires_at = row["expires_at"] if has_expires else None
+
                 existing = tgt_db.conn.execute(
                     "SELECT key FROM memories WHERE key = ?", (row["key"],)
                 ).fetchone()
 
+                ins_cols = "key, value, tags, metadata, created_at, updated_at"
+                ins_vals = "?, ?, ?, ?, ?, ?"
+                base_params = [row["value"], row["tags"], row["metadata"], row["created_at"], row["updated_at"]]
+                if has_pinned:
+                    ins_cols += ", pinned"
+                    ins_vals += ", ?"
+                    base_params.append(pinned)
+                if has_expires:
+                    ins_cols += ", expires_at"
+                    ins_vals += ", ?"
+                    base_params.append(expires_at)
+
                 if existing:
                     if conflict_resolution == "overwrite":
+                        upd_extra = ""
+                        upd_params = [row["value"], row["tags"], row["metadata"], row["updated_at"]]
+                        if has_pinned:
+                            upd_extra += ", pinned=?"
+                            upd_params.append(pinned)
+                        if has_expires:
+                            upd_extra += ", expires_at=?"
+                            upd_params.append(expires_at)
+                        upd_params.append(row["key"])
                         tgt_db.conn.execute(
-                            "UPDATE memories SET value=?, tags=?, metadata=?, updated_at=? WHERE key=?",
-                            (row["value"], row["tags"], row["metadata"], row["updated_at"], row["key"]),
+                            f"UPDATE memories SET value=?, tags=?, metadata=?, updated_at=?{upd_extra} WHERE key=?",
+                            upd_params,
                         )
                         overwritten += 1
                     elif conflict_resolution == "keep_both":
@@ -286,8 +320,8 @@ class ProfileManager:
                             suffix += 1
                             new_key = f"{row['key']}_imported_{suffix}"
                         tgt_db.conn.execute(
-                            "INSERT INTO memories (key, value, tags, metadata, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)",
-                            (new_key, row["value"], row["tags"], row["metadata"], row["created_at"], row["updated_at"]),
+                            f"INSERT INTO memories ({ins_cols}) VALUES ({ins_vals})",
+                            [new_key] + base_params,
                         )
                         imported += 1
                     else:
@@ -295,8 +329,8 @@ class ProfileManager:
                     continue
 
                 tgt_db.conn.execute(
-                    "INSERT INTO memories (key, value, tags, metadata, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)",
-                    (row["key"], row["value"], row["tags"], row["metadata"], row["created_at"], row["updated_at"]),
+                    f"INSERT INTO memories ({ins_cols}) VALUES ({ins_vals})",
+                    [row["key"]] + base_params,
                 )
                 imported += 1
 

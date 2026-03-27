@@ -85,6 +85,25 @@ class ConnectorPlugin(ABC):
     def enabled(self) -> bool:
         return self._config.get("_enabled", True)
 
+    @property
+    def ttl_days(self) -> Optional[int]:
+        val = self._config.get("ttl_days")
+        if val and int(val) > 0:
+            return int(val)
+        return None
+
+    def _compute_expires_at(self) -> Optional[float]:
+        days = self.ttl_days
+        if days:
+            return time.time() + (days * 86400)
+        return None
+
+    def _ttl_seconds(self) -> Optional[float]:
+        days = self.ttl_days
+        if days:
+            return days * 86400
+        return None
+
     @abstractmethod
     def config_schema(self) -> List[ConfigField]:
         """Return the list of configuration fields for the setup UI."""
@@ -140,6 +159,7 @@ class ConnectorPlugin(ABC):
             "enabled": self.enabled,
             "last_sync": self._config.get("_last_sync"),
             "synced_count": self._config.get("_synced_count", 0),
+            "ttl_days": self.ttl_days,
             "config": display_values,
             "schema": [f.to_dict() for f in schema],
         }

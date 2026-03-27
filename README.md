@@ -151,16 +151,60 @@ The MCP server runs alongside the web app:
 
 ## Docker
 
+### From Gitea Container Registry (recommended)
+
+```bash
+# 1. Docker muss die Registry als insecure kennen (einmalig)
+# In /etc/docker/daemon.json:
+# { "insecure-registries": ["<server-ip>:3300"] }
+# Danach: sudo systemctl restart docker
+
+# 2. Login
+docker login <server-ip>:3300
+
+# 3. Image pullen und starten
+docker pull <server-ip>:3300/constantin/context-pilot:latest
+```
+
+`docker-compose.yml` fuer den Betrieb:
+
 ```yaml
 services:
   context-pilot:
-    build: .
+    image: <server-ip>:3300/constantin/context-pilot:latest
+    container_name: context-pilot
+    restart: unless-stopped
     ports:
-      - "8080:8080"
-      - "8400:8400"
+      - "8080:8080"   # Web UI
+      - "8400:8400"   # MCP SSE Server
     volumes:
       - context-pilot-data:/data
-      - /path/to/docs:/mnt/docs:ro    # optional: map folders for indexing
+      - /path/to/docs:/mnt/docs:ro    # optional: Ordner fuer Indexierung
+    environment:
+      - CONTEXTPILOT_DATA_DIR=/data
+
+volumes:
+  context-pilot-data:
+```
+
+```bash
+docker compose up -d
+```
+
+### Lokal bauen
+
+```bash
+git clone http://<server-ip>:3300/constantin/context-pilot.git
+cd context-pilot
+docker compose up -d --build
+```
+
+### Neues Image bauen und pushen
+
+```bash
+cd /path/to/context-pilot
+docker build -t <server-ip>:3300/constantin/context-pilot:latest .
+docker push <server-ip>:3300/constantin/context-pilot:latest
 ```
 
 See [DOCKER.md](DOCKER.md) for full NAS device setup guide.
