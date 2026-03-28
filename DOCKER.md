@@ -1,85 +1,84 @@
-# Context Pilot — Docker Setup (NAS NAS)
+# Context Pilot — Docker Setup
 
-## Quick Start (any Docker host)
+## Quick Start
 
 ```bash
-git clone http://<your-server-ip>:3300/constantin/context-pilot.git
-cd context-pilot
+docker pull applehell/contextpilot:latest
+
+docker run -d --name context-pilot \
+  --restart unless-stopped \
+  -p 8080:8080 -p 8400:8400 \
+  -v context-pilot-data:/data \
+  applehell/contextpilot:latest
+```
+
+Web UI: `http://localhost:8080`
+MCP SSE: `http://localhost:8400/sse`
+
+## Docker Compose
+
+```yaml
+services:
+  context-pilot:
+    image: applehell/contextpilot:latest
+    container_name: context-pilot
+    restart: unless-stopped
+    ports:
+      - "8080:8080"   # Web UI
+      - "8400:8400"   # MCP SSE Server
+    volumes:
+      - context-pilot-data:/data
+      - /path/to/docs:/mnt/docs:ro    # optional: folder for indexing
+    environment:
+      - CONTEXTPILOT_DATA_DIR=/data
+
+volumes:
+  context-pilot-data:
+```
+
+```bash
 docker compose up -d
 ```
 
-Web UI: `http://<host-ip>:8080`
-MCP SSE: `http://<host-ip>:8400/sse`
+## Build from Source
 
-## NAS device Setup
+```bash
+git clone https://github.com/applehell/contextpilot.git
+cd contextpilot
+docker build -t context-pilot:latest .
+docker compose up -d
+```
 
-### Prerequisites
+## NAS / Remote Server Deployment
 
-- **Container Manager** installed (DSM Package Center)
-- SSH access enabled (Control Panel → Terminal & SNMP → Enable SSH)
+To deploy on a NAS or remote server:
 
-### Option A: Container Manager UI
-
-1. **Create project folder**
-   - File Station → Create folder: `/docker/context-pilot`
-
-2. **Upload files via SSH**
+1. **Pull or transfer the image**
    ```bash
-   ssh <user>@<nas-ip>
-   cd ~/docker/context-pilot
-   git clone http://<user>:<token>@<gitea-host>:3300/constantin/context-pilot.git .
+   # Option A: Pull from Docker Hub
+   docker pull applehell/contextpilot:latest
+
+   # Option B: Transfer from build machine
+   docker save applehell/contextpilot:latest | gzip > /tmp/context-pilot.tar.gz
+   scp /tmp/context-pilot.tar.gz user@server:/tmp/
+   ssh user@server "docker load < /tmp/context-pilot.tar.gz"
    ```
 
-3. **Build & run via Container Manager**
-   - Open Container Manager → Project → Create
-   - Path: `/docker/context-pilot`
-   - It auto-detects `docker-compose.yml`
-   - Click "Build" then "Start"
+2. **Start the container**
+   ```bash
+   docker run -d --name context-pilot \
+     --restart unless-stopped \
+     -p 8080:8080 -p 8400:8400 \
+     -v context-pilot-data:/data \
+     applehell/contextpilot:latest
+   ```
 
-4. **Verify**
-   - Open `http://<nas-ip>:8080` in your browser
+3. **Verify**
+   ```bash
+   curl http://localhost:8080/health
+   ```
 
-### Option B: SSH only
-
-```bash
-ssh <user>@<nas-ip>
-
-# Clone repo
-mkdir -p ~/docker/context-pilot
-cd ~/docker/context-pilot
-git clone http://<user>:<token>@<gitea-host>:3300/constantin/context-pilot.git .
-
-# Build and start
-docker compose up -d --build
-
-# Check logs
-docker logs -f context-pilot
-
-# Verify
-curl http://localhost:8080/api/dashboard
-```
-
-### Option C: Pre-built image from Pi
-
-Build on the Raspberry Pi and push to the NAS:
-
-```bash
-# On Pi (<your-server-ip>)
-cd ~/contextpilot
-docker build -t context-pilot:latest .
-docker save context-pilot:latest | gzip > /tmp/context-pilot.tar.gz
-scp /tmp/context-pilot.tar.gz <user>@<nas-ip>:/tmp/
-
-# On NAS
-ssh <user>@<nas-ip>
-docker load < /tmp/context-pilot.tar.gz
-mkdir -p ~/docker/context-pilot
-# Copy docker-compose.yml to that folder, then:
-cd ~/docker/context-pilot
-docker compose up -d
-```
-
-**Note:** The Pi is ARM64, the NAS device has an ARM ARM SoC. If architectures differ, build directly on the NAS instead.
+**Note:** The Docker image supports both `amd64` and `arm64` architectures. If your build machine and target have different architectures, pull from Docker Hub or build directly on the target.
 
 ## Ports
 
@@ -97,7 +96,7 @@ docker compose up -d
 The named volume `context-pilot-data` persists across container restarts. To back up:
 
 ```bash
-docker run --rm -v context-pilot-data:/data -v ~/backup:/backup \
+docker run --rm -v context-pilot-data:/data -v $(pwd):/backup \
   alpine tar czf /backup/context-pilot-backup.tar.gz -C /data .
 ```
 
@@ -110,11 +109,11 @@ services:
   context-pilot:
     volumes:
       - context-pilot-data:/data
-      - ~/documents:/mnt/documents:ro
-      - ~/configs:/mnt/configs:ro
+      - /path/to/documents:/mnt/documents:ro
+      - /path/to/configs:/mnt/configs:ro
 ```
 
-Then in the Web UI → Sources tab → "+ Add Folder" → use `/mnt/documents` as path.
+Then in the Web UI: Sources tab > "+ Add Folder" > use `/mnt/documents` as path.
 
 ## Environment Variables
 
@@ -131,21 +130,27 @@ After starting the container, register the MCP server in Claude's config:
   "mcpServers": {
     "context-pilot": {
       "type": "sse",
-      "url": "http://<nas-ip>:8400/sse"
+      "url": "http://localhost:8400/sse"
     }
   }
 }
 ```
 
-This goes into `~/.claude/settings.json` on the machine running Claude Code.
+This goes into `~/.claude.json` on the machine running Claude Code.
 
 ## Update
 
 ```bash
-cd ~/docker/context-pilot
-git pull
-docker compose up -d --build
+docker pull applehell/contextpilot:latest
+docker stop context-pilot && docker rm context-pilot
+docker run -d --name context-pilot \
+  --restart unless-stopped \
+  -p 8080:8080 -p 8400:8400 \
+  -v context-pilot-data:/data \
+  applehell/contextpilot:latest
 ```
+
+Your data persists in the `context-pilot-data` volume.
 
 ## Troubleshooting
 
@@ -163,7 +168,6 @@ ports:
 ```
 
 **Data recovery:**
-The SQLite database is in the Docker volume. To access:
 ```bash
 docker exec -it context-pilot ls /data/
 docker cp context-pilot:/data/data.db ./backup-data.db

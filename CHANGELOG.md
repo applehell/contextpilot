@@ -77,7 +77,7 @@ Major release: Knowledge Sources, Live Activity, UI Rewrite.
 ### Infrastructure
 - EventBus singleton with async SSE subscriber model
 - Docker healthcheck uses `/health` endpoint
-- NAS device deployment guide (DOCKER.md)
+- Docker deployment guide with NAS/remote server instructions (DOCKER.md)
 - 3 new test suites: EventBus, FolderManager, PaperlessConnector
 
 ## v2.2.0 — 2026-03-23
