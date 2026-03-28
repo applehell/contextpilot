@@ -3,7 +3,7 @@
 ## Quick Start (any Docker host)
 
 ```bash
-git clone http://<server-ip>:3300/constantin/context-pilot.git
+git clone http://<your-server-ip>:3300/constantin/context-pilot.git
 cd context-pilot
 docker compose up -d
 ```
@@ -27,7 +27,7 @@ MCP SSE: `http://<host-ip>:8400/sse`
    ```bash
    ssh <user>@<nas-ip>
    cd ~/docker/context-pilot
-   git clone http://constantin:REDACTED@<server-ip>:3300/constantin/context-pilot.git .
+   git clone http://<user>:<token>@<gitea-host>:3300/constantin/context-pilot.git .
    ```
 
 3. **Build & run via Container Manager**
@@ -47,7 +47,7 @@ ssh <user>@<nas-ip>
 # Clone repo
 mkdir -p ~/docker/context-pilot
 cd ~/docker/context-pilot
-git clone http://constantin:REDACTED@<server-ip>:3300/constantin/context-pilot.git .
+git clone http://<user>:<token>@<gitea-host>:3300/constantin/context-pilot.git .
 
 # Build and start
 docker compose up -d --build
@@ -64,7 +64,7 @@ curl http://localhost:8080/api/dashboard
 Build on the Raspberry Pi and push to the NAS:
 
 ```bash
-# On Pi (<server-ip>)
+# On Pi (<your-server-ip>)
 cd ~/contextpilot
 docker build -t context-pilot:latest .
 docker save context-pilot:latest | gzip > /tmp/context-pilot.tar.gz
