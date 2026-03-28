@@ -5,6 +5,7 @@
   <img src="https://img.shields.io/badge/python-3.11+-3776AB?style=flat-square&logo=python&logoColor=white" alt="Python">
   <img src="https://img.shields.io/badge/license-MIT-green?style=flat-square" alt="License">
   <a href="https://contextpilot.net"><img src="https://img.shields.io/badge/web-contextpilot.net-orange?style=flat-square" alt="Website"></a>
+  <a href="https://hub.docker.com/r/applehell/contextpilot"><img src="https://img.shields.io/badge/docker-applehell%2Fcontextpilot-2496ED?style=flat-square&logo=docker&logoColor=white" alt="Docker Hub"></a>
 </p>
 
 <h1 align="center">Context Pilot</h1>
@@ -187,12 +188,12 @@ Claude Code ──→ MCP Server (SSE, Port 8400)
 
 ## Docker
 
-### Tags
+### Available on [Docker Hub](https://hub.docker.com/r/applehell/contextpilot)
 
 | Tag | Description |
 |---|---|
-| `applehell/contextpilot:latest` | Latest stable release |
-| `applehell/contextpilot:3.4.0` | Specific version |
+| [`applehell/contextpilot:latest`](https://hub.docker.com/r/applehell/contextpilot/tags) | Latest stable release |
+| [`applehell/contextpilot:3.4.0`](https://hub.docker.com/r/applehell/contextpilot/tags) | Specific version |
 
 ### Volumes
 
