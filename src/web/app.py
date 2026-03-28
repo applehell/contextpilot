@@ -494,6 +494,14 @@ def create_app(db_path: Optional[Path] = None) -> FastAPI:
             "expiring_7d": expiring_7d,
         }
 
+    @app.get("/api/memories/{key:path}/versions")
+    async def memory_versions(key: str, limit: int = Query(20, ge=1, le=100)):
+        from src.storage.versions import VersionStore
+        vs = VersionStore(_db)
+        versions = vs.history(key, limit)
+        return [{"id": v.id, "value": v.value, "tags": v.tags,
+                 "changed_by": v.changed_by, "created_at": v.created_at} for v in versions]
+
     @app.get("/api/memories/{key:path}")
     async def get_memory(key: str):
         store = _get_memory_store()
@@ -1632,13 +1640,6 @@ def create_app(db_path: Optional[Path] = None) -> FastAPI:
     from src.storage.versions import VersionStore
     from src.storage.relations import RelationStore
     from src.storage.templates import TemplateStore, ContextTemplate
-
-    @app.get("/api/memories/{key:path}/versions")
-    async def memory_versions(key: str, limit: int = Query(20, ge=1, le=100)):
-        vs = VersionStore(_db)
-        versions = vs.history(key, limit)
-        return [{"id": v.id, "value": v.value, "tags": v.tags,
-                 "changed_by": v.changed_by, "created_at": v.created_at} for v in versions]
 
     # --- Memory Relations ---
 

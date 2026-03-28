@@ -1,5 +1,26 @@
 // Context Pilot — Frontend Logic
 
+const _mdRenderer = (function() {
+    try {
+        if (typeof EasyMDE !== 'undefined') {
+            const el = document.createElement('textarea');
+            document.body.appendChild(el);
+            const inst = new EasyMDE({ element: el, autoDownloadFontAwesome: false, toolbar: false, status: false });
+            inst.toTextArea();
+            el.remove();
+            return text => inst.markdown(text);
+        }
+    } catch (_) {}
+    return null;
+})();
+
+function renderMarkdown(text) {
+    if (_mdRenderer) {
+        try { return _mdRenderer(text); } catch (_) {}
+    }
+    return '<pre>' + escapeHtml(text) + '</pre>';
+}
+
 let debounceTimers = {};
 let bulkMode = false;
 let currentPage = 1;
@@ -1010,14 +1031,7 @@ async function toggleAccordion(headerEl) {
             const m = await res.json();
             const val = m.value || '';
 
-            let rendered;
-            try {
-                rendered = typeof EasyMDE !== 'undefined'
-                    ? EasyMDE.prototype.markdown(val)
-                    : '<pre>' + escapeHtml(val) + '</pre>';
-            } catch (_) {
-                rendered = '<pre>' + escapeHtml(val) + '</pre>';
-            }
+            const rendered = renderMarkdown(val);
 
             const tagsHtml = (m.tags || []).length
                 ? m.tags.map(t => '<span class="tag" onclick="event.stopPropagation();clickTag(\'' + escapeAttr(t) + '\')">#' + escapeHtml(t) + '</span>').join(' ')
@@ -1034,10 +1048,10 @@ async function toggleAccordion(headerEl) {
             body.innerHTML = '<div class="mem-body-content">' + rendered + '</div>'
                 + (tagsHtml ? '<div style="margin-top:8px;">' + tagsHtml + '</div>' : '')
                 + ttlHtml
-                + '<div class="mem-body-actions">'
-                + '<button class="btn btn-small" onclick="showVersions(\'' + ek + '\')">History</button>'
-                + '<button class="btn btn-small btn-primary" onclick="editMemory(\'' + ek + '\')">Edit</button>'
-                + '<button class="btn btn-small" onclick="viewMemory(\'' + ek + '\')">Full View</button>'
+                + '<div class="mem-body-actions" onclick="event.stopPropagation()">'
+                + '<button class="btn btn-small" onclick="event.stopPropagation();showVersions(\'' + ek + '\')">History</button>'
+                + '<button class="btn btn-small btn-primary" onclick="event.stopPropagation();editMemory(\'' + ek + '\')">Edit</button>'
+                + '<button class="btn btn-small" onclick="event.stopPropagation();viewMemory(\'' + ek + '\')">Full View</button>'
                 + '</div>';
             body.dataset.loaded = '1';
         } catch (e) {
@@ -1083,10 +1097,7 @@ async function viewMemory(key) {
             ? m.tags.map(t => `<span class="tag" onclick="event.stopPropagation();clickTag('${escapeAttr(t)}');closeModal();">#${escapeHtml(t)}</span>`).join(' ')
             : '<span class="muted">none</span>';
 
-        // Render markdown to HTML for preview
-        const rendered = typeof EasyMDE !== 'undefined'
-            ? EasyMDE.prototype.markdown(m.value)
-            : '<pre>' + escapeHtml(m.value) + '</pre>';
+        const rendered = renderMarkdown(m.value);
 
         let ttlHtml = '';
         if (m.expires_at) {
@@ -3145,7 +3156,7 @@ async function showVersions(key) {
     try {
         const [memRes, verRes] = await Promise.all([
             fetch(memoryUrl(key)),
-            fetch(`/api/memories/${encodeURIComponent(key)}/versions`)
+            fetch(memoryUrl(key) + '/versions')
         ]);
         const current = await memRes.json();
         const versions = await verRes.json();
@@ -3281,7 +3292,7 @@ async function exportMarkdown() {
 
 async function togglePin(key, pinned) {
     try {
-        await fetch(`/api/memories/${encodeURIComponent(key)}/pin?pinned=${pinned}`, { method: 'POST' });
+        await fetch(memoryUrl(key) + `/pin?pinned=${pinned}`, { method: 'POST' });
         loadMemories();
     } catch (e) { console.error(e); }
 }
