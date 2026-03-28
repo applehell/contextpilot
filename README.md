@@ -4,6 +4,7 @@
   <img src="https://img.shields.io/docker/image-size/applehell/contextpilot/latest?style=flat-square&color=blue" alt="Image Size">
   <img src="https://img.shields.io/badge/python-3.11+-3776AB?style=flat-square&logo=python&logoColor=white" alt="Python">
   <img src="https://img.shields.io/badge/license-MIT-green?style=flat-square" alt="License">
+  <a href="https://contextpilot.net"><img src="https://img.shields.io/badge/web-contextpilot.net-orange?style=flat-square" alt="Website"></a>
 </p>
 
 <h1 align="center">Context Pilot</h1>
@@ -14,6 +15,7 @@
 </p>
 
 <p align="center">
+  <a href="https://contextpilot.net">Website</a> &bull;
   <a href="#quick-start">Quick Start</a> &bull;
   <a href="#features">Features</a> &bull;
   <a href="#docker">Docker</a> &bull;
@@ -398,5 +400,6 @@ python -m src.web --reload    # Hot-reload
 ---
 
 <p align="center">
+  <a href="https://contextpilot.net"><strong>contextpilot.net</strong></a> — Screenshots, demos, and detailed documentation<br><br>
   Built with Claude Code
 </p>
