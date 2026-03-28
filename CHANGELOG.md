@@ -1,5 +1,47 @@
 # Changelog
 
+## v3.4.0 — 2026-03-27
+
+Memory UX overhaul, DB cleanup, Profile redesign.
+
+- **Memory page redesign**: sidebar layout with filters, accordion-style expandable items
+- **New Memory modal** with markdown editor (EasyMDE)
+- **Icon buttons** (pin/edit/delete) replace text buttons in memory list
+- **Pin icon** (SVG star) replaces "P" text badge
+- **Profile switcher redesign**: clean header dropdown with user icon
+- **Profile management** (rename/delete/import) moved to Settings page
+- **DB stats**: separate embeddings size from core DB size
+- **Schema v12**: enable auto_vacuum=INCREMENTAL, drop unused tables
+  (skill_profiles, skill_budget_allocation), remove redundant index
+- Responsive layout: max-width 1400px, breakpoints for tablet/mobile
+- Favicon (inline SVG compass)
+- Docker Hub: published as `applehell/contextpilot`
+
+## v3.3.0 — 2026-03-27
+
+Setup Wizard, GitHub Connector, Memory TTL, Settings Page.
+
+- **Setup Wizard**: 7-step animated onboarding for fresh installs
+- **GitHub Connector**: track public repos — releases, READMEs, issues, metadata
+- **Gitea Connector expanded**: packages/containers, releases, wikis, repo metadata
+- **Memory TTL**: time-to-live with auto-expiry, lifetime indicators, filters
+  (permanent/expiring/urgent), bulk TTL editing, connector TTL config
+- **Settings Page**: MCP register/deregister, DB maintenance (vacuum, FTS rebuild),
+  import/export hub, scheduler control, system info, danger zone
+- **Skeleton loading**: shimmer animations across all loading states
+- Docker: Gitea Container Registry integration
+- DB migration v11 (expires_at column)
+
+## v3.2.0 — 2026-03-26
+
+Dark Mode, Email Connector, Smart UI.
+
+- Dark mode with system preference detection
+- Email connector (IMAP)
+- Memory diff view
+- Profile export/import as ZIP
+- Dependency graph visualization
+
 ## v3.1.0 — 2026-03-24
 
 Profile isolation: switching profiles changes ALL data.

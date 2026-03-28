@@ -1,6 +1,6 @@
 services:
   context-pilot:
-    image: <server-ip>:3300/constantin/context-pilot:latest
+    image: applehell/contextpilot:latest
     build: .
     container_name: context-pilot
     restart: unless-stopped

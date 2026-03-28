@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "context-pilot"
-version = "3.3.0"
+version = "3.4.0"
 description = "Smart context and memory management for AI models — Web App + MCP Server"
 requires-python = ">=3.11"
 dependencies = [
@@ -22,7 +22,12 @@ context-pilot = "src.interfaces.cli:cli"
 context-pilot-web = "src.web.__main__:main"
 
 [project.optional-dependencies]
-dev = ["pytest>=7.0", "pytest-cov>=4.0", "httpx>=0.27.0"]
+dev = [
+    "pytest>=7.0",
+    "pytest-cov>=4.0",
+    "httpx>=0.27.0",
+    "debugpy>=1.8.0",
+]
 
 [tool.setuptools.packages.find]
 include = ["src*"]
