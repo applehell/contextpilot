@@ -116,7 +116,7 @@ Claude Code now has full access to your knowledge base.
 | Tag | Description |
 |---|---|
 | `latest` | Latest stable release |
-| `3.4.0` | Current version |
+| `3.5.1` | Current version |
 
 ## Volumes
 

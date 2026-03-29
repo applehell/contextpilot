@@ -21,9 +21,13 @@ from src.core.skill_registry import SkillRegistry
 from src.storage.db import Database
 from src.storage.memory import Memory, MemoryStore
 from src.storage.memory_activity import MemoryActivityLog
+from src.storage.profiles import ProfileManager
 from src.storage.usage import UsageStore, UsageRecord, FeedbackRecord, block_hash
 
+APP_VERSION = "3.5.1"
+
 mcp = FastMCP("context-pilot")
+mcp._mcp_server.version = APP_VERSION
 
 _assembler = Assembler(compressors=[
     BulletExtractCompressor(),
@@ -33,7 +37,7 @@ _assembler = Assembler(compressors=[
 ])
 _relevance = RelevanceEngine()
 
-_db_path = Path.home() / ".contextpilot" / "data.db"
+_db_path = ProfileManager().active_db_path
 _db: Optional[Database] = None
 _usage_store: Optional[UsageStore] = None
 _memory_store: Optional[MemoryStore] = None
@@ -132,7 +136,7 @@ def _block_to_dict(b: Block) -> Dict[str, Any]:
 def register_skill(
     name: str,
     description: str,
-    context_hints: Optional[List[str]] = None,
+    context_hints: List[str] = [],
 ) -> Dict[str, Any]:
     """Register an external skill/agent with Context Pilot.
 
@@ -197,7 +201,7 @@ def heartbeat(name: str) -> Dict[str, Any]:
 def get_skill_context(
     skill_name: str,
     token_budget: int = 4000,
-    blocks: Optional[List[Dict[str, Any]]] = None,
+    blocks: List[Dict[str, Any]] = [],
 ) -> Dict[str, Any]:
     """Get relevant context blocks for a registered skill.
 
@@ -207,7 +211,7 @@ def get_skill_context(
     Args:
         skill_name: The registered skill name.
         token_budget: Max tokens for the context window (default 4000).
-        blocks: Optional block pool. If not provided, uses memories as blocks.
+        blocks: Block pool. If empty, uses memories as blocks.
 
     Returns selected blocks with relevance scores.
     """
@@ -292,11 +296,11 @@ def get_skill_context(
 # ══════════════════════════════════════════════════════════════════════
 
 @mcp.tool()
-def memory_list(tag: Optional[str] = None) -> List[Dict[str, Any]]:
+def memory_list(tag: str = "") -> List[Dict[str, Any]]:
     """List all memories, optionally filtered by tag.
 
     Args:
-        tag: Optional tag to filter by.
+        tag: Tag to filter by. Leave empty for all memories.
     """
     store = _get_memory_store()
     if tag:
@@ -331,13 +335,13 @@ def memory_get(key: str) -> Dict[str, Any]:
 
 
 @mcp.tool()
-def memory_set(key: str, value: str, tags: Optional[List[str]] = None) -> Dict[str, Any]:
+def memory_set(key: str, value: str, tags: List[str] = []) -> Dict[str, Any]:
     """Create or update a memory.
 
     Args:
         key: Unique memory key.
         value: Memory content.
-        tags: Optional list of tags.
+        tags: List of tags.
     """
     store = _get_memory_store()
     # Determine if this is a create or update
@@ -371,15 +375,15 @@ def memory_delete(key: str) -> Dict[str, Any]:
 
 
 @mcp.tool()
-def memory_search(query: str, tags: Optional[List[str]] = None) -> List[Dict[str, Any]]:
+def memory_search(query: str, tags: List[str] = []) -> List[Dict[str, Any]]:
     """Search memories by text query and/or tags.
 
     Args:
         query: Search text.
-        tags: Optional tags to filter by.
+        tags: Tags to filter by. Leave empty for no tag filter.
     """
     store = _get_memory_store()
-    results = store.search(query, tags=tags)
+    results = store.search(query, tags=tags or None)
     tag_info = f" tags=[{', '.join(tags)}]" if tags else ""
     _get_activity_log().record("searched", query or "*", f"{len(results)} Treffer{tag_info}")
     return [
@@ -455,12 +459,12 @@ def submit_feedback(assembly_id: str, block_content: str, helpful: bool) -> Dict
 
 
 @mcp.tool()
-def get_block_weight(block_content: str, project_name: Optional[str] = None) -> Dict[str, Any]:
+def get_block_weight(block_content: str, project_name: str = "") -> Dict[str, Any]:
     """Get the computed weight and usage statistics for a block."""
     from src.core.weight_adjuster import WeightAdjuster
     store = _get_usage_store()
     adjuster = WeightAdjuster(store)
-    w = adjuster.compute_weight(block_content, project_name)
+    w = adjuster.compute_weight(block_content, project_name or None)
     return {
         "block_hash": w.block_hash,
         "weight": w.weight,

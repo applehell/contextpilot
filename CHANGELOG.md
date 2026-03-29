@@ -1,5 +1,28 @@
 # Changelog
 
+## v3.5.1 — 2026-03-29
+
+MCP compatibility fix for Claude Code.
+
+- **Fix: MCP tools use simple types instead of Optional unions** — `anyOf`
+  schemas with `null` caused Claude Code's MCP client to reject valid
+  requests with `-32602: Invalid request parameters`
+- Replaced `Optional[str]` with `str = ""` and `Optional[List[str]]` with
+  `List[str] = []` in all MCP tool signatures
+
+## v3.5.0 — 2026-03-29
+
+Profile-aware startup, MCP server fixes.
+
+- **Fix: Web app uses active profile on startup** — previously always loaded
+  default DB, requiring manual profile switch after container restart
+- **Fix: MCP server uses active profile DB** — previously hardcoded to
+  default data.db, causing memory_set/search to operate on wrong profile
+- **Fix: MCP server reports app version** — was reporting mcp library version
+  (1.26.0) instead of ContextPilot version
+- **Central APP_VERSION** — single source of truth for Web + MCP version
+- **14 new regression tests** for profile startup behavior
+
 ## v3.4.0 — 2026-03-27
 
 Memory UX overhaul, DB cleanup, Profile redesign.
