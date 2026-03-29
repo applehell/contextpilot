@@ -283,6 +283,37 @@ class TestProfileSwitchReloadsData:
             r = client.get("/api/memories")
             assert r.json()["total"] == 3
 
+    def test_mcp_get_db_follows_profile_switch(self, profile_env, monkeypatch):
+        """MCP _get_db() must detect profile switches and reopen the database."""
+        import src.interfaces.mcp_server as mcp_mod
+
+        monkeypatch.setattr("src.storage.folders._DATA_DIR", profile_env["tmp_path"])
+        monkeypatch.setattr("src.connectors.base._DATA_DIR", profile_env["tmp_path"])
+        monkeypatch.setattr("src.core.webhooks._DATA_DIR", profile_env["tmp_path"])
+
+        # Reset MCP module state
+        mcp_mod._db = None
+        mcp_mod._db_path = None
+        mcp_mod._memory_store = None
+        mcp_mod._usage_store = None
+        mcp_mod._activity_log = None
+
+        # MCP should use smarthome profile (currently active)
+        store1 = mcp_mod._get_memory_store()
+        assert len(store1.list()) == 3
+
+        # Switch to default profile
+        profile_env["pm"].switch("default")
+        store2 = mcp_mod._get_memory_store()
+        memories = store2.list()
+        assert len(memories) == 1
+        assert memories[0].key == "default/only"
+
+        # Switch back to smarthome
+        profile_env["pm"].switch(profile_env["profile"].id)
+        store3 = mcp_mod._get_memory_store()
+        assert len(store3.list()) == 3
+
     def test_memory_set_after_switch_goes_to_correct_profile(self, profile_env, monkeypatch):
         monkeypatch.setattr("src.storage.folders._DATA_DIR", profile_env["tmp_path"])
         monkeypatch.setattr("src.connectors.base._DATA_DIR", profile_env["tmp_path"])

@@ -37,7 +37,7 @@ _assembler = Assembler(compressors=[
 ])
 _relevance = RelevanceEngine()
 
-_db_path = ProfileManager().active_db_path
+_db_path: Optional[Path] = None
 _db: Optional[Database] = None
 _usage_store: Optional[UsageStore] = None
 _memory_store: Optional[MemoryStore] = None
@@ -49,9 +49,19 @@ _registry = SkillRegistry.instance()
 
 
 def _get_db() -> Database:
-    global _db
-    if _db is None:
+    global _db, _db_path, _usage_store, _memory_store, _activity_log
+    current_path = ProfileManager().active_db_path
+    if _db is None or _db_path != current_path:
+        if _db is not None:
+            try:
+                _db.close()
+            except Exception:
+                pass
+        _db_path = current_path
         _db = Database(_db_path)
+        _usage_store = None
+        _memory_store = None
+        _activity_log = None
     return _db
 
 
@@ -64,6 +74,7 @@ def _get_usage_store() -> UsageStore:
 
 def _get_memory_store() -> MemoryStore:
     global _memory_store
+    _get_db()
     if _memory_store is None:
         _memory_store = MemoryStore(_get_db())
     return _memory_store
@@ -71,6 +82,7 @@ def _get_memory_store() -> MemoryStore:
 
 def _get_activity_log() -> MemoryActivityLog:
     global _activity_log
+    _get_db()
     if _activity_log is None:
         _activity_log = MemoryActivityLog(_get_db())
     return _activity_log
