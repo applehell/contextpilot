@@ -9,7 +9,9 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
+COPY pyproject.toml .
 COPY src/ src/
+RUN pip install --no-cache-dir -e .
 
 RUN useradd -m -u 1000 appuser \
     && mkdir -p /data \
