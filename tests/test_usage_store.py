@@ -7,7 +7,7 @@ import pytest
 
 from src.storage.db import Database
 from src.storage.usage import (
-    UsageStore, UsageRecord, FeedbackRecord, BlockWeight, SkillProfile,
+    UsageStore, UsageRecord, FeedbackRecord, BlockWeight,
     block_hash,
 )
 
@@ -137,45 +137,3 @@ class TestBlockWeights:
         assert store.get_weight("missing", None) is None
 
 
-class TestSkillProfiles:
-    def test_save_and_get(self, store: UsageStore) -> None:
-        sp = SkillProfile(skill_name="git_status", model_id="gpt-4", avg_tokens=50)
-        store.save_skill_profile(sp)
-        loaded = store.get_skill_profile("git_status", "gpt-4")
-        assert loaded is not None
-        assert loaded.avg_tokens == 50
-
-    def test_upsert(self, store: UsageStore) -> None:
-        sp1 = SkillProfile(skill_name="s", model_id="m", avg_tokens=10)
-        store.save_skill_profile(sp1)
-        sp2 = SkillProfile(skill_name="s", model_id="m", avg_tokens=20)
-        store.save_skill_profile(sp2)
-        assert store.get_skill_profile("s", "m").avg_tokens == 20
-
-    def test_list_by_model(self, store: UsageStore) -> None:
-        store.save_skill_profile(SkillProfile(skill_name="a", model_id="m1"))
-        store.save_skill_profile(SkillProfile(skill_name="b", model_id="m2"))
-        assert len(store.list_skill_profiles("m1")) == 1
-        assert len(store.list_skill_profiles()) == 2
-
-    def test_not_found(self, store: UsageStore) -> None:
-        assert store.get_skill_profile("x", "y") is None
-
-    def test_update_from_usage(self, store: UsageStore) -> None:
-        store.record_usage([
-            UsageRecord(block_hash="h1", skill_name="git", model_id="m1",
-                        included=True, token_count=100),
-            UsageRecord(block_hash="h2", skill_name="git", model_id="m1",
-                        included=True, token_count=200),
-            UsageRecord(block_hash="h3", skill_name="git", model_id="m1",
-                        included=False, token_count=50),
-        ])
-        sp = store.update_skill_profile_from_usage("git", "m1")
-        assert sp.avg_tokens == 116  # (100+200+50) // 3
-        assert sp.inclusion_rate == pytest.approx(2 / 3, abs=0.01)
-        assert sp.preferred_priority == "medium"  # 66% inclusion → medium
-
-    def test_update_from_no_usage(self, store: UsageStore) -> None:
-        sp = store.update_skill_profile_from_usage("empty", "m1")
-        assert sp.avg_tokens == 0
-        assert sp.inclusion_rate == 1.0

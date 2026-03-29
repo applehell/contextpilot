@@ -15,10 +15,12 @@ const _mdRenderer = (function() {
 })();
 
 function renderMarkdown(text) {
+    let html;
     if (_mdRenderer) {
-        try { return _mdRenderer(text); } catch (_) {}
+        try { html = _mdRenderer(text); } catch (_) { html = null; }
     }
-    return '<pre>' + escapeHtml(text) + '</pre>';
+    if (!html) html = '<pre>' + escapeHtml(text) + '</pre>';
+    return typeof DOMPurify !== 'undefined' ? DOMPurify.sanitize(html) : html;
 }
 
 let debounceTimers = {};
@@ -1664,29 +1666,41 @@ function showAssemblyResult(data) {
     const panel = document.getElementById('assembly-result');
     panel.style.display = 'block';
     const pct = Math.min(100, (data.used_tokens / data.budget) * 100);
-    document.getElementById('budget-bar').style.width = pct + '%';
+    const bar = document.getElementById('budget-bar');
+    bar.style.width = '0%';
+    requestAnimationFrame(() => { bar.style.width = pct + '%'; });
     document.getElementById('budget-label').textContent =
-        `${data.used_tokens} / ${data.budget} tokens (${pct.toFixed(1)}%)`;
-    document.getElementById('assembly-meta').innerHTML =
-        `Assembly ID: <code>${data.assembly_id}</code> | ${data.block_count} included, ${data.dropped_count} dropped`;
+        `${data.used_tokens.toLocaleString()} / ${data.budget.toLocaleString()} tokens (${pct.toFixed(1)}%)`;
 
-    document.getElementById('assembly-blocks').innerHTML = data.blocks.map(b =>
-        `<div class="result-block priority-${b.priority}">
-            <div class="meta">${b.priority.toUpperCase()} | ${b.token_count} tokens${b.compress_hint ? ' | ' + b.compress_hint : ''}</div>
-            <pre>${escapeHtml(b.content)}</pre>
-        </div>`
-    ).join('');
+    const meta = [];
+    if (data.template) meta.push(`Template: <strong>${escapeHtml(data.template)}</strong>`);
+    if (data.assembly_id) meta.push(`ID: <code>${data.assembly_id}</code>`);
+    meta.push(`${data.block_count} included`);
+    if (data.dropped_count) meta.push(`${data.dropped_count} dropped`);
+    if (data.total_matching) meta.push(`${data.total_matching} matched`);
+    document.getElementById('assembly-meta').innerHTML = meta.join(' &middot; ');
+
+    document.getElementById('assembly-blocks').innerHTML = data.blocks.map(b => {
+        const keyLabel = b.key ? `<span style="font-weight:600;">${escapeHtml(b.key)}</span> &middot; ` : '';
+        return `<div class="result-block priority-${b.priority}">
+            <div class="meta">${keyLabel}${b.priority.toUpperCase()} &middot; ${b.token_count} tok${b.compress_hint ? ' &middot; ' + b.compress_hint : ''}</div>
+            <pre>${escapeHtml(b.content.length > 500 ? b.content.substring(0, 500) + '...' : b.content)}</pre>
+        </div>`;
+    }).join('');
 
     let droppedHtml = '';
-    if (data.dropped.length > 0) {
-        droppedHtml = '<h3 style="font-size:14px;margin:12px 0 8px;">Dropped Blocks</h3>' + data.dropped.map(b =>
-            `<div class="result-block dropped">
-                <div class="meta">${b.priority.toUpperCase()} | ${b.token_count} tokens (dropped)</div>
-                <pre>${escapeHtml(b.content)}</pre>
-            </div>`
-        ).join('');
+    if (data.dropped && data.dropped.length > 0) {
+        droppedHtml = `<details style="margin-top:8px;"><summary style="cursor:pointer;font-size:13px;font-weight:600;color:var(--text-muted);">${data.dropped.length} Dropped Blocks</summary>` +
+            data.dropped.map(b => {
+                const keyLabel = b.key ? `<span style="font-weight:600;">${escapeHtml(b.key)}</span> &middot; ` : '';
+                return `<div class="result-block dropped">
+                    <div class="meta">${keyLabel}${b.priority.toUpperCase()} &middot; ${b.token_count} tok (dropped)</div>
+                    <pre>${escapeHtml(b.content.length > 200 ? b.content.substring(0, 200) + '...' : b.content)}</pre>
+                </div>`;
+            }).join('') + '</details>';
     }
     document.getElementById('assembly-dropped').innerHTML = droppedHtml;
+    panel.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
 }
 
 // ═══════════════════════════════════════════════════════════════
@@ -2917,33 +2931,158 @@ async function runSchedulerNow() {
 // TEMPLATES
 // ═══════════════════════════════════════════════════════════════
 
+let _allTemplates = [];
+
 async function loadTemplates() {
     const el = document.getElementById('template-list');
     if (!el) return;
     try {
         const res = await fetch('/api/templates');
-        const templates = await res.json();
-        if (templates.length === 0) {
-            el.innerHTML = '<p class="muted">No templates. Create one to quickly assemble context.</p>';
-            return;
-        }
-        el.innerHTML = templates.map(t => `<div class="memory-item" style="cursor:default;">
-            <div class="main">
-                <div class="key">${escapeHtml(t.name)}</div>
-                <div class="preview">${escapeHtml(t.description || '')}</div>
-                <div class="meta">
-                    <span class="age">budget: ${t.budget} tokens</span>
-                    <span class="age">tags: ${t.tag_filter.length ? t.tag_filter.join(', ') : 'all'}</span>
-                    ${t.key_filter ? '<span class="age">prefix: ' + escapeHtml(t.key_filter) + '</span>' : ''}
+        _allTemplates = await res.json();
+        renderTemplates(_allTemplates);
+    } catch (e) { console.error(e); }
+}
+
+function renderTemplates(templates) {
+    const el = document.getElementById('template-list');
+    const countEl = document.getElementById('asm-tpl-count');
+    if (countEl) countEl.textContent = templates.length + ' template' + (templates.length !== 1 ? 's' : '');
+
+    if (templates.length === 0) {
+        el.innerHTML = '<p class="muted" style="padding:16px;">No templates match. Create one to get started.</p>';
+        return;
+    }
+    el.innerHTML = templates.map(t => {
+        const tags = t.tag_filter.length ? t.tag_filter.map(tag => `<span class="tpl-badge">${escapeHtml(tag)}</span>`).join('') : '<span class="tpl-badge">all</span>';
+        return `<div class="tpl-item" data-name="${escapeAttr(t.name)}">
+            <div class="tpl-header" onclick="toggleTplAccordion(this)">
+                <span class="tpl-chevron">&#9654;</span>
+                <span class="tpl-name">${escapeHtml(t.name)}</span>
+                <span class="tpl-desc">${escapeHtml(t.description || '')}</span>
+                <span class="tpl-badges">${tags}</span>
+                <span class="tpl-badge">${t.budget} tok</span>
+            </div>
+            <div class="tpl-body">
+                <dl class="tpl-details">
+                    <dt>Description</dt><dd>${escapeHtml(t.description || '(none)')}</dd>
+                    <dt>Tag Filter</dt><dd>${t.tag_filter.length ? t.tag_filter.join(', ') : 'all memories'}</dd>
+                    <dt>Key Filter</dt><dd>${t.key_filter ? escapeHtml(t.key_filter) : 'none'}</dd>
+                    <dt>Token Budget</dt><dd>${t.budget.toLocaleString()} tokens</dd>
+                </dl>
+                <div class="tpl-actions">
+                    <button class="btn btn-small btn-primary" onclick="assembleTemplate('${escapeAttr(t.name)}')">Assemble</button>
+                    <button class="btn btn-small" onclick="editTemplate('${escapeAttr(t.name)}')">Edit</button>
+                    <button class="btn btn-small btn-danger" onclick="deleteTemplate('${escapeAttr(t.name)}')">Delete</button>
                 </div>
             </div>
-            <div class="actions" style="display:flex;flex-direction:column;gap:4px;">
-                <button class="btn btn-small btn-primary" onclick="assembleTemplate('${escapeAttr(t.name)}')">Assemble</button>
-                <button class="btn btn-small" onclick="editTemplate('${escapeAttr(t.name)}')">Edit</button>
-                <button class="btn btn-small btn-danger" onclick="deleteTemplate('${escapeAttr(t.name)}')">Delete</button>
-            </div>
-        </div>`).join('');
-    } catch (e) { console.error(e); }
+        </div>`;
+    }).join('');
+}
+
+function toggleTplAccordion(header) {
+    const item = header.closest('.tpl-item');
+    item.classList.toggle('expanded');
+}
+
+function filterTemplates(query) {
+    const q = query.toLowerCase().trim();
+    if (!q) { renderTemplates(_allTemplates); return; }
+    renderTemplates(_allTemplates.filter(t =>
+        t.name.toLowerCase().includes(q) ||
+        (t.description || '').toLowerCase().includes(q) ||
+        t.tag_filter.some(tag => tag.toLowerCase().includes(q))
+    ));
+}
+
+function toggleAsmSidebar() {
+    const sb = document.querySelector('.asm-sidebar');
+    if (sb) sb.style.display = sb.style.display === 'none' ? '' : 'none';
+}
+
+async function suggestTemplates() {
+    const tid = showToast('Analyzing memories', 'Finding clusters...');
+    botBusy();
+    try {
+        const res = await fetch('/api/templates/suggest');
+        const d = await res.json();
+        const suggestions = d.suggestions || [];
+        if (suggestions.length === 0) {
+            completeToast(tid, 'No new templates to suggest', false);
+            return;
+        }
+        completeToast(tid, `${suggestions.length} suggestions found`, false);
+
+        const reasonLabel = {key_prefix: 'Key Prefix', tag_cluster: 'Tag Cluster', all: 'All Memories'};
+        const rows = suggestions.map(s => `
+            <div class="tpl-item" style="margin-bottom:4px;">
+                <div class="tpl-header" onclick="toggleTplAccordion(this)">
+                    <span class="tpl-chevron">&#9654;</span>
+                    <span class="tpl-name">${escapeHtml(s.name)}</span>
+                    <span class="tpl-desc">${escapeHtml(s.description)}</span>
+                    <span class="tpl-badge">${s.memory_count} mem</span>
+                    <span class="tpl-badge">${s.budget} tok</span>
+                </div>
+                <div class="tpl-body">
+                    <dl class="tpl-details">
+                        <dt>Reason</dt><dd>${reasonLabel[s.reason] || s.reason}</dd>
+                        <dt>Tag Filter</dt><dd>${s.tag_filter.length ? s.tag_filter.join(', ') : 'none'}</dd>
+                        <dt>Key Filter</dt><dd>${s.key_filter || 'none'}</dd>
+                        <dt>Memories</dt><dd>${s.memory_count} (${s.total_tokens.toLocaleString()} tokens total)</dd>
+                        <dt>Budget</dt><dd>${s.budget.toLocaleString()} tokens</dd>
+                    </dl>
+                    <div class="tpl-actions">
+                        <button class="btn btn-small btn-primary" onclick="acceptSuggestion(${escapeAttr(JSON.stringify(s))})">Accept</button>
+                        <button class="btn btn-small" onclick="this.closest('.tpl-item').remove()">Dismiss</button>
+                    </div>
+                </div>
+            </div>`).join('');
+
+        openModal('Template Suggestions', `
+            <p class="muted" style="margin:0 0 12px;">Based on your memory clusters. Click <strong>Accept</strong> to create.</p>
+            <div style="max-height:60vh;overflow-y:auto;">${rows}</div>
+        `, `
+            <button class="btn btn-primary" onclick="acceptAllSuggestions()">Accept All</button>
+            <button class="btn" onclick="closeModal()">Close</button>
+        `);
+        window._pendingSuggestions = suggestions;
+    } catch (e) { completeToast(tid, 'Failed: ' + e.message, true); }
+    finally { botIdle(); }
+}
+
+async function acceptSuggestion(s) {
+    try {
+        const res = await fetch('/api/templates', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({name: s.name, description: s.description, tag_filter: s.tag_filter, key_filter: s.key_filter, budget: s.budget})
+        });
+        if (res.ok) {
+            const tid3 = showToast('Created', s.name);
+            completeToast(tid3, s.name, false);
+            const item = event.target.closest('.tpl-item');
+            if (item) { item.style.opacity = '0.4'; item.querySelector('.tpl-actions').innerHTML = '<span class="muted">Created</span>'; }
+            loadTemplates();
+        }
+    } catch (e) { alert('Error: ' + e.message); }
+}
+
+async function acceptAllSuggestions() {
+    const suggestions = window._pendingSuggestions || [];
+    let created = 0;
+    for (const s of suggestions) {
+        try {
+            const res = await fetch('/api/templates', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({name: s.name, description: s.description, tag_filter: s.tag_filter, key_filter: s.key_filter, budget: s.budget})
+            });
+            if (res.ok) created++;
+        } catch (e) { /* skip */ }
+    }
+    closeModal();
+    const tid2 = showToast('Creating templates', `${created}/${suggestions.length}`);
+    completeToast(tid2, `${created}/${suggestions.length} templates created`, false);
+    loadTemplates();
 }
 
 function showAddTemplate() {
@@ -2983,12 +3122,13 @@ async function submitTemplate() {
 }
 
 async function assembleTemplate(name) {
-    const tid = showToast(`Assembling "${name}"`, 'Selecting memories...');
+    const tid = showToast(`Assembling "${name}"`, 'Filtering, weighting, compressing...');
     botBusy();
     try {
         const res = await fetch(`/api/templates/${encodeURIComponent(name)}/assemble`, { method: 'POST' });
         const d = await res.json();
-        completeToast(tid, `${d.used_tokens}/${d.budget} tokens, ${d.included}/${d.total_matching} memories`, false);
+        completeToast(tid, `${d.used_tokens}/${d.budget} tokens, ${d.block_count}/${d.total_matching} blocks`, false);
+        showAssemblyResult(d);
     } catch (e) { completeToast(tid, 'Failed: ' + e.message, true); }
     finally { botIdle(); }
 }

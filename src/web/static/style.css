@@ -862,7 +862,59 @@ label {
     color: var(--text);
 }
 
-/* Assembler */
+/* Assembler intro */
+.asm-intro { border-left: 3px solid var(--accent); margin-bottom: 12px; }
+.asm-intro-content { display: flex; gap: 16px; align-items: center; padding: 4px 0; }
+.asm-intro-icon { flex-shrink: 0; }
+.asm-sidebar { min-width: 200px; max-width: 200px; }
+#tab-assembler .mem-layout { gap: 16px; }
+#tab-assembler .mem-main { gap: 10px; display: flex; flex-direction: column; }
+
+.asm-anim-icon .asm-block {
+    fill: var(--accent);
+    opacity: 0.15;
+    animation: asm-fill 2.4s ease-in-out infinite;
+}
+.asm-b1 { animation-delay: 0s; }
+.asm-b2 { animation-delay: 0.3s; }
+.asm-b3 { animation-delay: 0.6s; }
+.asm-b4 { animation-delay: 0.9s; }
+.asm-anim-icon .asm-arrow { stroke: var(--accent); opacity: 0; animation: asm-arrow-in 2.4s ease-in-out infinite; animation-delay: 1.2s; }
+
+@keyframes asm-fill {
+    0%, 100% { opacity: 0.15; }
+    30%, 60% { opacity: 0.7; }
+}
+@keyframes asm-arrow-in {
+    0%, 100% { opacity: 0; stroke-dashoffset: 40; }
+    40%, 80% { opacity: 1; stroke-dashoffset: 0; }
+}
+
+/* Template accordion items */
+#template-list { display: flex; flex-direction: column; gap: 4px; }
+
+.tpl-item { border: 1px solid var(--border); border-radius: var(--radius); background: var(--surface); transition: box-shadow 0.15s, border-color 0.15s; }
+.tpl-item:hover { border-color: var(--border-focus); }
+.tpl-item.expanded { box-shadow: 0 2px 8px rgba(0,0,0,0.06); border-color: var(--border-focus); }
+
+.tpl-header { display: flex; align-items: center; gap: 10px; padding: 10px 14px; cursor: pointer; user-select: none; }
+.tpl-header .tpl-chevron { font-size: 10px; color: var(--text-muted); transition: transform 0.15s; flex-shrink: 0; width: 14px; }
+.tpl-item.expanded .tpl-chevron { transform: rotate(90deg); }
+.tpl-header .tpl-name { font-weight: 600; font-size: 13px; white-space: nowrap; }
+.tpl-header .tpl-desc { color: var(--text-muted); font-size: 12px; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tpl-header .tpl-badges { display: flex; gap: 4px; flex-shrink: 0; }
+.tpl-header .tpl-badge, .tpl-badge { font-size: 10px; padding: 2px 8px; border-radius: 4px; background: var(--surface-alt); color: var(--text-muted); white-space: nowrap; }
+
+.tpl-body { display: none; padding: 8px 14px 14px; border-top: 1px solid var(--border); }
+.tpl-item.expanded .tpl-body { display: block; }
+
+.tpl-details { display: grid; grid-template-columns: auto 1fr; gap: 6px 14px; font-size: 12px; margin-top: 8px; }
+.tpl-details dt { color: var(--text-muted); font-weight: 600; }
+.tpl-details dd { margin: 0; }
+
+.tpl-actions { display: flex; gap: 8px; margin-top: 14px; padding-top: 10px; border-top: 1px solid var(--border); }
+
+/* Assembler block entry */
 .block-entry {
     border: 1px solid var(--border);
     border-radius: var(--radius);

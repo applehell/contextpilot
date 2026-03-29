@@ -489,32 +489,6 @@ def usage_weights(ctx: click.Context, project: Optional[str], fmt: str) -> None:
             click.echo(f"{bh:18s} {c:5d} {weight:>7s} {fb:>9s}")
 
 
-@usage.command("skills")
-@click.option("--model", default=None, help="Filter by model ID.")
-@click.option("--format", "fmt", default="text", type=click.Choice(["text", "json"]), show_default=True)
-@click.pass_context
-def usage_skills(ctx: click.Context, model: Optional[str], fmt: str) -> None:
-    """Show skill adaptation profiles."""
-    store: UsageStore = ctx.obj["usage_store"]
-    profiles = store.list_skill_profiles(model)
-
-    if fmt == "json":
-        click.echo(json.dumps([
-            {"skill_name": p.skill_name, "model_id": p.model_id,
-             "avg_tokens": p.avg_tokens, "inclusion_rate": p.inclusion_rate,
-             "preferred_priority": p.preferred_priority}
-            for p in profiles
-        ], indent=2))
-    else:
-        if not profiles:
-            click.echo("No skill profiles yet.")
-            return
-        click.echo(f"{'Skill':20s} {'Model':20s} {'Avg Tok':>8s} {'Incl%':>6s} {'Prio':>6s}")
-        click.echo("-" * 62)
-        for p in profiles:
-            click.echo(f"{p.skill_name:20s} {p.model_id:20s} {p.avg_tokens:>8d} {p.inclusion_rate:>5.0%} {p.preferred_priority:>6s}")
-
-
 # ---------------------------------------------------------------------------
 # feedback
 # ---------------------------------------------------------------------------

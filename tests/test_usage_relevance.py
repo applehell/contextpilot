@@ -91,30 +91,3 @@ class TestUpdateRelevanceScores:
         assert rel["hash1"].score > 0.5
 
 
-class TestSkillBudgetAllocation:
-    def test_save_and_get(self, usage_store: UsageStore) -> None:
-        usage_store.save_skill_budget("git", "", 3000, 0.85)
-        budgets = usage_store.get_skill_budgets("")
-        assert "git" in budgets
-        assert budgets["git"]["tokens"] == 3000
-        assert abs(budgets["git"]["efficiency"] - 0.85) < 0.01
-
-    def test_upsert(self, usage_store: UsageStore) -> None:
-        usage_store.save_skill_budget("git", "", 3000, 0.85)
-        usage_store.save_skill_budget("git", "", 4000, 0.92)
-        budgets = usage_store.get_skill_budgets("")
-        assert budgets["git"]["tokens"] == 4000
-
-    def test_multiple_skills(self, usage_store: UsageStore) -> None:
-        usage_store.save_skill_budget("git", "", 3000, 0.85)
-        usage_store.save_skill_budget("db", "", 5000, 0.70)
-        budgets = usage_store.get_skill_budgets("")
-        assert len(budgets) == 2
-
-    def test_project_isolation(self, usage_store: UsageStore) -> None:
-        usage_store.save_skill_budget("git", "project_a", 3000, 0.85)
-        usage_store.save_skill_budget("git", "project_b", 5000, 0.70)
-        a = usage_store.get_skill_budgets("project_a")
-        b = usage_store.get_skill_budgets("project_b")
-        assert a["git"]["tokens"] == 3000
-        assert b["git"]["tokens"] == 5000

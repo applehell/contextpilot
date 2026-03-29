@@ -49,7 +49,7 @@ class TestDetectPatterns:
         assert any(f.pattern_name == "wifi_password" for f in report.findings)
 
     def test_private_ip(self, detector):
-        report = detector.scan("Server at <server-ip>")
+        report = detector.scan("Server at 192.168.1.78")
         assert report.is_sensitive
         assert any(f.pattern_name == "private_ip" for f in report.findings)
         assert report.max_severity == "low"

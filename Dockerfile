@@ -11,11 +11,17 @@ RUN pip install --no-cache-dir -r requirements.txt
 
 COPY src/ src/
 
+RUN useradd -m -u 1000 appuser \
+    && mkdir -p /data \
+    && chown -R appuser:appuser /app /data
+
 ENV PYTHONUNBUFFERED=1
 ENV CONTEXTPILOT_DATA_DIR=/data
 
 VOLUME /data
 EXPOSE 8080 8400
+
+USER appuser
 
 HEALTHCHECK --interval=30s --timeout=5s --retries=3 \
     CMD python -c "import urllib.request; urllib.request.urlopen('http://localhost:8080/health')" || exit 1

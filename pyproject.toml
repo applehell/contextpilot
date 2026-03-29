@@ -4,9 +4,26 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "context-pilot"
-version = "3.5.1"
+version = "3.6.0"
 description = "Smart context and memory management for AI models — Web App + MCP Server"
+readme = "README.md"
+license = {text = "MIT"}
 requires-python = ">=3.11"
+authors = [
+    {name = "Constantin Mathe"},
+]
+keywords = ["ai", "context", "memory", "mcp", "llm", "assembler"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Software Development :: Libraries",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+]
 dependencies = [
     "tiktoken>=0.6.0",
     "click>=8.1.0",
@@ -16,6 +33,11 @@ dependencies = [
     "jinja2>=3.1.0",
     "python-multipart>=0.0.9",
 ]
+
+[project.urls]
+Homepage = "https://github.com/applehell/contextpilot"
+Repository = "https://github.com/applehell/contextpilot"
+Issues = "https://github.com/applehell/contextpilot/issues"
 
 [project.scripts]
 context-pilot = "src.interfaces.cli:cli"

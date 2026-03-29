@@ -5,7 +5,10 @@ from unittest.mock import patch, MagicMock
 
 import pytest
 
-from src.interfaces.mcp_server import assemble_context, list_blocks, submit_feedback, get_block_weight
+from src.interfaces.mcp_server import (
+    assemble_context, list_blocks, submit_feedback, get_block_weight,
+    list_templates, assemble_template, suggest_templates,
+)
 
 
 SAMPLE_BLOCKS = [
@@ -131,6 +134,72 @@ class TestGetBlockWeight:
         result = get_block_weight(block_content="Project block", project_name="myproject")
         assert "weight" in result
         assert result["suggested_priority"] in ("high", "medium", "low")
+
+
+class TestListTemplates:
+    def test_returns_list(self):
+        result = list_templates()
+        assert isinstance(result, list)
+
+    def test_template_fields(self):
+        from src.storage.templates import TemplateStore, ContextTemplate
+        from src.interfaces.mcp_server import _get_db
+        ts = TemplateStore(_get_db())
+        ts.save(ContextTemplate(name="_test_tpl", description="Test", tag_filter=["t"], budget=100))
+        try:
+            result = list_templates()
+            tpl = next(t for t in result if t["name"] == "_test_tpl")
+            assert tpl["description"] == "Test"
+            assert tpl["tag_filter"] == ["t"]
+            assert tpl["budget"] == 100
+        finally:
+            ts.delete("_test_tpl")
+
+
+class TestAssembleTemplate:
+    def test_not_found(self):
+        result = assemble_template(name="_nonexistent_template_xyz")
+        assert "error" in result
+
+    def test_assembles_matching_memories(self):
+        from src.storage.templates import TemplateStore, ContextTemplate
+        from src.storage.memory import Memory
+        from src.interfaces.mcp_server import _get_db, _get_memory_store
+        db = _get_db()
+        ts = TemplateStore(db)
+        store = _get_memory_store()
+
+        ts.save(ContextTemplate(name="_test_asm", tag_filter=["_test_tag"], budget=500))
+        store.set(Memory(key="_test/mem1", value="Test memory content one", tags=["_test_tag"]))
+        store.set(Memory(key="_test/mem2", value="Unrelated memory", tags=["other"]))
+        try:
+            result = assemble_template(name="_test_asm")
+            assert result["template"] == "_test_asm"
+            assert result["budget"] == 500
+            assert result["total_matching"] == 1
+            assert result["block_count"] >= 1
+            assert "assembly_id" in result
+        finally:
+            ts.delete("_test_asm")
+            store.delete("_test/mem1")
+            store.delete("_test/mem2")
+
+
+class TestSuggestTemplates:
+    def test_empty_returns_empty(self):
+        result = suggest_templates()
+        assert isinstance(result, list)
+
+    def test_suggests_by_prefix_or_tag(self):
+        result = suggest_templates()
+        if not result:
+            return
+        for s in result:
+            assert "name" in s
+            assert "reason" in s
+            assert s["reason"] in ("key_prefix", "tag_cluster", "all")
+            assert s["memory_count"] >= 3 or s["reason"] == "all"
+            assert s["budget"] > 0
 
 
 class TestAssembleContextUsageTracking:

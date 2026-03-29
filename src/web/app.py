@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import re
 import time
 from pathlib import Path
 from typing import Any, Dict, List, Optional
@@ -71,6 +72,32 @@ def _get_usage_store() -> UsageStore:
     if _usage_store is None:
         _usage_store = UsageStore(_get_db())
     return _usage_store
+
+
+_CODE_INDICATORS = re.compile(
+    r"(```|def |class |function |import |from |curl |export |const |let |var )"
+)
+_STEP_INDICATORS = re.compile(
+    r"^(\d+[.)]\s|[-*]\s|#{1,3}\s)", re.MULTILINE
+)
+_KV_INDICATORS = re.compile(
+    r"^[A-Za-z][^:=\n]{0,40}(?::[ \t]|[ \t]*=[ \t])", re.MULTILINE
+)
+
+
+def _detect_compress_hint(text: str) -> Optional[str]:
+    code = len(_CODE_INDICATORS.findall(text))
+    steps = len(_STEP_INDICATORS.findall(text))
+    kv = len(_KV_INDICATORS.findall(text))
+    if code >= 3:
+        return "code_compact"
+    if steps >= 3:
+        return "mermaid"
+    if kv >= 3:
+        return "yaml_struct"
+    if len(text) > 200:
+        return "bullet_extract"
+    return None
 
 
 def _make_assembler() -> Assembler:
@@ -195,6 +222,14 @@ def create_app(db_path: Optional[Path] = None) -> FastAPI:
 
     app.mount("/static", StaticFiles(directory=str(WEB_DIR / "static")), name="static")
     templates = Jinja2Templates(directory=str(WEB_DIR / "templates"))
+
+    @app.middleware("http")
+    async def security_headers(request: Request, call_next):
+        response = await call_next(request)
+        response.headers["X-Content-Type-Options"] = "nosniff"
+        response.headers["X-Frame-Options"] = "SAMEORIGIN"
+        response.headers["Referrer-Policy"] = "same-origin"
+        return response
 
     # --- HTML ---
 
@@ -920,7 +955,7 @@ def create_app(db_path: Optional[Path] = None) -> FastAPI:
                 "id": m.key,
                 "label": label,
                 "group": group,
-                "title": f"<b>{m.key}</b><br>Tags: {', '.join(m.tags) or 'keine'}<br>{tokens} tokens",
+                "title": f"<b>{m.key}</b><br>Tags: {', '.join(m.tags) or 'none'}<br>{tokens} tokens",
                 "value": size,
                 "tags": m.tags,
             })
@@ -1691,6 +1726,91 @@ def create_app(db_path: Optional[Path] = None) -> FastAPI:
         _events.emit("template", "save", t.name)
         return {"status": "saved", "name": t.name}
 
+    @app.get("/api/templates/suggest")
+    async def suggest_templates():
+        store = _get_memory_store()
+        memories = store.list()
+        if not memories:
+            return {"suggestions": []}
+
+        from collections import Counter
+        from src.core.token_budget import TokenBudget as _TB
+
+        tag_counts: Counter = Counter()
+        prefix_counts: Counter = Counter()
+        tag_tokens: Dict[str, int] = {}
+        prefix_tokens: Dict[str, int] = {}
+
+        for m in memories:
+            tokens = _TB.estimate(m.value)
+            prefix = m.key.split("/")[0] if "/" in m.key else m.key
+            prefix_counts[prefix] += 1
+            prefix_tokens[prefix] = prefix_tokens.get(prefix, 0) + tokens
+            for tag in m.tags:
+                tag_counts[tag] += 1
+                tag_tokens[tag] = tag_tokens.get(tag, 0) + tokens
+
+        existing = {t.name for t in TemplateStore(_db).list()}
+        suggestions = []
+
+        # Suggest by key prefix clusters (>=3 memories)
+        for prefix, count in prefix_counts.most_common(20):
+            if count < 3:
+                continue
+            name = f"{prefix}-context"
+            if name in existing:
+                continue
+            total_tok = prefix_tokens[prefix]
+            budget = min(max(total_tok, 2000), 16000)
+            suggestions.append({
+                "name": name,
+                "description": f"{count} memories under {prefix}/",
+                "tag_filter": [],
+                "key_filter": f"{prefix}/",
+                "budget": budget,
+                "memory_count": count,
+                "total_tokens": total_tok,
+                "reason": "key_prefix",
+            })
+
+        # Suggest by dominant tag clusters (>=5 memories, not already covered by prefix)
+        covered_names = {s["name"] for s in suggestions}
+        for tag, count in tag_counts.most_common(15):
+            if count < 5:
+                continue
+            name = f"{tag}-context"
+            if name in existing or name in covered_names:
+                continue
+            total_tok = tag_tokens[tag]
+            budget = min(max(total_tok, 2000), 16000)
+            suggestions.append({
+                "name": name,
+                "description": f"{count} memories tagged '{tag}'",
+                "tag_filter": [tag],
+                "key_filter": "",
+                "budget": budget,
+                "memory_count": count,
+                "total_tokens": total_tok,
+                "reason": "tag_cluster",
+            })
+
+        # Suggest an "everything" template if none exists and >10 memories
+        if len(memories) >= 10 and "all-context" not in existing:
+            total = sum(_TB.estimate(m.value) for m in memories)
+            suggestions.append({
+                "name": "all-context",
+                "description": f"All {len(memories)} memories",
+                "tag_filter": [],
+                "key_filter": "",
+                "budget": min(total, 16000),
+                "memory_count": len(memories),
+                "total_tokens": total,
+                "reason": "all",
+            })
+
+        suggestions.sort(key=lambda s: s["memory_count"], reverse=True)
+        return {"suggestions": suggestions[:12]}
+
     @app.delete("/api/templates/{name}")
     async def delete_template(name: str):
         ts = TemplateStore(_db)
@@ -1711,28 +1831,56 @@ def create_app(db_path: Optional[Path] = None) -> FastAPI:
         store = _get_memory_store()
         memories = store.list()
 
-        # Apply filters
         if t.tag_filter:
             memories = [m for m in memories if any(tag in m.tags for tag in t.tag_filter)]
         if t.key_filter:
             memories = [m for m in memories if t.key_filter.lower() in m.key.lower()]
 
-        total_tokens = sum(TokenBudget.estimate(m.value) for m in memories)
-        included = []
-        used = 0
+        from src.core.weight_adjuster import WeightAdjuster
+        adjuster = WeightAdjuster(_get_usage_store())
+
+        blocks = []
         for m in memories:
-            tokens = TokenBudget.estimate(m.value)
-            if used + tokens <= t.budget:
-                included.append({"key": m.key, "tokens": tokens, "preview": m.value[:200]})
-                used += tokens
+            hint = _detect_compress_hint(m.value)
+            b = Block(
+                content=m.value,
+                priority=Priority.HIGH if getattr(m, "pinned", False) else Priority.MEDIUM,
+                compress_hint=hint,
+            )
+            b = adjuster.adjust_priority(b, adjuster.compute_weight(m.value))
+            b.source_key = m.key
+            blocks.append(b)
+
+        assembler = _make_assembler()
+        result = assembler.assemble_tracked(blocks, t.budget)
+
+        from src.storage.usage import UsageRecord
+        try:
+            included_hashes = {block_hash(b.content) for b in result.blocks}
+            records = [
+                UsageRecord(block_hash=block_hash(b.content), included=block_hash(b.content) in included_hashes, token_count=b.token_count)
+                for b in result.input_blocks
+            ]
+            _get_usage_store().record_usage(records)
+        except Exception:
+            pass
+
+        def _block_result(b: Block) -> Dict[str, Any]:
+            d = _block_to_dict(b)
+            d["key"] = b.source_key or ""
+            return d
 
         return {
             "template": t.name,
+            "description": t.description,
             "budget": t.budget,
-            "used_tokens": used,
-            "included": len(included),
+            "assembly_id": result.assembly_id,
+            "used_tokens": result.used_tokens,
             "total_matching": len(memories),
-            "blocks": included,
+            "block_count": len(result.blocks),
+            "blocks": [_block_result(b) for b in result.blocks],
+            "dropped_count": len(result.dropped_blocks),
+            "dropped": [_block_result(b) for b in result.dropped_blocks],
         }
 
     # --- Export as CLAUDE.md ---

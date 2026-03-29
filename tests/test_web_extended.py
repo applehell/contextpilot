@@ -342,3 +342,94 @@ class TestMemoryEvents:
         events = client.get("/api/events?category=memory").json()
         searches = [e for e in events if e["action"] == "search"]
         assert any(e["subject"] == "findme" for e in searches)
+
+
+# ═══════════════════════════════════════════════════════════════
+# TEMPLATES
+# ═══════════════════════════════════════════════════════════════
+
+class TestTemplates:
+    def test_list_empty(self, client):
+        r = client.get("/api/templates")
+        assert r.status_code == 200
+        assert r.json() == []
+
+    def test_create_and_list(self, client):
+        r = client.post("/api/templates", json={
+            "name": "test-tpl", "description": "Test template",
+            "tag_filter": ["python"], "key_filter": "src/", "budget": 5000,
+        })
+        assert r.status_code == 201
+        templates = client.get("/api/templates").json()
+        assert len(templates) == 1
+        assert templates[0]["name"] == "test-tpl"
+        assert templates[0]["budget"] == 5000
+
+    def test_delete(self, client):
+        client.post("/api/templates", json={"name": "del-me", "budget": 1000})
+        r = client.delete("/api/templates/del-me")
+        assert r.status_code == 200
+        assert client.get("/api/templates").json() == []
+
+    def test_delete_not_found(self, client):
+        r = client.delete("/api/templates/nonexistent")
+        assert r.status_code == 404
+
+    def test_assemble_template(self, client):
+        client.post("/api/memories", json={"key": "asm/a", "value": "Memory A content", "tags": ["asm"]})
+        client.post("/api/memories", json={"key": "asm/b", "value": "Memory B content", "tags": ["asm"]})
+        client.post("/api/memories", json={"key": "other/c", "value": "Unrelated", "tags": ["other"]})
+        client.post("/api/templates", json={
+            "name": "asm-test", "tag_filter": ["asm"], "budget": 4000,
+        })
+        r = client.post("/api/templates/asm-test/assemble")
+        assert r.status_code == 200
+        d = r.json()
+        assert d["template"] == "asm-test"
+        assert d["total_matching"] == 2
+        assert d["block_count"] >= 1
+        assert "assembly_id" in d
+        assert d["used_tokens"] <= d["budget"]
+
+    def test_assemble_not_found(self, client):
+        r = client.post("/api/templates/ghost/assemble")
+        assert r.status_code == 404
+
+    def test_assemble_uses_compression(self, client):
+        long_code = "import os\nfrom pathlib import Path\ndef main():\n    pass\nclass Foo:\n    pass\n" * 10
+        client.post("/api/memories", json={"key": "code/big", "value": long_code, "tags": ["code"]})
+        client.post("/api/templates", json={
+            "name": "code-tpl", "tag_filter": ["code"], "budget": 4000,
+        })
+        r = client.post("/api/templates/code-tpl/assemble")
+        d = r.json()
+        assert d["block_count"] >= 1
+        for b in d["blocks"]:
+            assert "compress_hint" in b
+
+    def test_suggest_empty(self, client):
+        r = client.get("/api/templates/suggest")
+        assert r.status_code == 200
+        assert r.json()["suggestions"] == []
+
+    def test_suggest_with_memories(self, client):
+        for i in range(5):
+            client.post("/api/memories", json={
+                "key": f"cluster/item{i}", "value": f"Content {i}", "tags": ["grouped"],
+            })
+        r = client.get("/api/templates/suggest")
+        assert r.status_code == 200
+        suggestions = r.json()["suggestions"]
+        assert len(suggestions) >= 1
+        names = [s["name"] for s in suggestions]
+        assert "cluster-context" in names
+
+    def test_suggest_skips_existing(self, client):
+        for i in range(5):
+            client.post("/api/memories", json={
+                "key": f"pfx/m{i}", "value": f"Val {i}", "tags": ["t"],
+            })
+        client.post("/api/templates", json={"name": "pfx-context", "budget": 2000})
+        r = client.get("/api/templates/suggest")
+        names = [s["name"] for s in r.json()["suggestions"]]
+        assert "pfx-context" not in names

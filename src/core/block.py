@@ -18,6 +18,7 @@ class Block:
     content: str
     priority: Priority = Priority.MEDIUM
     compress_hint: Optional[str] = None
+    source_key: Optional[str] = field(default=None, repr=False, compare=False)
     _token_count: Optional[int] = field(default=None, repr=False, compare=False)
 
     @property

@@ -1,11 +1,14 @@
 """Entry point: python -m src.web [--port PORT] [--host HOST] [--mcp-port PORT]"""
 import argparse
+import logging
 import subprocess
 import sys
 import atexit
 import signal
 
 import uvicorn
+
+logger = logging.getLogger("context-pilot")
 
 
 _mcp_process = None
@@ -45,12 +48,12 @@ def main():
     global _mcp_process
     if not args.no_mcp:
         _mcp_process = _start_mcp(args.mcp_port, args.host)
-        print(f"MCP Server (SSE) gestartet auf Port {args.mcp_port}")
+        logger.info("MCP Server (SSE) started on port %d", args.mcp_port)
 
     atexit.register(_cleanup)
     signal.signal(signal.SIGTERM, lambda *_: (_cleanup(), sys.exit(0)))
 
-    print(f"Web UI: http://{args.host}:{args.port}")
+    logger.info("Web UI: http://%s:%d", args.host, args.port)
     uvicorn.run("src.web.app:app", host=args.host, port=args.port, reload=args.reload)
 
 

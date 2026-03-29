@@ -1,8 +1,6 @@
 """Context Pilot MCP Server — exposes assembler, memories, and skill registry as MCP tools."""
 from __future__ import annotations
 
-import json
-import time
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
@@ -24,7 +22,11 @@ from src.storage.memory_activity import MemoryActivityLog
 from src.storage.profiles import ProfileManager
 from src.storage.usage import UsageStore, UsageRecord, FeedbackRecord, block_hash
 
-APP_VERSION = "3.5.1"
+from importlib.metadata import version as _pkg_version, PackageNotFoundError
+try:
+    APP_VERSION = _pkg_version("context-pilot")
+except PackageNotFoundError:
+    APP_VERSION = "dev"
 
 mcp = FastMCP("context-pilot")
 mcp._mcp_server.version = APP_VERSION
@@ -397,7 +399,7 @@ def memory_search(query: str, tags: List[str] = []) -> List[Dict[str, Any]]:
     store = _get_memory_store()
     results = store.search(query, tags=tags or None)
     tag_info = f" tags=[{', '.join(tags)}]" if tags else ""
-    _get_activity_log().record("searched", query or "*", f"{len(results)} Treffer{tag_info}")
+    _get_activity_log().record("searched", query or "*", f"{len(results)} results{tag_info}")
     return [
         {"key": m.key, "value": m.value[:200], "tags": m.tags}
         for m in results
@@ -468,6 +470,166 @@ def submit_feedback(assembly_id: str, block_content: str, helpful: bool) -> Dict
         assembly_id=assembly_id, block_hash=bh, helpful=helpful,
     ))
     return {"status": "recorded", "block_hash": bh, "helpful": helpful}
+
+
+@mcp.tool()
+def list_templates() -> List[Dict[str, Any]]:
+    """List all context templates in the active profile.
+
+    Returns templates with name, description, tag_filter, key_filter, and budget.
+    """
+    from src.storage.templates import TemplateStore
+    ts = TemplateStore(_get_db())
+    return [
+        {"name": t.name, "description": t.description, "tag_filter": t.tag_filter,
+         "key_filter": t.key_filter, "budget": t.budget}
+        for t in ts.list()
+    ]
+
+
+@mcp.tool()
+def suggest_templates() -> List[Dict[str, Any]]:
+    """Suggest new context templates based on memory tag and key-prefix clusters.
+
+    Analyzes the active profile's memories and suggests templates that don't exist yet.
+    Each suggestion includes name, description, filters, budget, and the reason (key_prefix, tag_cluster, all).
+    """
+    from collections import Counter
+    from src.core.token_budget import TokenBudget as _TB
+    from src.storage.templates import TemplateStore
+
+    store = _get_memory_store()
+    memories = store.list()
+    if not memories:
+        return []
+
+    tag_counts: Dict[str, int] = {}
+    prefix_counts: Dict[str, int] = {}
+    tag_tokens: Dict[str, int] = {}
+    prefix_tokens: Dict[str, int] = {}
+
+    for m in memories:
+        tokens = _TB.estimate(m.value)
+        prefix = m.key.split("/")[0] if "/" in m.key else m.key
+        prefix_counts[prefix] = prefix_counts.get(prefix, 0) + 1
+        prefix_tokens[prefix] = prefix_tokens.get(prefix, 0) + tokens
+        for tag in m.tags:
+            tag_counts[tag] = tag_counts.get(tag, 0) + 1
+            tag_tokens[tag] = tag_tokens.get(tag, 0) + tokens
+
+    existing = {t.name for t in TemplateStore(_get_db()).list()}
+    suggestions = []
+
+    for prefix, count in sorted(prefix_counts.items(), key=lambda x: -x[1])[:20]:
+        if count < 3:
+            continue
+        name = f"{prefix}-context"
+        if name in existing:
+            continue
+        total_tok = prefix_tokens[prefix]
+        suggestions.append({
+            "name": name, "description": f"{count} memories under {prefix}/",
+            "tag_filter": [], "key_filter": f"{prefix}/",
+            "budget": min(max(total_tok, 2000), 16000),
+            "memory_count": count, "total_tokens": total_tok, "reason": "key_prefix",
+        })
+
+    covered = {s["name"] for s in suggestions}
+    for tag, count in sorted(tag_counts.items(), key=lambda x: -x[1])[:15]:
+        if count < 5:
+            continue
+        name = f"{tag}-context"
+        if name in existing or name in covered:
+            continue
+        total_tok = tag_tokens[tag]
+        suggestions.append({
+            "name": name, "description": f"{count} memories tagged '{tag}'",
+            "tag_filter": [tag], "key_filter": "",
+            "budget": min(max(total_tok, 2000), 16000),
+            "memory_count": count, "total_tokens": total_tok, "reason": "tag_cluster",
+        })
+
+    if len(memories) >= 10 and "all-context" not in existing:
+        total = sum(_TB.estimate(m.value) for m in memories)
+        suggestions.append({
+            "name": "all-context", "description": f"All {len(memories)} memories",
+            "tag_filter": [], "key_filter": "",
+            "budget": min(total, 16000),
+            "memory_count": len(memories), "total_tokens": total, "reason": "all",
+        })
+
+    suggestions.sort(key=lambda s: s["memory_count"], reverse=True)
+    return suggestions[:12]
+
+
+@mcp.tool()
+def assemble_template(name: str) -> Dict[str, Any]:
+    """Assemble a context template — filters memories by tag/key and assembles within the template budget.
+
+    Args:
+        name: The template name (use list_templates to see available ones).
+
+    Returns the assembled context blocks with token counts.
+    """
+    from src.storage.templates import TemplateStore
+    from src.core.weight_adjuster import WeightAdjuster
+
+    ts = TemplateStore(_get_db())
+    try:
+        t = ts.get(name)
+    except KeyError:
+        return {"error": f"Template '{name}' not found."}
+
+    store = _get_memory_store()
+    memories = store.list()
+
+    if t.tag_filter:
+        memories = [m for m in memories if any(tag in m.tags for tag in t.tag_filter)]
+    if t.key_filter:
+        memories = [m for m in memories if t.key_filter.lower() in m.key.lower()]
+
+    adjuster = WeightAdjuster(_get_usage_store())
+    blocks = []
+    for m in memories:
+        hint = _detect_compress_hint(m.value)
+        b = Block(
+            content=m.value,
+            priority=Priority.HIGH if m.pinned else Priority.MEDIUM,
+            compress_hint=hint,
+        )
+        b = adjuster.adjust_priority(b, adjuster.compute_weight(m.value))
+        b.source_key = m.key
+        blocks.append(b)
+
+    assembly = _assembler.assemble_tracked(blocks, t.budget)
+
+    try:
+        included_hashes = {block_hash(b.content) for b in assembly.blocks}
+        records = [
+            UsageRecord(block_hash=block_hash(b.content), included=block_hash(b.content) in included_hashes, token_count=b.token_count)
+            for b in assembly.input_blocks
+        ]
+        _get_usage_store().record_usage(records)
+    except Exception:
+        pass
+
+    def _result(b: Block) -> Dict[str, Any]:
+        d = _block_to_dict(b)
+        d["key"] = b.source_key or ""
+        return d
+
+    return {
+        "template": t.name,
+        "description": t.description,
+        "budget": t.budget,
+        "assembly_id": assembly.assembly_id,
+        "used_tokens": assembly.used_tokens,
+        "total_matching": len(memories),
+        "block_count": len(assembly.blocks),
+        "blocks": [_result(b) for b in assembly.blocks],
+        "dropped_count": len(assembly.dropped_blocks),
+        "dropped": [_result(b) for b in assembly.dropped_blocks],
+    }
 
 
 @mcp.tool()

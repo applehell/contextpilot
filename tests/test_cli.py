@@ -454,26 +454,6 @@ class TestUsageWeights:
         assert result.exit_code == 0
 
 
-class TestUsageSkills:
-    def test_skills_empty_text(self, db_runner):
-        runner, db = db_runner
-        result = runner.invoke(cli, ["--db-path", db, "usage", "skills"])
-        assert result.exit_code == 0
-        assert "No skill profiles" in result.output
-
-    def test_skills_empty_json(self, db_runner):
-        runner, db = db_runner
-        result = runner.invoke(cli, ["--db-path", db, "usage", "skills", "--format", "json"])
-        assert result.exit_code == 0
-        data = json.loads(result.output)
-        assert data == []
-
-    def test_skills_with_model_filter(self, db_runner):
-        runner, db = db_runner
-        result = runner.invoke(cli, ["--db-path", db, "usage", "skills", "--model", "gpt-4"])
-        assert result.exit_code == 0
-
-
 # ---------------------------------------------------------------------------
 # feedback CLI
 # ---------------------------------------------------------------------------

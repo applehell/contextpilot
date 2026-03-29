@@ -7,10 +7,11 @@
     <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Ccircle cx='16' cy='16' r='15' fill='%23c4a882' stroke='%23a08060' stroke-width='1'/%3E%3Cpath d='M16 4 L18.5 13.5 L28 16 L18.5 18.5 L16 28 L13.5 18.5 L4 16 L13.5 13.5Z' fill='%23fff' stroke='%23a08060' stroke-width='0.5'/%3E%3Ccircle cx='16' cy='16' r='2.5' fill='%23a08060'/%3E%3C/svg%3E">
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="/static/style.css?v=28">
+    <link rel="stylesheet" href="/static/style.css?v=31">
     <script src="https://unpkg.com/vis-network@9.1.9/standalone/umd/vis-network.min.js"></script>
     <link rel="stylesheet" href="https://unpkg.com/easymde@2.18.0/dist/easymde.min.css">
     <script src="https://unpkg.com/easymde@2.18.0/dist/easymde.min.js"></script>
+    <script src="https://unpkg.com/dompurify@3.0.6/dist/purify.min.js"></script>
 </head>
 <body>
     <!-- Welcome Screen -->
@@ -578,51 +579,110 @@
 
         <!-- Assembler -->
         <section id="tab-assembler" class="tab-content">
-            <div class="panel">
-                <div style="display:flex;justify-content:space-between;align-items:center;">
-                    <h2>Context Templates</h2>
-                    <button class="btn btn-small btn-primary" onclick="showAddTemplate()">+ Template</button>
-                </div>
-                <div id="template-list"><p class="muted">No templates. Create one to quickly assemble context.</p></div>
-            </div>
-            <div class="panel">
-                <div style="display:flex;justify-content:space-between;align-items:center;">
-                    <h2>Export</h2>
-                    <div style="display:flex;gap:8px;align-items:center;">
-                        <input type="text" id="export-tags" placeholder="Filter by tags (comma-separated)" style="width:200px;padding:4px 8px;font-size:12px;">
-                        <button class="btn btn-small btn-primary" onclick="exportClaudeMd()">Export CLAUDE.md</button>
-                        <button class="btn btn-small" onclick="exportMarkdown()">Export Markdown</button>
+            <!-- Intro / Explainer -->
+            <div class="panel asm-intro">
+                <div class="asm-intro-content">
+                    <div class="asm-intro-icon">
+                        <svg class="asm-anim-icon" viewBox="0 0 64 64" width="48" height="48">
+                            <rect class="asm-block asm-b1" x="6" y="8" width="20" height="12" rx="3"/>
+                            <rect class="asm-block asm-b2" x="30" y="8" width="28" height="12" rx="3"/>
+                            <rect class="asm-block asm-b3" x="6" y="24" width="52" height="12" rx="3"/>
+                            <rect class="asm-block asm-b4" x="6" y="40" width="36" height="12" rx="3"/>
+                            <path class="asm-arrow" d="M54 46 L58 46 L58 56 L32 56" stroke-width="2" fill="none" marker-end="url(#asm-arrowhead)"/>
+                            <defs><marker id="asm-arrowhead" markerWidth="6" markerHeight="4" refX="5" refY="2" orient="auto"><path d="M0,0 L6,2 L0,4" fill="var(--accent)"/></marker></defs>
+                        </svg>
+                    </div>
+                    <div>
+                        <h2 style="margin:0 0 4px;">Context Assembler</h2>
+                        <p class="muted" style="margin:0;line-height:1.5;">
+                            Assemble optimised context from your memories within a token budget.
+                            <strong>Templates</strong> filter memories by tags and keys, then apply
+                            <strong>compression</strong>, <strong>weight-based priority</strong>, and smart truncation
+                            to fit the most relevant knowledge into your AI's context window.
+                        </p>
                     </div>
                 </div>
-                <div id="export-result"></div>
             </div>
-            <div class="panel">
-                <div style="display:flex;justify-content:space-between;align-items:center;">
-                    <h2>Duplicates</h2>
-                    <button class="btn btn-small" onclick="findDuplicates()">Scan</button>
+
+            <!-- Templates -->
+            <div class="mem-layout">
+                <aside class="mem-sidebar asm-sidebar">
+                    <div class="sidebar-section">
+                        <div class="sidebar-label">Filter Templates</div>
+                        <input type="text" id="asm-tpl-search" placeholder="Search templates..." oninput="filterTemplates(this.value)" style="width:100%;">
+                    </div>
+                    <div class="sidebar-section">
+                        <div class="sidebar-label">Quick Actions</div>
+                        <button class="btn btn-small btn-primary" onclick="showAddTemplate()" style="width:100%;">+ New Template</button>
+                        <button class="btn btn-small" onclick="suggestTemplates()" style="width:100%;margin-top:4px;">Auto-Suggest</button>
+                    </div>
+                    <div class="sidebar-section">
+                        <div class="sidebar-label">Tools</div>
+                        <div style="display:flex;flex-direction:column;gap:6px;">
+                            <button class="btn btn-small" onclick="findDuplicates()" style="width:100%;">Scan Duplicates</button>
+                            <div style="display:flex;gap:4px;">
+                                <button class="btn btn-small" onclick="exportClaudeMd()" style="flex:1;">CLAUDE.md</button>
+                                <button class="btn btn-small" onclick="exportMarkdown()" style="flex:1;">Markdown</button>
+                            </div>
+                            <input type="text" id="export-tags" placeholder="Export tag filter" style="width:100%;font-size:11px;">
+                        </div>
+                    </div>
+                </aside>
+
+                <div class="mem-main">
+                    <!-- Assembly Result (above templates, hidden initially) -->
+                    <div id="assembly-result" class="panel" style="display:none;margin-bottom:8px;">
+                        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">
+                            <h3 style="font-size:14px;margin:0;">Assembly Result</h3>
+                            <button class="btn btn-small" onclick="document.getElementById('assembly-result').style.display='none'">Close</button>
+                        </div>
+                        <div class="budget-bar-container"><div id="budget-bar" class="budget-bar"></div><span id="budget-label"></span></div>
+                        <div id="assembly-meta" style="font-size:12px;color:var(--text-muted);margin:8px 0;"></div>
+                        <div id="assembly-blocks"></div>
+                        <div id="assembly-dropped"></div>
+                    </div>
+
+                    <!-- Template toolbar -->
+                    <div class="mem-toolbar">
+                        <div class="mem-toolbar-left">
+                            <span id="asm-tpl-count" class="muted" style="font-size:13px;">0 templates</span>
+                        </div>
+                        <div class="mem-toolbar-right">
+                            <button class="btn btn-small" onclick="toggleAsmSidebar()" title="Toggle sidebar">Sidebar</button>
+                        </div>
+                    </div>
+
+                    <!-- Template list (accordion) -->
+                    <div id="template-list">
+                        <p class="muted">No templates. Create one to quickly assemble context.</p>
+                    </div>
+
+                    <!-- Duplicate results -->
+                    <div id="duplicate-list" style="display:none;"></div>
+
+                    <!-- Export result -->
+                    <div id="export-result"></div>
+
+                    <!-- Manual Assemble (collapsed by default) -->
+                    <details class="panel" style="margin-top:8px;">
+                        <summary style="cursor:pointer;font-weight:600;font-size:14px;">Manual Block Assembly</summary>
+                        <div style="margin-top:12px;">
+                            <div class="form-row"><label>Token Budget</label><input type="number" id="budget" value="4000" min="100"></div>
+                            <div id="block-list"></div>
+                            <div class="button-row">
+                                <button class="btn" onclick="addBlock()">+ Block</button>
+                                <button class="btn btn-primary" onclick="runAssemble()">Assemble</button>
+                            </div>
+                        </div>
+                    </details>
+
+                    <!-- Compression test -->
+                    <div id="compress-result" class="panel" style="display:none;">
+                        <h3 style="font-size:14px;">Compression Test</h3>
+                        <div id="compress-meta" style="font-size:13px;margin:8px 0;"></div>
+                        <pre id="compress-preview" style="white-space:pre-wrap;font-size:12px;max-height:300px;overflow-y:auto;background:var(--surface-alt);padding:12px;border-radius:6px;"></pre>
+                    </div>
                 </div>
-                <div id="duplicate-list"><p class="muted">Click "Scan" to find duplicate memories.</p></div>
-            </div>
-            <div class="panel">
-                <h2>Assemble Context</h2>
-                <div class="form-row"><label>Token Budget</label><input type="number" id="budget" value="4000" min="100"></div>
-                <div id="block-list"></div>
-                <div class="button-row">
-                    <button class="btn" onclick="addBlock()">+ Block</button>
-                    <button class="btn btn-primary" onclick="runAssemble()">Assemble</button>
-                </div>
-                <div id="assembly-result" class="result-panel" style="display:none">
-                    <h3 style="font-size:14px;margin-bottom:8px;">Result</h3>
-                    <div class="budget-bar-container"><div id="budget-bar" class="budget-bar"></div><span id="budget-label"></span></div>
-                    <div id="assembly-meta" style="font-size:12px;color:var(--text-muted);margin-bottom:8px;"></div>
-                    <div id="assembly-blocks"></div>
-                    <div id="assembly-dropped"></div>
-                </div>
-            </div>
-            <div id="compress-result" class="panel" style="display:none;">
-                <h3 style="font-size:14px;">Compression Test</h3>
-                <div id="compress-meta" style="font-size:13px;margin:8px 0;"></div>
-                <pre id="compress-preview" style="white-space:pre-wrap;font-size:12px;max-height:300px;overflow-y:auto;background:var(--surface-alt);padding:12px;border-radius:6px;"></pre>
             </div>
         </section>
 
@@ -744,7 +804,7 @@
 
     <div id="progress-toast"></div>
 
-    <script src="/static/app.js?v=31"></script>
+    <script src="/static/app.js?v=35"></script>
     <script>init();</script>
 </body>
 </html>

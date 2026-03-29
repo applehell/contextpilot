@@ -4,7 +4,7 @@ from __future__ import annotations
 import hashlib
 import time
 from dataclasses import dataclass, field
-from typing import Dict, List, Optional
+from typing import Any, Dict, List, Optional
 
 from .db import Database
 
@@ -43,18 +43,8 @@ class BlockWeight:
     updated_at: float = field(default_factory=time.time)
 
 
-@dataclass
-class SkillProfile:
-    skill_name: str
-    model_id: str
-    avg_tokens: int = 0
-    inclusion_rate: float = 1.0
-    preferred_priority: str = "medium"
-    updated_at: float = field(default_factory=time.time)
-
-
 class UsageStore:
-    """SQLite-backed usage tracking for blocks, feedback, and skill profiles."""
+    """SQLite-backed usage tracking for blocks, feedback, and weights."""
 
     def __init__(self, db: Database) -> None:
         self._db = db
@@ -187,102 +177,6 @@ class UsageStore:
         )
         self._db.conn.commit()
 
-    # ── Skill profiles ───────────────────────────────────────────────
-
-    def get_skill_profile(self, skill_name: str, model_id: str) -> Optional[SkillProfile]:
-        row = self._db.conn.execute(
-            """SELECT skill_name, model_id, avg_tokens, inclusion_rate,
-                      preferred_priority, updated_at
-               FROM skill_profiles WHERE skill_name = ? AND model_id = ?""",
-            (skill_name, model_id),
-        ).fetchone()
-        if not row:
-            return None
-        return SkillProfile(
-            skill_name=row["skill_name"],
-            model_id=row["model_id"],
-            avg_tokens=row["avg_tokens"],
-            inclusion_rate=row["inclusion_rate"],
-            preferred_priority=row["preferred_priority"],
-            updated_at=row["updated_at"],
-        )
-
-    def save_skill_profile(self, sp: SkillProfile) -> None:
-        self._db.conn.execute(
-            """INSERT INTO skill_profiles
-               (skill_name, model_id, avg_tokens, inclusion_rate,
-                preferred_priority, updated_at)
-               VALUES (?, ?, ?, ?, ?, ?)
-               ON CONFLICT(skill_name, model_id) DO UPDATE SET
-                 avg_tokens = excluded.avg_tokens,
-                 inclusion_rate = excluded.inclusion_rate,
-                 preferred_priority = excluded.preferred_priority,
-                 updated_at = excluded.updated_at""",
-            (sp.skill_name, sp.model_id, sp.avg_tokens,
-             sp.inclusion_rate, sp.preferred_priority, sp.updated_at),
-        )
-        self._db.conn.commit()
-
-    def list_skill_profiles(self, model_id: Optional[str] = None) -> List[SkillProfile]:
-        if model_id:
-            rows = self._db.conn.execute(
-                """SELECT skill_name, model_id, avg_tokens, inclusion_rate,
-                          preferred_priority, updated_at
-                   FROM skill_profiles WHERE model_id = ?""",
-                (model_id,),
-            ).fetchall()
-        else:
-            rows = self._db.conn.execute(
-                """SELECT skill_name, model_id, avg_tokens, inclusion_rate,
-                          preferred_priority, updated_at
-                   FROM skill_profiles"""
-            ).fetchall()
-        return [
-            SkillProfile(
-                skill_name=r["skill_name"],
-                model_id=r["model_id"],
-                avg_tokens=r["avg_tokens"],
-                inclusion_rate=r["inclusion_rate"],
-                preferred_priority=r["preferred_priority"],
-                updated_at=r["updated_at"],
-            )
-            for r in rows
-        ]
-
-    def update_skill_profile_from_usage(self, skill_name: str, model_id: str) -> SkillProfile:
-        rows = self._db.conn.execute(
-            """SELECT included, token_count FROM block_usage
-               WHERE skill_name = ? AND model_id = ?""",
-            (skill_name, model_id),
-        ).fetchall()
-        if not rows:
-            sp = SkillProfile(skill_name=skill_name, model_id=model_id)
-            self.save_skill_profile(sp)
-            return sp
-
-        total = len(rows)
-        included = sum(1 for r in rows if r["included"])
-        avg_tokens = sum(r["token_count"] for r in rows) // total if total else 0
-        inclusion_rate = included / total if total else 1.0
-
-        # Determine preferred priority from most common inclusion pattern
-        preferred = "medium"
-        if inclusion_rate > 0.8:
-            preferred = "high"
-        elif inclusion_rate < 0.3:
-            preferred = "low"
-
-        sp = SkillProfile(
-            skill_name=skill_name,
-            model_id=model_id,
-            avg_tokens=avg_tokens,
-            inclusion_rate=inclusion_rate,
-            preferred_priority=preferred,
-            updated_at=time.time(),
-        )
-        self.save_skill_profile(sp)
-        return sp
-
     # ── Skill-Block Relevance ────────────────────────────────────────
 
     def record_skill_relevance(
@@ -312,7 +206,7 @@ class UsageStore:
             )
         self._db.conn.commit()
 
-    def get_skill_relevance(self, skill_name: str) -> Dict[str, "SkillRelevanceData"]:
+    def get_skill_relevance(self, skill_name: str) -> Dict[str, Any]:
         from ..core.relevance import SkillRelevanceProfile
         rows = self._db.conn.execute(
             """SELECT skill_name, block_hash, score, included_count, dropped_count,
@@ -368,35 +262,3 @@ class UsageStore:
         )
         self._db.conn.commit()
 
-    # ── Skill Budget Allocation ──────────────────────────────────────
-
-    def save_skill_budget(
-        self, skill_name: str, project_name: str, token_budget: int, efficiency: float,
-    ) -> None:
-        now = time.time()
-        self._db.conn.execute(
-            """INSERT INTO skill_budget_allocation
-               (skill_name, project_name, token_budget, efficiency, updated_at)
-               VALUES (?, ?, ?, ?, ?)
-               ON CONFLICT(skill_name, project_name) DO UPDATE SET
-                 token_budget = excluded.token_budget,
-                 efficiency = excluded.efficiency,
-                 updated_at = excluded.updated_at""",
-            (skill_name, project_name, token_budget, efficiency, now),
-        )
-        self._db.conn.commit()
-
-    def get_skill_budgets(self, project_name: str = "") -> Dict[str, dict]:
-        rows = self._db.conn.execute(
-            """SELECT skill_name, token_budget, efficiency
-               FROM skill_budget_allocation WHERE project_name = ?""",
-            (project_name,),
-        ).fetchall()
-        return {
-            r["skill_name"]: {
-                "skill_name": r["skill_name"],
-                "tokens": r["token_budget"],
-                "efficiency": r["efficiency"],
-            }
-            for r in rows
-        }

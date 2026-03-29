@@ -89,17 +89,6 @@ MIGRATIONS = {
             updated_at REAL NOT NULL,
             PRIMARY KEY (block_hash, project_name)
         )""",
-        # -- skill adaption profiles --
-        """CREATE TABLE IF NOT EXISTS skill_profiles (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            skill_name TEXT NOT NULL,
-            model_id TEXT NOT NULL,
-            avg_tokens INTEGER NOT NULL DEFAULT 0,
-            inclusion_rate REAL NOT NULL DEFAULT 1.0,
-            preferred_priority TEXT NOT NULL DEFAULT 'medium',
-            updated_at REAL NOT NULL,
-            UNIQUE(skill_name, model_id)
-        )""",
     ],
     3: [
         # -- fix block_weights: project_name must not be NULL (sentinel '') --
@@ -133,15 +122,6 @@ MIGRATIONS = {
         )""",
         """CREATE INDEX IF NOT EXISTS idx_sbr_skill ON skill_block_relevance(skill_name)""",
         """CREATE INDEX IF NOT EXISTS idx_sbr_score ON skill_block_relevance(skill_name, score DESC)""",
-        # -- per-skill budget allocation --
-        """CREATE TABLE IF NOT EXISTS skill_budget_allocation (
-            skill_name TEXT NOT NULL,
-            project_name TEXT NOT NULL DEFAULT '',
-            token_budget INTEGER NOT NULL DEFAULT 0,
-            efficiency REAL NOT NULL DEFAULT 1.0,
-            updated_at REAL NOT NULL,
-            PRIMARY KEY (skill_name, project_name)
-        )""",
     ],
     5: [
         # -- external skill registry (shared between MCP server + GUI) --
