@@ -474,14 +474,16 @@ if __name__ == "__main__":
     import argparse
     parser = argparse.ArgumentParser()
     parser.add_argument("--transport", choices=["stdio", "sse", "streamable-http"], default="stdio")
+    parser.add_argument("--host", default="0.0.0.0", help="Bind host (default: 0.0.0.0)")
     parser.add_argument("--port", type=int, default=8400)
     args = parser.parse_args()
 
-    if args.transport == "sse":
+    if args.transport in ("sse", "streamable-http"):
         import os
         os.environ.setdefault("MCP_SSE_PORT", str(args.port))
+        mcp.settings.host = args.host
         mcp.settings.port = args.port
-    elif args.transport == "streamable-http":
-        mcp.settings.port = args.port
+        if args.host == "0.0.0.0":
+            mcp.settings.transport_security = None
 
     mcp.run(transport=args.transport)

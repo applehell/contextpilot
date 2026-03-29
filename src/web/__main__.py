@@ -11,10 +11,10 @@ import uvicorn
 _mcp_process = None
 
 
-def _start_mcp(port: int) -> subprocess.Popen:
+def _start_mcp(port: int, host: str = "0.0.0.0") -> subprocess.Popen:
     proc = subprocess.Popen(
         [sys.executable, "-m", "src.interfaces.mcp_server",
-         "--transport", "sse", "--port", str(port)],
+         "--transport", "sse", "--host", host, "--port", str(port)],
         stdout=subprocess.PIPE,
         stderr=subprocess.STDOUT,
     )
@@ -44,7 +44,7 @@ def main():
 
     global _mcp_process
     if not args.no_mcp:
-        _mcp_process = _start_mcp(args.mcp_port)
+        _mcp_process = _start_mcp(args.mcp_port, args.host)
         print(f"MCP Server (SSE) gestartet auf Port {args.mcp_port}")
 
     atexit.register(_cleanup)
