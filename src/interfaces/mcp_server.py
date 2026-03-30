@@ -91,14 +91,17 @@ def _get_activity_log() -> MemoryActivityLog:
 
 
 def _dicts_to_blocks(raw: List[Dict[str, Any]]) -> List[Block]:
-    return [
-        Block(
-            content=item["content"],
-            priority=Priority(item.get("priority", "medium")),
-            compress_hint=item.get("compress_hint"),
-        )
-        for item in raw
-    ]
+    blocks = []
+    for item in raw:
+        try:
+            blocks.append(Block(
+                content=item["content"],
+                priority=Priority(item.get("priority", "medium")),
+                compress_hint=item.get("compress_hint"),
+            ))
+        except (KeyError, ValueError):
+            continue
+    return blocks
 
 
 _CODE_INDICATORS = re.compile(
@@ -165,6 +168,8 @@ def register_skill(
 
     Returns registration confirmation with skill_id.
     """
+    if not name or not name.strip():
+        return {"error": "Skill name must not be empty."}
     _registry.register(name, description, context_hints)
     return {
         "status": "registered",
@@ -357,6 +362,8 @@ def memory_set(key: str, value: str, tags: List[str] = []) -> Dict[str, Any]:
         value: Memory content.
         tags: List of tags.
     """
+    if not key or not key.strip():
+        return {"error": "Memory key must not be empty."}
     store = _get_memory_store()
     # Determine if this is a create or update
     is_update = False
@@ -418,6 +425,8 @@ def assemble_context(budget: int, blocks: List[Dict[str, Any]]) -> Dict[str, Any
     ``priority`` (``"high"`` | ``"medium"`` | ``"low"``, default ``"medium"``)
     and ``compress_hint`` (str, name of a registered compressor).
     """
+    if not budget or budget <= 0 or budget > 128000:
+        return {"error": f"Invalid budget: {budget}. Must be between 1 and 128000."}
     block_objs = _dicts_to_blocks(blocks)
     assembly = _assembler.assemble_tracked(block_objs, budget)
 
@@ -478,13 +487,17 @@ def list_templates() -> List[Dict[str, Any]]:
 
     Returns templates with name, description, tag_filter, key_filter, and budget.
     """
+    import sqlite3
     from src.storage.templates import TemplateStore
-    ts = TemplateStore(_get_db())
-    return [
-        {"name": t.name, "description": t.description, "tag_filter": t.tag_filter,
-         "key_filter": t.key_filter, "budget": t.budget}
-        for t in ts.list()
-    ]
+    try:
+        ts = TemplateStore(_get_db())
+        return [
+            {"name": t.name, "description": t.description, "tag_filter": t.tag_filter,
+             "key_filter": t.key_filter, "budget": t.budget}
+            for t in ts.list()
+        ]
+    except sqlite3.OperationalError:
+        return []
 
 
 @mcp.tool()
@@ -499,7 +512,10 @@ def suggest_templates() -> List[Dict[str, Any]]:
     from src.storage.templates import TemplateStore
 
     store = _get_memory_store()
-    memories = store.list()
+    try:
+        memories = store.list()
+    except Exception:
+        return []
     if not memories:
         return []
 

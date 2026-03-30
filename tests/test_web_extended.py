@@ -433,3 +433,113 @@ class TestTemplates:
         r = client.get("/api/templates/suggest")
         names = [s["name"] for s in r.json()["suggestions"]]
         assert "pfx-context" not in names
+
+
+# ═══════════════════════════════════════════════════════════════
+# INPUT VALIDATION (corner cases)
+# ═══════════════════════════════════════════════════════════════
+
+class TestInputValidation:
+    # -- Memories --
+
+    def test_create_memory_empty_key(self, client):
+        with pytest.raises(ValueError, match="key must not be empty"):
+            client.post("/api/memories", json={"key": "", "value": "v", "tags": []})
+
+    def test_create_memory_special_chars_in_value(self, client):
+        value = 'back\\slash "quotes" and\nnewlines\ttabs'
+        r = client.post("/api/memories", json={"key": "special-val", "value": value, "tags": []})
+        assert r.status_code == 201
+        got = client.get("/api/memories/special-val").json()
+        assert got["value"] == value
+
+    def test_create_memory_fts5_operators_in_value(self, client):
+        r = client.post("/api/memories", json={
+            "key": "fts-ops", "value": "AND OR NOT * NEAR", "tags": [],
+        })
+        assert r.status_code == 201
+
+    # -- Search --
+
+    def test_search_special_chars(self, client):
+        r = client.get("/api/memories/search", params={"q": "test*+AND+(foo)"})
+        assert r.status_code == 200
+
+    def test_search_empty_query(self, client):
+        r = client.get("/api/memories/search", params={"q": ""})
+        assert r.status_code == 200
+
+    def test_search_quotes_in_query(self, client):
+        r = client.get("/api/memories/search", params={"q": '"hello"'})
+        assert r.status_code == 200
+
+    def test_search_very_long_query(self, client):
+        r = client.get("/api/memories/search", params={"q": "a" * 2000})
+        assert r.status_code == 200
+
+    # -- Templates --
+
+    def test_create_template_empty_name(self, client):
+        r = client.post("/api/templates", json={"name": "", "budget": 1000})
+        assert r.status_code == 400
+
+    def test_create_template_missing_name(self, client):
+        r = client.post("/api/templates", json={})
+        assert r.status_code == 400
+
+    def test_create_template_zero_budget(self, client):
+        r = client.post("/api/templates", json={"name": "zero", "budget": 0})
+        assert r.status_code == 400
+
+    def test_create_template_negative_budget(self, client):
+        r = client.post("/api/templates", json={"name": "neg", "budget": -100})
+        assert r.status_code == 400
+
+    def test_create_template_huge_budget(self, client):
+        r = client.post("/api/templates", json={"name": "huge", "budget": 999999})
+        assert r.status_code == 400
+
+    # -- Profiles --
+
+    def test_create_profile_empty_name(self, client):
+        r = client.post("/api/profiles", json={"name": ""})
+        assert r.status_code == 400
+
+    # -- Assemble --
+
+    def test_assemble_invalid_priority(self, client):
+        r = client.post("/api/assemble", json={
+            "blocks": [{"content": "hello", "priority": "invalid"}],
+            "budget": 1000,
+        })
+        assert r.status_code == 400
+
+    def test_assemble_missing_content(self, client):
+        r = client.post("/api/assemble", json={
+            "blocks": [{"priority": "medium"}],
+            "budget": 1000,
+        })
+        assert r.status_code == 422
+
+    # -- Malformed JSON --
+
+    def test_malformed_json_body(self, client):
+        r = client.post(
+            "/api/memories",
+            content=b"{not valid json",
+            headers={"Content-Type": "application/json"},
+        )
+        assert r.status_code == 422
+
+    # -- Template suggest --
+
+    def test_template_suggest_empty(self, client):
+        r = client.get("/api/templates/suggest")
+        assert r.status_code == 200
+        assert r.json()["suggestions"] == []
+
+    # -- Relations --
+
+    def test_create_relation_missing_fields(self, client):
+        r = client.post("/api/relations", json={})
+        assert r.status_code == 400

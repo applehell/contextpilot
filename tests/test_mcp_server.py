@@ -8,6 +8,8 @@ import pytest
 from src.interfaces.mcp_server import (
     assemble_context, list_blocks, submit_feedback, get_block_weight,
     list_templates, assemble_template, suggest_templates,
+    memory_set, memory_get, memory_delete, memory_search,
+    register_skill,
 )
 
 
@@ -200,6 +202,97 @@ class TestSuggestTemplates:
             assert s["reason"] in ("key_prefix", "tag_cluster", "all")
             assert s["memory_count"] >= 3 or s["reason"] == "all"
             assert s["budget"] > 0
+
+
+class TestInputValidation:
+    # -- assemble_context budget edge cases --
+
+    def test_assemble_zero_budget(self):
+        result = assemble_context(budget=0, blocks=SAMPLE_BLOCKS)
+        assert "error" in result
+
+    def test_assemble_negative_budget(self):
+        result = assemble_context(budget=-1, blocks=SAMPLE_BLOCKS)
+        assert "error" in result
+
+    def test_assemble_huge_budget(self):
+        result = assemble_context(budget=999999, blocks=SAMPLE_BLOCKS)
+        assert "error" in result
+
+    def test_assemble_empty_blocks(self):
+        result = assemble_context(budget=4000, blocks=[])
+        assert result["blocks"] == []
+        assert result["used_tokens"] == 0
+
+    # -- assemble_context malformed blocks --
+
+    def test_assemble_block_missing_content(self):
+        result = assemble_context(budget=4000, blocks=[{"priority": "high"}])
+        assert "error" not in result
+        assert result["block_count"] == 0
+
+    def test_assemble_block_invalid_priority(self):
+        result = assemble_context(
+            budget=4000,
+            blocks=[{"content": "x", "priority": "invalid"}],
+        )
+        assert result["block_count"] == 0
+
+    # -- memory_set key validation --
+
+    def test_memory_set_empty_key(self):
+        result = memory_set(key="", value="x")
+        assert "error" in result
+
+    def test_memory_set_whitespace_key(self):
+        result = memory_set(key="  ", value="x")
+        assert "error" in result
+
+    # -- memory_get / memory_delete nonexistent --
+
+    def test_memory_get_nonexistent(self):
+        result = memory_get(key="nonexistent_xyz_123")
+        assert isinstance(result, dict)
+        assert "error" in result
+
+    def test_memory_delete_nonexistent(self):
+        result = memory_delete(key="nonexistent_xyz_123")
+        assert isinstance(result, dict)
+        assert "error" in result
+
+    # -- memory_search special inputs --
+
+    def test_memory_search_special_chars(self):
+        result = memory_search(query="test* AND (foo)")
+        assert isinstance(result, list)
+
+    def test_memory_search_empty(self):
+        result = memory_search(query="")
+        assert isinstance(result, list)
+
+    def test_memory_search_quotes(self):
+        result = memory_search(query='"hello world"')
+        assert isinstance(result, list)
+
+    # -- register_skill validation --
+
+    def test_register_skill_empty_name(self):
+        result = register_skill(name="", description="x")
+        assert "error" in result
+
+    # -- templates edge cases --
+
+    def test_list_templates_empty_db(self):
+        result = list_templates()
+        assert isinstance(result, list)
+
+    def test_suggest_templates_empty(self):
+        result = suggest_templates()
+        assert isinstance(result, list)
+
+    def test_assemble_template_nonexistent(self):
+        result = assemble_template(name="xyz_nonexistent")
+        assert "error" in result
 
 
 class TestAssembleContextUsageTracking:

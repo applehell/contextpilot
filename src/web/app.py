@@ -368,14 +368,17 @@ def create_app(db_path: Optional[Path] = None) -> FastAPI:
 
     @app.post("/api/assemble")
     async def assemble(req: AssembleRequest):
-        blocks = [
-            Block(
+        blocks = []
+        for b in req.blocks:
+            try:
+                prio = Priority(b.priority)
+            except ValueError:
+                raise HTTPException(400, f"Invalid priority value: {b.priority}")
+            blocks.append(Block(
                 content=b.content,
-                priority=Priority(b.priority),
+                priority=prio,
                 compress_hint=b.compress_hint,
-            )
-            for b in req.blocks
-        ]
+            ))
         assembler = _make_assembler()
         result = assembler.assemble_tracked(blocks, req.budget)
 
@@ -618,7 +621,10 @@ def create_app(db_path: Optional[Path] = None) -> FastAPI:
     @app.post("/api/memories/{key:path}/ttl")
     async def set_memory_ttl(key: str, request: Request):
         store = _get_memory_store()
-        body = await request.json()
+        try:
+            body = await request.json()
+        except json.JSONDecodeError:
+            raise HTTPException(400, "Invalid JSON")
         ttl_seconds = body.get("ttl_seconds")
         try:
             store.get(key)
@@ -638,7 +644,10 @@ def create_app(db_path: Optional[Path] = None) -> FastAPI:
 
     @app.post("/api/memories/suggest-tags")
     async def suggest_tags(request: Request):
-        body = await request.json()
+        try:
+            body = await request.json()
+        except json.JSONDecodeError:
+            raise HTTPException(400, "Invalid JSON")
         text = f"{body.get('key', '')} {body.get('value', '')}"
         from src.core.embeddings import _tokenize
         words = _tokenize(text)
@@ -703,7 +712,10 @@ def create_app(db_path: Optional[Path] = None) -> FastAPI:
 
     @app.post("/api/memories/bulk-tags")
     async def bulk_tag_memories(request: Request):
-        body = await request.json()
+        try:
+            body = await request.json()
+        except json.JSONDecodeError:
+            raise HTTPException(400, "Invalid JSON")
         keys = body.get("keys", [])
         add_tags = body.get("add", [])
         remove_tags = body.get("remove", [])
@@ -742,7 +754,10 @@ def create_app(db_path: Optional[Path] = None) -> FastAPI:
 
     @app.post("/api/memory-presets", status_code=201)
     async def save_memory_preset(request: Request):
-        body = await request.json()
+        try:
+            body = await request.json()
+        except json.JSONDecodeError:
+            raise HTTPException(400, "Invalid JSON")
         name = body.get("name", "").strip()
         if not name:
             raise HTTPException(400, "Name required")
@@ -1248,7 +1263,10 @@ def create_app(db_path: Optional[Path] = None) -> FastAPI:
     @app.post("/api/mcp/register")
     async def mcp_register(request: Request):
         from src.core.claude_config import register_mcp
-        body = await request.json()
+        try:
+            body = await request.json()
+        except json.JSONDecodeError:
+            raise HTTPException(400, "Invalid JSON")
         port = int(body.get("port", 8400))
         transport = body.get("transport", "sse")
         register_mcp(port=port, transport=transport)
@@ -1405,6 +1423,8 @@ def create_app(db_path: Optional[Path] = None) -> FastAPI:
 
     @app.post("/api/profiles", status_code=201)
     async def create_profile(req: ProfileCreate):
+        if not req.name or not req.name.strip():
+            raise HTTPException(400, "name must be a non-empty string")
         pm = ProfileManager()
         try:
             p = pm.create(req.name, req.description)
@@ -1687,7 +1707,12 @@ def create_app(db_path: Optional[Path] = None) -> FastAPI:
 
     @app.post("/api/relations", status_code=201)
     async def add_relation(request: Request):
-        body = await request.json()
+        try:
+            body = await request.json()
+        except json.JSONDecodeError:
+            raise HTTPException(400, "Invalid JSON")
+        if not body.get("source_key") or not body.get("target_key"):
+            raise HTTPException(400, "source_key and target_key are required")
         rs = RelationStore(_db)
         try:
             r = rs.add(body["source_key"], body["target_key"], body.get("relation_type", "related"))
@@ -1715,12 +1740,20 @@ def create_app(db_path: Optional[Path] = None) -> FastAPI:
 
     @app.post("/api/templates", status_code=201)
     async def save_template(request: Request):
-        body = await request.json()
+        try:
+            body = await request.json()
+        except json.JSONDecodeError:
+            raise HTTPException(400, "Invalid JSON")
+        if not body.get("name"):
+            raise HTTPException(400, "name is required")
+        budget = body.get("budget", 4000)
+        if not isinstance(budget, (int, float)) or budget <= 0 or budget > 128000:
+            raise HTTPException(400, "budget must be > 0 and <= 128000")
         ts = TemplateStore(_db)
         t = ContextTemplate(
             name=body["name"], description=body.get("description", ""),
             tag_filter=body.get("tag_filter", []), key_filter=body.get("key_filter", ""),
-            budget=body.get("budget", 4000),
+            budget=int(budget),
         )
         ts.save(t)
         _events.emit("template", "save", t.name)
@@ -1970,7 +2003,10 @@ def create_app(db_path: Optional[Path] = None) -> FastAPI:
 
     @app.post("/api/webhooks", status_code=201)
     async def add_webhook(request: Request):
-        body = await request.json()
+        try:
+            body = await request.json()
+        except json.JSONDecodeError:
+            raise HTTPException(400, "Invalid JSON")
         wm = WebhookManager(_get_profile_dir())
         wm.add(body["name"], body["type"], body["url"],
                chat_id=body.get("chat_id", ""), session=body.get("session", "default"),
@@ -1988,7 +2024,10 @@ def create_app(db_path: Optional[Path] = None) -> FastAPI:
 
     @app.post("/api/webhooks/test")
     async def test_webhook(request: Request):
-        body = await request.json()
+        try:
+            body = await request.json()
+        except json.JSONDecodeError:
+            raise HTTPException(400, "Invalid JSON")
         wm = WebhookManager(_get_profile_dir())
         results = wm.notify(body.get("event", "test"), body.get("message", "Context Pilot test notification"))
         return {"results": results}
@@ -2079,7 +2118,10 @@ def create_app(db_path: Optional[Path] = None) -> FastAPI:
     @app.post("/api/connectors/{name}/setup")
     async def connector_setup(name: str, request: Request):
         c = _get_connector(name)
-        body = await request.json()
+        try:
+            body = await request.json()
+        except json.JSONDecodeError:
+            raise HTTPException(400, "Invalid JSON")
         c.configure(body)
         result = c.test_connection()
         _events.emit("connector", "setup", name, f"ok={result.get('ok')}")
@@ -2090,7 +2132,10 @@ def create_app(db_path: Optional[Path] = None) -> FastAPI:
         c = _get_connector(name)
         if not c.configured:
             raise HTTPException(400, f"Connector '{name}' not configured yet.")
-        body = await request.json()
+        try:
+            body = await request.json()
+        except json.JSONDecodeError:
+            raise HTTPException(400, "Invalid JSON")
         c.update(body)
         return {"status": "updated"}
 
@@ -2142,7 +2187,10 @@ def create_app(db_path: Optional[Path] = None) -> FastAPI:
     @app.post("/api/connectors/email/accounts")
     async def add_email_account(request: Request):
         c = _get_connector("email")
-        body = await request.json()
+        try:
+            body = await request.json()
+        except json.JSONDecodeError:
+            raise HTTPException(400, "Invalid JSON")
         required = ["name", "host", "user", "password"]
         for f in required:
             if not body.get(f):

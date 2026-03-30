@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="https://img.shields.io/badge/version-3.6.0-blue?style=flat-square" alt="Version">
+  <img src="https://img.shields.io/badge/version-3.6.1-blue?style=flat-square" alt="Version">
   <img src="https://img.shields.io/docker/pulls/applehell/contextpilot?style=flat-square&color=blue" alt="Docker Pulls">
   <img src="https://img.shields.io/docker/image-size/applehell/contextpilot/latest?style=flat-square&color=blue" alt="Image Size">
   <img src="https://img.shields.io/badge/python-3.11+-3776AB?style=flat-square&logo=python&logoColor=white" alt="Python">
@@ -193,7 +193,7 @@ Claude Code ──→ MCP Server (SSE, Port 8400)
 | Tag | Description |
 |---|---|
 | [`applehell/contextpilot:latest`](https://hub.docker.com/r/applehell/contextpilot/tags) | Latest stable release |
-| [`applehell/contextpilot:3.6.0`](https://hub.docker.com/r/applehell/contextpilot/tags) | Specific version |
+| [`applehell/contextpilot:3.6.1`](https://hub.docker.com/r/applehell/contextpilot/tags) | Specific version |
 
 ### Volumes
 

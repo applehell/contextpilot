@@ -2,6 +2,8 @@
 from __future__ import annotations
 
 import json
+import re
+import sqlite3
 import time
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional, Set
@@ -84,11 +86,19 @@ def _row_to_memory(row) -> Memory:
         expires_at = row["expires_at"]
     except (IndexError, KeyError):
         pass
+    try:
+        tags = json.loads(row["tags"])
+    except (json.JSONDecodeError, TypeError):
+        tags = []
+    try:
+        metadata = json.loads(row["metadata"])
+    except (json.JSONDecodeError, TypeError):
+        metadata = {}
     return Memory(
         key=row["key"],
         value=row["value"],
-        tags=json.loads(row["tags"]),
-        metadata=json.loads(row["metadata"]),
+        tags=tags,
+        metadata=metadata,
         created_at=row["created_at"],
         updated_at=row["updated_at"],
         pinned=pinned,
@@ -109,7 +119,7 @@ class MemoryStore:
             try:
                 self._db.conn.execute("SELECT pinned FROM memories LIMIT 0")
                 self._has_pin = True
-            except Exception:
+            except sqlite3.OperationalError:
                 self._has_pin = False
         return self._has_pin
 
@@ -118,7 +128,7 @@ class MemoryStore:
             try:
                 self._db.conn.execute("SELECT expires_at FROM memories LIMIT 0")
                 self._has_expires = True
-            except Exception:
+            except sqlite3.OperationalError:
                 self._has_expires = False
         return self._has_expires
 
@@ -189,6 +199,8 @@ class MemoryStore:
         return _row_to_memory(row)
 
     def set(self, memory: Memory, reset_ttl: bool = True) -> None:
+        if not memory.key or not memory.key.strip():
+            raise ValueError("Memory key must not be empty.")
         has_pin = self._has_pinned_column()
         has_exp = self._has_expires_column()
         existing = self._db.conn.execute(
@@ -245,7 +257,7 @@ class MemoryStore:
                     "INSERT OR REPLACE INTO memory_trash (key, value, tags, metadata, created_at, deleted_at) VALUES (?, ?, ?, ?, ?, ?)",
                     (row["key"], row["value"], row["tags"], row["metadata"], row["created_at"], time.time()),
                 )
-            except Exception:
+            except sqlite3.OperationalError:
                 pass  # trash table may not exist yet
         self._db.conn.execute("DELETE FROM memories WHERE key = ?", (key,))
         self._db.conn.commit()
@@ -369,15 +381,22 @@ class MemoryStore:
         m_extra = extra.replace(", ", ", m.") if extra else ""
 
         if q:
-            fts_query = '"' + q.replace('"', '""') + '"'
-            rows = self._db.conn.execute(
-                f"""SELECT m.key, m.value, m.tags, m.metadata, m.created_at, m.updated_at{m_extra}
-                   FROM memories m
-                   JOIN memories_fts fts ON m.rowid = fts.rowid
-                   WHERE memories_fts MATCH ?
-                   ORDER BY rank""",
-                (fts_query,),
-            ).fetchall()
+            escaped_q = q.replace('"', '""')
+            escaped_q = re.sub(r'[*()\{\}\[\]^~:]', ' ', escaped_q)
+            for kw in ('AND', 'OR', 'NOT', 'NEAR'):
+                escaped_q = re.sub(r'\b' + kw + r'\b', kw.lower(), escaped_q)
+            fts_query = '"' + escaped_q + '"'
+            try:
+                rows = self._db.conn.execute(
+                    f"""SELECT m.key, m.value, m.tags, m.metadata, m.created_at, m.updated_at{m_extra}
+                       FROM memories m
+                       JOIN memories_fts fts ON m.rowid = fts.rowid
+                       WHERE memories_fts MATCH ?
+                       ORDER BY rank""",
+                    (fts_query,),
+                ).fetchall()
+            except sqlite3.OperationalError:
+                rows = []
             fts_keys = {r["key"] for r in rows}
             like_pattern = f"%{q}%"
             like_rows = self._db.conn.execute(

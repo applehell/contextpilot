@@ -139,3 +139,108 @@ class TestMemory:
         assert m2.metadata == m.metadata
         assert m2.created_at == m.created_at
         assert m2.updated_at == m.updated_at
+
+
+class TestMemoryStoreEdgeCases:
+    def test_set_empty_key_raises(self, store: MemoryStore) -> None:
+        with pytest.raises(ValueError):
+            store.set(Memory(key="", value="x"))
+
+    def test_set_whitespace_key_raises(self, store: MemoryStore) -> None:
+        with pytest.raises(ValueError):
+            store.set(Memory(key="   ", value="x"))
+
+    def test_set_very_long_key(self, store: MemoryStore) -> None:
+        long_key = "k" * 10000
+        store.set(Memory(key=long_key, value="v"))
+        assert store.get(long_key).value == "v"
+
+    def test_set_key_with_slashes(self, store: MemoryStore) -> None:
+        store.set(Memory(key="a/b/c/d", value="nested"))
+        assert store.get("a/b/c/d").value == "nested"
+
+    def test_set_key_with_unicode(self, store: MemoryStore) -> None:
+        store.set(Memory(key="schlüssel-日本語-🔑", value="wert"))
+        assert store.get("schlüssel-日本語-🔑").value == "wert"
+
+    def test_set_value_with_special_chars(self, store: MemoryStore) -> None:
+        val = 'back\\slash "quotes" new\nline\ttab'
+        store.set(Memory(key="special", value=val))
+        assert store.get("special").value == val
+
+    def test_set_value_with_fts5_operators(self, store: MemoryStore) -> None:
+        val = "foo AND bar OR baz NOT qux NEAR quux * wildcard"
+        store.set(Memory(key="ops", value=val))
+        results = store.search("foo")
+        assert any(m.key == "ops" for m in results)
+
+    def test_set_empty_tags(self, store: MemoryStore) -> None:
+        store.set(Memory(key="notags", value="v", tags=[]))
+        assert store.get("notags").tags == []
+
+    def test_set_tags_with_special_chars(self, store: MemoryStore) -> None:
+        tags = ["tag with spaces", "tag/with/slashes"]
+        store.set(Memory(key="spectags", value="v", tags=tags))
+        assert store.get("spectags").tags == tags
+
+    def test_search_empty_query(self, store: MemoryStore) -> None:
+        store.set(Memory(key="a", value="x"))
+        results = store.search("")
+        assert len(results) >= 1
+
+    def test_search_fts5_special_chars(self, store: MemoryStore) -> None:
+        store.set(Memory(key="doc", value="test data"))
+        results = store.search("test* AND foo")
+        assert isinstance(results, list)
+
+    def test_search_query_with_quotes(self, store: MemoryStore) -> None:
+        store.set(Memory(key="q", value="he said hello"))
+        results = store.search('he said "hello"')
+        assert isinstance(results, list)
+
+    def test_search_query_with_parentheses(self, store: MemoryStore) -> None:
+        store.set(Memory(key="p", value="test value"))
+        results = store.search("(test)")
+        assert isinstance(results, list)
+
+    def test_search_query_with_asterisk(self, store: MemoryStore) -> None:
+        store.set(Memory(key="w", value="testing"))
+        results = store.search("test*")
+        assert isinstance(results, list)
+
+    def test_search_query_with_operators(self, store: MemoryStore) -> None:
+        store.set(Memory(key="op", value="foo bar baz"))
+        results = store.search("foo AND bar OR baz")
+        assert isinstance(results, list)
+
+    def test_search_very_long_query(self, store: MemoryStore) -> None:
+        store.set(Memory(key="long", value="data"))
+        results = store.search("x" * 5000)
+        assert isinstance(results, list)
+
+    def test_delete_nonexistent_key(self, store: MemoryStore) -> None:
+        with pytest.raises(KeyError):
+            store.delete("nonexistent")
+
+    def test_get_nonexistent_key(self, store: MemoryStore) -> None:
+        with pytest.raises(KeyError):
+            store.get("nonexistent")
+
+    def test_set_and_get_preserves_special_value(self, store: MemoryStore) -> None:
+        val = "line1\nline2\ttab\\back'single\"double"
+        store.set(Memory(key="roundtrip", value=val))
+        assert store.get("roundtrip").value == val
+
+    def test_tags_returns_unique_tags(self, store: MemoryStore) -> None:
+        store.set(Memory(key="a", value="x", tags=["dup", "dup", "other"]))
+        store.set(Memory(key="b", value="y", tags=["dup"]))
+        result = store.tags()
+        assert len(result) == len(set(result))
+
+    def test_search_by_tag_with_special_chars(self, store: MemoryStore) -> None:
+        tag = "my/special tag"
+        store.set(Memory(key="tagged", value="v", tags=[tag]))
+        store.set(Memory(key="other", value="v", tags=["normal"]))
+        results = store.search("", tags=[tag])
+        assert len(results) == 1
+        assert results[0].key == "tagged"

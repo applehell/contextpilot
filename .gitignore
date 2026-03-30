@@ -16,3 +16,5 @@ build/
 .env
 .env.*
 *.env
+=1.8.0
+requirements.lock
