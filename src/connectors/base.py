@@ -153,6 +153,7 @@ class ConnectorPlugin(ABC):
             else:
                 display_values[f.name] = val
 
+        sync_history = self._config.get("_sync_history", [])
         return {
             "name": self.name,
             "display_name": self.display_name,
@@ -168,6 +169,8 @@ class ConnectorPlugin(ABC):
             "ttl_days": self.ttl_days,
             "config": display_values,
             "schema": [f.to_dict() for f in schema],
+            "sync_history": sync_history,
+            "error_count": sum(s.get("errors", 0) for s in sync_history),
         }
 
     def remove(self) -> None:
@@ -185,6 +188,20 @@ class ConnectorPlugin(ABC):
                 store.delete(m.key)
                 count += 1
         return count
+
+    def _record_sync(self, result: SyncResult) -> None:
+        history = self._config.get("_sync_history", [])
+        history.insert(0, {
+            "timestamp": time.time(),
+            "added": result.added,
+            "updated": result.updated,
+            "removed": result.removed,
+            "skipped": result.skipped,
+            "errors": len(result.errors),
+            "error_details": result.errors[:5] if result.errors else [],
+        })
+        self._config["_sync_history"] = history[:20]
+        self._save()
 
     def _update_sync_stats(self, count: int) -> None:
         self._config["_last_sync"] = time.time()

@@ -818,8 +818,22 @@ def create_app(db_path: Optional[Path] = None) -> FastAPI:
         results = []
         for c in _get_connectors().list():
             status = c.get_status()
-            health = {"name": status["name"], "display_name": status.get("display_name", ""),
-                       "configured": status.get("configured", False), "enabled": status.get("enabled", False)}
+            sync_history = status.get("sync_history", [])
+            last_error_detail = None
+            for s in sync_history:
+                if s.get("error_details"):
+                    last_error_detail = s["error_details"]
+                    break
+            health = {
+                "name": status["name"],
+                "display_name": status.get("display_name", ""),
+                "configured": status.get("configured", False),
+                "enabled": status.get("enabled", False),
+                "last_sync": status.get("last_sync"),
+                "error_count": status.get("error_count", 0),
+                "total_synced": status.get("synced_count", 0),
+                "last_error_detail": last_error_detail,
+            }
             if status.get("configured"):
                 try:
                     test = c.test_connection()
@@ -2149,8 +2163,14 @@ def create_app(db_path: Optional[Path] = None) -> FastAPI:
         c = _get_connector(name)
         store = _get_memory_store()
         result = c.sync(store)
+        c._record_sync(result)
         _events.emit("connector", "sync", name, f"+{result.added} ~{result.updated} -{result.removed}")
         return {"status": "synced", **result.to_dict()}
+
+    @app.get("/api/connectors/{name}/history")
+    async def connector_history(name: str):
+        c = _get_connector(name)
+        return c._config.get("_sync_history", [])
 
     @app.post("/api/connectors/{name}/enable")
     async def connector_enable(name: str, enabled: bool = Query(True)):
