@@ -543,3 +543,68 @@ class TestInputValidation:
     def test_create_relation_missing_fields(self, client):
         r = client.post("/api/relations", json={})
         assert r.status_code == 400
+
+
+# ═══════════════════════════════════════════════════════════════
+# CONNECTOR ENDPOINTS (extended)
+# ═══════════════════════════════════════════════════════════════
+
+class TestConnectorEndpoints:
+    def test_list_connectors_returns_all(self, client):
+        r = client.get("/api/connectors")
+        assert r.status_code == 200
+        connectors = r.json()
+        assert len(connectors) >= 17
+
+    def test_connectors_have_category(self, client):
+        connectors = client.get("/api/connectors").json()
+        for c in connectors:
+            assert "category" in c, f"Connector {c['name']} missing 'category'"
+
+    def test_connectors_have_setup_guide(self, client):
+        connectors = client.get("/api/connectors").json()
+        for c in connectors:
+            assert "setup_guide" in c, f"Connector {c['name']} missing 'setup_guide'"
+
+    def test_connectors_have_color(self, client):
+        connectors = client.get("/api/connectors").json()
+        for c in connectors:
+            assert "color" in c, f"Connector {c['name']} missing 'color'"
+
+    def test_connector_health(self, client):
+        r = client.get("/api/connectors/health")
+        assert r.status_code == 200
+        assert isinstance(r.json(), list)
+
+    def test_connector_health_fields(self, client):
+        health = client.get("/api/connectors/health").json()
+        for entry in health:
+            assert "name" in entry, f"Health entry missing 'name'"
+            assert "configured" in entry, f"Health entry {entry.get('name')} missing 'configured'"
+            assert "enabled" in entry, f"Health entry {entry.get('name')} missing 'enabled'"
+            assert "error_count" in entry, f"Health entry {entry.get('name')} missing 'error_count'"
+
+    def test_connector_history_not_found(self, client):
+        r = client.get("/api/connectors/nonexistent/history")
+        assert r.status_code == 404
+
+    def test_connector_history_empty(self, client):
+        r = client.get("/api/connectors/rss/history")
+        assert r.status_code == 200
+        assert r.json() == []
+
+
+# ═══════════════════════════════════════════════════════════════
+# CONNECTOR STORE UI
+# ═══════════════════════════════════════════════════════════════
+
+class TestConnectorStoreUI:
+    def test_index_has_connector_store(self, client):
+        r = client.get("/")
+        assert r.status_code == 200
+        assert "Connector Store" in r.text
+
+    def test_index_has_connector_filters(self, client):
+        r = client.get("/")
+        assert r.status_code == 200
+        assert 'conn-filters' in r.text
