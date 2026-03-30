@@ -80,6 +80,9 @@ class GitHubConnector(ConnectorPlugin):
     display_name = "GitHub"
     description = "Track public repos — releases, READMEs, issues, and metadata"
     icon = "GH"
+    category = "Development"
+    setup_guide = "Create a Personal Access Token at GitHub > Settings > Developer Settings > Tokens (optional for public repos)."
+    color = "#333"
 
     def config_schema(self) -> List[ConfigField]:
         return [

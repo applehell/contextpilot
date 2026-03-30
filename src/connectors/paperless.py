@@ -71,6 +71,9 @@ class PaperlessConnector(ConnectorPlugin):
     display_name = "Paperless-ngx"
     description = "Sync OCR'd documents from Paperless-ngx"
     icon = "P"
+    category = "Documents"
+    setup_guide = "Create an API token at Settings > API Authentication in your Paperless-ngx instance."
+    color = "#17b547"
 
     def config_schema(self) -> List[ConfigField]:
         return [

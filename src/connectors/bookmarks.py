@@ -76,6 +76,9 @@ class BookmarkConnector(ConnectorPlugin):
     display_name = "Bookmarks"
     description = "Fetch and index web pages as knowledge sources"
     icon = "B"
+    category = "Knowledge"
+    setup_guide = "Add URLs to fetch and index. No authentication required."
+    color = "#f59e0b"
 
     def __init__(self, data_dir: Optional[Path] = None) -> None:
         super().__init__(data_dir=data_dir)

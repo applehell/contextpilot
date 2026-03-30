@@ -125,6 +125,9 @@ class EmailConnector(ConnectorPlugin):
     display_name = "Email (IMAP)"
     description = "Sync emails from IMAP accounts as knowledge memories"
     icon = "@"
+    category = "Communication"
+    setup_guide = "Use your email provider's IMAP server address, port, and login credentials."
+    color = "#ea4335"
 
     def config_schema(self) -> List[ConfigField]:
         return [

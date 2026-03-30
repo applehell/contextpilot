@@ -2407,69 +2407,90 @@ async function viewRedacted(key) {
 // CONNECTORS (Plugin Architecture)
 // ═══════════════════════════════════════════════════════════════
 
+let _allConnectors = [];
+let _connFilter = {category: 'All', status: 'All'};
+
 async function loadConnectors() {
     const el = document.getElementById('connectors-list');
-    showSkeleton('connectors-list', {rows: 4, type: 'list'});
     try {
         const res = await fetch('/api/connectors');
-        const connectors = await res.json();
-        if (connectors.length === 0) {
-            el.innerHTML = '<div class="panel"><p class="muted">No connectors available.</p></div>';
-            return;
-        }
-        el.innerHTML = connectors.map(c => renderConnectorPanel(c)).join('');
+        _allConnectors = await res.json();
+        renderConnectorFilters();
+        renderConnectorStore();
     } catch (e) { console.error(e); }
 }
 
-function renderConnectorPanel(c) {
-    const lastSync = c.last_sync ? new Date(c.last_sync * 1000).toLocaleString() : 'never';
-    let actions, statusHtml;
+function renderConnectorFilters() {
+    const cats = ['All', ...new Set(_allConnectors.map(c => c.category || 'Other'))];
+    const statuses = ['All', 'Connected', 'Available'];
+    const filEl = document.getElementById('conn-filters');
+    if (!filEl) return;
+    filEl.innerHTML =
+        cats.map(c => `<button class="conn-filter${_connFilter.category === c ? ' active' : ''}" onclick="setConnFilter('category','${c}')">${c}</button>`).join('') +
+        '<span style="width:1px;background:var(--border);margin:0 4px;"></span>' +
+        statuses.map(s => `<button class="conn-filter${_connFilter.status === s ? ' active' : ''}" onclick="setConnFilter('status','${s}')">${s}</button>`).join('');
+}
+
+function setConnFilter(key, val) {
+    _connFilter[key] = val;
+    renderConnectorFilters();
+    renderConnectorStore();
+}
+
+function renderConnectorStore() {
+    let filtered = _allConnectors;
+    if (_connFilter.category !== 'All') filtered = filtered.filter(c => c.category === _connFilter.category);
+    if (_connFilter.status === 'Connected') filtered = filtered.filter(c => c.configured && c.enabled);
+    if (_connFilter.status === 'Available') filtered = filtered.filter(c => !c.configured);
+
+    const countEl = document.getElementById('conn-count');
+    if (countEl) countEl.textContent = `${filtered.length} of ${_allConnectors.length} connectors`;
+
+    const el = document.getElementById('connectors-list');
+    if (filtered.length === 0) {
+        el.innerHTML = '<p class="muted" style="padding:20px;text-align:center;">No connectors match this filter.</p>';
+        return;
+    }
+    el.innerHTML = filtered.map(c => renderConnectorCard(c)).join('');
+}
+
+function renderConnectorCard(c) {
+    const bg = c.color || 'var(--accent)';
+    const lastSync = c.last_sync ? new Date(c.last_sync * 1000).toLocaleString() : '';
+    let statusDot, statusText, cardClass, actions;
 
     if (!c.configured) {
+        statusDot = 'gray'; statusText = 'Not connected'; cardClass = '';
         actions = `<button class="btn btn-small btn-primary" onclick="showConnectorSetup('${escapeAttr(c.name)}')">Connect</button>`;
-        statusHtml = `<div class="empty-state">Not connected. Click "Connect" to set up.</div>`;
-    } else {
-        const statusClass = c.enabled ? 'success' : 'danger';
-        const statusLabel = c.enabled ? 'connected' : 'disabled';
-
-        // Build config summary from non-password fields
-        const summary = c.schema
-            .filter(f => f.type !== 'password' && c.config[f.name])
-            .map(f => `<span class="age">${escapeHtml(f.label)}: ${escapeHtml(String(c.config[f.name]))}</span>`)
-            .join('');
-
-        actions = `
-            <button class="btn btn-small btn-primary" onclick="syncConnector('${escapeAttr(c.name)}')">Sync</button>
-            <button class="btn btn-small" onclick="testConnector('${escapeAttr(c.name)}')">Test</button>
+    } else if (c.enabled) {
+        statusDot = 'green'; statusText = `${c.synced_count} items`; cardClass = 'connected';
+        actions = `<button class="btn btn-small btn-primary" onclick="syncConnector('${escapeAttr(c.name)}')">Sync</button>
             <button class="btn btn-small" onclick="showConnectorSetup('${escapeAttr(c.name)}')">Settings</button>
-            <button class="btn btn-small btn-danger" onclick="removeConnector('${escapeAttr(c.name)}')">Disconnect</button>
-        `;
-
-        const ttlInfo = c.ttl_days ? `<span class="badge badge-ttl" style="font-size:10px;">TTL: ${c.ttl_days}d</span>` : '';
-
-        statusHtml = `<div class="memory-item" style="cursor:default;">
-            <div class="main">
-                <div class="key">
-                    <span class="badge" style="background:var(--${statusClass}-light);color:var(--${statusClass});">${statusLabel}</span>
-                    ${escapeHtml(c.display_name)} ${ttlInfo}
-                </div>
-                <div class="meta">
-                    <span class="age">${c.synced_count} items synced</span>
-                    <span class="age">last sync: ${lastSync}</span>
-                    ${summary}
-                </div>
-            </div>
-        </div>`;
+            <button class="btn btn-small btn-danger" onclick="removeConnector('${escapeAttr(c.name)}')">Disconnect</button>`;
+    } else {
+        statusDot = 'orange'; statusText = 'Disabled'; cardClass = 'disabled';
+        actions = `<button class="btn btn-small btn-primary" onclick="enableConnector('${escapeAttr(c.name)}',true)">Enable</button>
+            <button class="btn btn-small" onclick="showConnectorSetup('${escapeAttr(c.name)}')">Settings</button>`;
     }
 
-    return `<div class="panel">
-        <div style="display:flex;justify-content:space-between;align-items:center;">
-            <h2>${escapeHtml(c.display_name)}</h2>
-            <div style="display:flex;gap:8px;">${actions}</div>
+    return `<div class="connector-card ${cardClass}">
+        <div class="conn-card-header">
+            <div class="conn-icon" style="background:${bg};">${escapeHtml(c.icon)}</div>
+            <div>
+                <div class="conn-name">${escapeHtml(c.display_name)}</div>
+                ${lastSync ? `<div style="font-size:10px;color:var(--text-muted);">Last: ${lastSync}</div>` : ''}
+            </div>
+            <span class="conn-cat">${escapeHtml(c.category || 'Other')}</span>
         </div>
-        <p class="muted" style="margin-bottom:12px;">${escapeHtml(c.description)}</p>
-        ${statusHtml}
+        <div class="conn-desc">${escapeHtml(c.description)}</div>
+        <div class="conn-status"><span class="dot ${statusDot}"></span>${statusText}</div>
+        <div class="conn-actions">${actions}</div>
     </div>`;
+}
+
+async function enableConnector(name, enabled) {
+    await fetch(`/api/connectors/${encodeURIComponent(name)}/enable?enabled=${enabled}`, {method: 'POST'});
+    loadConnectors();
 }
 
 function showConnectorSetup(name) {
@@ -2486,7 +2507,8 @@ function showConnectorSetup(name) {
         const ttlField = `<label>Memory TTL (auto-delete synced memories after N days, 0 = never)</label>
             <input type="number" id="conn-ttl_days" placeholder="0 (permanent)" value="${c.ttl_days || ''}" min="0" step="1">`;
 
-        openModal(`${c.display_name} Setup`, fields + ttlField, `
+        const guide = c.setup_guide ? `<div class="conn-setup-guide">${escapeHtml(c.setup_guide)}</div>` : '';
+        openModal(`${c.display_name} Setup`, guide + fields + ttlField, `
             <button class="btn btn-primary" id="conn-save-btn">Save & Test</button>
             <button class="btn" onclick="closeModal()">Cancel</button>
         `);

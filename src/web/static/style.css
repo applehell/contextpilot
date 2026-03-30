@@ -1967,3 +1967,32 @@ details.panel > summary:hover { color: var(--accent); }
     .modal-header { padding: 14px 16px 12px; }
     .modal-footer { padding: 12px 16px; }
 }
+
+/* Connector Store */
+.connector-filters { display: flex; gap: 6px; margin-bottom: 14px; flex-wrap: wrap; }
+.conn-filter { padding: 4px 12px; border-radius: 20px; font-size: 12px; font-weight: 500; border: 1px solid var(--border); background: var(--surface); color: var(--text-muted); cursor: pointer; transition: all 0.15s; }
+.conn-filter:hover { border-color: var(--border-focus); color: var(--text); }
+.conn-filter.active { background: var(--accent); color: #fff; border-color: var(--accent); }
+
+.connector-store { display: grid; grid-template-columns: repeat(auto-fill, minmax(270px, 1fr)); gap: 12px; }
+
+.connector-card { border: 1px solid var(--border); border-radius: var(--radius); padding: 16px; background: var(--surface); display: flex; flex-direction: column; gap: 10px; transition: border-color 0.15s, box-shadow 0.15s; }
+.connector-card:hover { border-color: var(--border-focus); box-shadow: 0 2px 8px rgba(0,0,0,0.05); }
+.connector-card.connected { border-left: 3px solid var(--success); }
+.connector-card.disabled { border-left: 3px solid var(--warning); opacity: 0.7; }
+
+.conn-card-header { display: flex; align-items: center; gap: 10px; }
+.conn-icon { width: 40px; height: 40px; border-radius: 10px; display: flex; align-items: center; justify-content: center; font-size: 16px; font-weight: 700; color: #fff; flex-shrink: 0; }
+.conn-card-header .conn-name { font-weight: 600; font-size: 14px; }
+.conn-card-header .conn-cat { font-size: 10px; padding: 2px 6px; border-radius: 4px; background: var(--surface-alt); color: var(--text-muted); margin-left: auto; }
+
+.conn-desc { font-size: 12px; color: var(--text-muted); line-height: 1.4; flex: 1; }
+.conn-status { font-size: 11px; color: var(--text-muted); display: flex; align-items: center; gap: 6px; }
+.conn-status .dot { width: 6px; height: 6px; border-radius: 50%; display: inline-block; }
+.conn-status .dot.green { background: var(--success); }
+.conn-status .dot.gray { background: var(--text-muted); }
+.conn-status .dot.orange { background: var(--warning); }
+
+.conn-actions { display: flex; gap: 6px; flex-wrap: wrap; }
+
+.conn-setup-guide { font-size: 12px; color: var(--text-muted); background: var(--surface-alt); padding: 10px 12px; border-radius: 6px; margin-bottom: 8px; border-left: 3px solid var(--accent); line-height: 1.5; }

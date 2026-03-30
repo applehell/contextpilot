@@ -93,6 +93,9 @@ class GiteaConnector(ConnectorPlugin):
     display_name = "Gitea"
     description = "Sync repos, issues, packages, releases, and wikis from Gitea"
     icon = "G"
+    category = "Development"
+    setup_guide = "Create an API token at User Settings > Applications in your Gitea instance."
+    color = "#609926"
 
     def config_schema(self) -> List[ConfigField]:
         return [

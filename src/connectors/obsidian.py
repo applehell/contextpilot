@@ -16,6 +16,9 @@ class ObsidianConnector(ConnectorPlugin):
     display_name = "Obsidian Vault"
     description = "Sync markdown notes from an Obsidian vault"
     icon = "O"
+    category = "Knowledge"
+    setup_guide = "Point to your local Obsidian vault directory. No authentication required."
+    color = "#7c3aed"
 
     EXTENSIONS = {".md", ".markdown"}
     MAX_FILE_SIZE = 2 * 1024 * 1024

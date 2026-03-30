@@ -57,6 +57,9 @@ class HomeAssistantConnector(ConnectorPlugin):
     display_name = "Home Assistant"
     description = "Sync automations, scenes, and entity states from Home Assistant"
     icon = "H"
+    category = "Smart Home"
+    setup_guide = "Create a Long-Lived Access Token at Profile > Security in your Home Assistant instance."
+    color = "#03a9f4"
 
     def config_schema(self) -> List[ConfigField]:
         return [

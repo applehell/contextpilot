@@ -62,6 +62,9 @@ class ConnectorPlugin(ABC):
     display_name: str = ""      # e.g. "Paperless-ngx"
     description: str = ""       # short description for the UI
     icon: str = ""              # emoji or short label
+    category: str = "Other"     # "Development", "Documents", "Smart Home", "Communication", "Knowledge"
+    setup_guide: str = ""       # how to get credentials/tokens
+    color: str = ""             # CSS accent color for store card
 
     def __init__(self, data_dir: Optional[Path] = None) -> None:
         self._data_dir = data_dir or _DATA_DIR
@@ -155,6 +158,9 @@ class ConnectorPlugin(ABC):
             "display_name": self.display_name,
             "description": self.description,
             "icon": self.icon,
+            "category": self.category,
+            "setup_guide": self.setup_guide,
+            "color": self.color,
             "configured": self.configured,
             "enabled": self.enabled,
             "last_sync": self._config.get("_last_sync"),
