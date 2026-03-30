@@ -109,17 +109,32 @@ python -m src.web --mcp-port 8500          # Custom MCP port
 | **Export** | JSON export (all or filtered by tag) |
 | **Diff View** | Compare memory versions side-by-side |
 
-### Knowledge Sources — Connectors
+### Connector Store — 17 Sources
 
-Context Pilot pulls knowledge from multiple sources into a unified memory store:
+Context Pilot pulls knowledge from multiple sources into a unified memory store. The **Connector Store** provides a card-based UI with category filters, brand icons, and setup guides.
 
-| Connector | What it syncs |
-|---|---|
-| **Folder Mapping** | Local directories — recursive scan, extension filter, PDF extraction, content-hash dedup |
-| **Paperless-ngx** | OCR'd documents via REST API — tag-filtered sync, metadata headers |
-| **GitHub** | Public repos — releases, READMEs, issues, metadata |
-| **Gitea** | Self-hosted repos — READMEs, issues, releases, wikis, packages |
-| **Email (IMAP)** | Import emails as memories |
+| Category | Connector | What it syncs |
+|---|---|---|
+| **Documents** | Paperless-ngx | OCR'd documents via REST API |
+| | Microsoft Excel | Spreadsheets as markdown tables (openpyxl) |
+| | Google Drive | Docs, Sheets, Slides via service account |
+| **Development** | GitHub | Repos, releases, READMEs, issues |
+| | Gitea | Self-hosted repos, wikis, packages |
+| **Knowledge** | Obsidian Vault | Markdown notes with frontmatter |
+| | Bookmarks | Web pages fetched and indexed |
+| | RSS / Atom Feeds | Feed articles (no external deps) |
+| | Notion | Pages and databases via API |
+| | KeePass | Notes, titles, URLs only (never passwords) |
+| | Bitwarden | Secure Notes only (never logins) |
+| **Communication** | Email (IMAP) | Emails from any IMAP server |
+| | Telegram | Bot messages via Bot API |
+| | Microsoft Teams | Channel messages via Graph API |
+| **Infrastructure** | Kubernetes | Deployments, services, configmaps (never secrets) |
+| | Dockge | Docker Compose stacks (env values redacted) |
+| **Smart Home** | Home Assistant | Automations, scenes, entities |
+| **Local** | Folder Mapping | Directories with extension filter, PDF extraction |
+
+Each connector tracks **sync history** (last 20 runs) and exposes a **health dashboard** (`GET /api/connectors/health`).
 
 ### Import
 
@@ -149,6 +164,18 @@ profiles/{name}/
 - Export/import as ZIP archive
 - Rename, delete, duplicate from Settings
 
+### Context Assembler
+
+The Assembler optimizes your memories for AI consumption within a token budget:
+
+| Feature | Description |
+|---|---|
+| **Templates** | Save reusable filter + budget combos (tag filter, key prefix, token budget) |
+| **Auto-Suggest** | Analyzes memory clusters and proposes templates automatically |
+| **Compression** | 6 compressors: bullet extract, code compact, YAML struct, Mermaid, table, dedup |
+| **Weight-Based Priority** | Blocks ranked by usage history and feedback scores |
+| **MCP Integration** | `assemble_template` and `suggest_templates` tools for programmatic use |
+
 ### More Features
 
 | Feature | Description |
@@ -158,7 +185,8 @@ profiles/{name}/
 | **Secrets Scanner** | Detects API keys, passwords, tokens, private keys (OWASP patterns) |
 | **Live Activity** | Real-time SSE event stream with color-coded category badges |
 | **Dark Mode** | System preference detection + manual toggle |
-| **Context Preview** | Token budget assembler with auto-compression preview |
+| **DOMPurify** | XSS protection for Markdown rendering |
+| **Security Headers** | X-Content-Type-Options, X-Frame-Options, Referrer-Policy |
 | **Settings Page** | MCP control, DB maintenance, import/export hub, scheduler |
 | **Skeleton Loading** | Shimmer animations across all loading states |
 | **Responsive** | Breakpoints for desktop, tablet, and mobile |
@@ -171,18 +199,82 @@ Context Pilot includes a built-in MCP Server (Model Context Protocol) that lets 
 
 ```
 Claude Code ──→ MCP Server (SSE, Port 8400)
+                   ├── memory_set / get / delete / search / list
+                   ├── assemble_template / list_templates / suggest_templates
                    ├── get_skill_context    → relevance scoring + compression
-                   ├── memory_set / get     → read and write memories
-                   ├── memory_search        → full-text search
-                   ├── memory_delete        → remove memories
-                   └── register_skill       → skill registration + heartbeat
+                   ├── register_skill / heartbeat / list_registered_skills
+                   ├── assemble_context / list_blocks
+                   └── submit_feedback / get_block_weight
 ```
+
+**23 MCP Tools** covering: memory CRUD, template assembly, auto-suggest, skill registry, context assembly, and feedback.
+
+**Profile-aware:** The MCP server follows profile switches in real-time — no restart needed.
 
 **How it works:**
 1. Start Context Pilot → MCP Server starts on port 8400
 2. Auto-registers in `~/.claude.json`
 3. Claude Code can now read/write your memories
 4. Stop app → auto-deregistration
+
+---
+
+## Claude Code Plugin
+
+The **context-pilot plugin** adds deep integration with Claude Code — auto-profile detection, slash commands, and a skill file that teaches Claude how to use ContextPilot optimally.
+
+### Installation
+
+```bash
+# From GitHub
+claude plugins marketplace add https://github.com/applehell/context-pilot-plugin.git
+claude plugins install context-pilot
+```
+
+Or clone directly:
+
+```bash
+git clone https://github.com/applehell/context-pilot-plugin.git \
+  ~/.claude/plugins/cache/context-pilot/1.0.0
+```
+
+### What It Does
+
+| Component | Description |
+|---|---|
+| **SessionStart Hook** | Auto-detects the right profile based on your working directory |
+| **`/context-pilot`** | Dashboard, template assembly, search, profile switch, suggest, status |
+| **`/context-pilot-learn`** | Quick-save a memory from your session |
+| **Skill File** | Teaches Claude all 23 MCP tools, best practices, and when to use what |
+| **MCP Config** | Auto-registers the ContextPilot MCP server |
+
+### Commands
+
+```bash
+/context-pilot                    # Show dashboard (profile, memories, templates)
+/context-pilot bugfix-context     # Assemble the "bugfix-context" template
+/context-pilot search docker      # Search memories for "docker"
+/context-pilot profile smarthome  # Switch to smarthome profile
+/context-pilot suggest            # Auto-suggest new templates
+/context-pilot status             # Show connector health
+
+/context-pilot-learn infra/nginx Reverse proxy config for port 443 || infra,nginx
+```
+
+### Profile Auto-Detection
+
+| Working Directory Contains | Profile |
+|---|---|
+| `contextpilot` or `context-pilot` | `software-development` |
+| `homeassistant` or `home-assistant` | `smarthome` |
+| *(default)* | Keep current profile |
+
+### Configuration
+
+```bash
+export CONTEXTPILOT_URL=http://your-server:8080        # Web UI
+export CONTEXTPILOT_MCP_URL=http://your-server:8400/sse  # MCP Server
+```
 
 ---
 
@@ -220,19 +312,27 @@ Browser ──→ Web UI (FastAPI, Port 8080)
                ├── Dashboard        Stats, Import, Live Activity SSE
                ├── Memories         CRUD, Search, Editor, Tags, TTL
                ├── Knowledge Graph  Interactive vis.js network
-               ├── Sources          Folder Mapping, Connectors
+               ├── Sources          Connector Store (17), Folder Mapping, Webhooks
                ├── Secrets          Scanner, Redacted View
-               ├── Settings         MCP, DB, Import/Export, Scheduler
-               └── Assembler        Token Budget, Compress Preview
+               ├── Settings         MCP, DB, Import/Export, Scheduler, Profiles
+               └── Assembler        Templates, Auto-Suggest, Compression
 
 Claude Code ──→ MCP Server (SSE, Port 8400)
-                   ├── get_skill_context
-                   ├── memory_set / get / delete / search
-                   └── register_skill / heartbeat
+                   ├── memory_set / get / delete / search / list
+                   ├── assemble_template / list_templates / suggest_templates
+                   ├── get_skill_context / register_skill / heartbeat
+                   └── assemble_context / submit_feedback / get_block_weight
 
-Connectors ──→ GitHub, Gitea, Paperless-ngx, Email (IMAP)
+            ──→ Plugin (context-pilot)
+                   ├── SessionStart hook (auto-profile detection)
+                   ├── /context-pilot command
+                   └── Skill file (best practices + tool guidance)
 
-Storage ──→ SQLite (WAL mode + FTS5)
+Connectors ──→ 17 sources (GitHub, Gitea, Paperless, Obsidian, Email,
+               Notion, Teams, Telegram, RSS, Excel, Google Drive,
+               KeePass, Bitwarden, Kubernetes, Dockge, Bookmarks, HA)
+
+Storage ──→ SQLite (WAL mode + FTS5, Schema v12)
 ```
 
 ### Data Paths
@@ -282,17 +382,36 @@ Storage ──→ SQLite (WAL mode + FTS5)
 </details>
 
 <details>
-<summary><strong>Knowledge Sources</strong></summary>
+<summary><strong>Connectors</strong></summary>
 
 | Endpoint | Method | Description |
 |---|---|---|
+| `/api/connectors` | GET | List all connectors with status |
+| `/api/connectors/{name}` | GET | Connector details + schema |
+| `/api/connectors/{name}/setup` | POST | Configure connector |
+| `/api/connectors/{name}/test` | POST | Test connection |
+| `/api/connectors/{name}/sync` | POST | Sync data |
+| `/api/connectors/{name}/enable` | POST | Enable/disable |
+| `/api/connectors/{name}/history` | GET | Sync history (last 20) |
+| `/api/connectors/health` | GET | Health dashboard for all connectors |
 | `/api/folders` | GET/POST | List/add folder sources |
 | `/api/folders/{name}` | PUT/DELETE | Update/remove folder source |
 | `/api/folders/{name}/scan` | POST | Scan single folder |
-| `/api/folders/scan-all` | POST | Scan all enabled folders |
-| `/api/paperless` | GET/PUT/DELETE | Paperless-ngx config |
-| `/api/paperless/setup` | POST | Configure + test connection |
-| `/api/paperless/sync` | POST | Sync documents |
+
+</details>
+
+<details>
+<summary><strong>Templates & Assembly</strong></summary>
+
+| Endpoint | Method | Description |
+|---|---|---|
+| `/api/templates` | GET/POST | List/create templates |
+| `/api/templates/{name}` | DELETE | Delete template |
+| `/api/templates/{name}/assemble` | POST | Assemble with compression + weighting |
+| `/api/templates/suggest` | GET | Auto-suggest templates from memory clusters |
+| `/api/assemble` | POST | Manual block assembly |
+| `/api/estimate` | POST | Token estimation |
+| `/api/test-compress` | POST | Test compressor |
 
 </details>
 
@@ -323,17 +442,13 @@ Storage ──→ SQLite (WAL mode + FTS5)
 </details>
 
 <details>
-<summary><strong>Import & Assembly</strong></summary>
+<summary><strong>Import</strong></summary>
 
 | Endpoint | Method | Description |
 |---|---|---|
 | `/api/import/claude-md` | POST | Upload CLAUDE.md |
 | `/api/import/copilot-md` | POST | Upload Copilot.md |
 | `/api/import/sqlite` | POST | Upload SQLite DB |
-| `/api/preview-context` | POST | Assembly preview |
-| `/api/test-compress` | POST | Test compressor |
-| `/api/estimate` | POST | Token estimation |
-| `/api/assemble` | POST | Block assembly |
 
 </details>
 
@@ -352,10 +467,17 @@ src/
     secrets.py                 Secrets detector (OWASP patterns)
     token_budget.py            tiktoken wrapper
     weight_adjuster.py         Usage-based weight adjustment
-  connectors/                  External service connectors
-    github.py                  GitHub REST API client
-    gitea.py                   Gitea REST API client
-    paperless.py               Paperless-ngx REST API client
+  connectors/                  17 external service connectors
+    github.py, gitea.py        Development sources
+    paperless.py, excel.py     Document sources
+    gdrive.py                  Google Drive (service account JWT)
+    obsidian.py, notion.py     Knowledge sources
+    rss.py, bookmarks.py       Web sources
+    keepass.py, bitwarden.py   Secure notes (never passwords)
+    email_imap.py, telegram.py Communication sources
+    teams.py                   Microsoft Teams (Graph API)
+    kubernetes.py, dockge.py   Infrastructure sources
+    homeassistant.py           Smart Home source
   storage/                     SQLite persistence
     db.py                      DB engine + migrations (v1-v12)
     memory.py                  MemoryStore (CRUD + FTS5)
@@ -396,7 +518,9 @@ python -m src.web --reload    # Hot-reload
 | **Database** | SQLite (WAL mode, FTS5) |
 | **Realtime** | Server-Sent Events (SSE) |
 | **AI Integration** | MCP Server (FastMCP), tiktoken |
-| **Deployment** | Docker (arm64 + amd64) |
+| **Connectors** | requests, openpyxl, PyJWT, pykeepass, PyYAML |
+| **Security** | DOMPurify, Security Headers, non-root Docker |
+| **Deployment** | Docker (arm64 + amd64), 697+ tests |
 
 ---
 
