@@ -191,13 +191,14 @@ def unregister_skill(name: str) -> Dict[str, Any]:
 
 
 @mcp.tool()
-def list_registered_skills() -> List[Dict[str, Any]]:
+def list_registered_skills() -> Dict[str, Any]:
     """List all currently registered external skills.
 
     Returns a list of skill registrations with name, description,
     context_hints, registration time, and usage stats.
     """
-    return [s.to_dict() for s in _registry.list_all()]
+    skills = [s.to_dict() for s in _registry.list_all()]
+    return {"skills": skills, "count": len(skills)}
 
 
 @mcp.tool()
@@ -315,7 +316,7 @@ def get_skill_context(
 # ══════════════════════════════════════════════════════════════════════
 
 @mcp.tool()
-def memory_list(tag: str = "") -> List[Dict[str, Any]]:
+def memory_list(tag: str = "") -> Dict[str, Any]:
     """List all memories, optionally filtered by tag.
 
     Args:
@@ -326,15 +327,16 @@ def memory_list(tag: str = "") -> List[Dict[str, Any]]:
         memories = store.search("", tags=[tag])
     else:
         memories = store.list()
-    return [
+    items = [
         {
             "key": m.key,
             "value": m.value[:200],
             "tags": m.tags,
-            "token_count": len(m.value.split()) * 2,  # rough estimate
+            "token_count": len(m.value.split()) * 2,
         }
         for m in memories
     ]
+    return {"memories": items, "count": len(items)}
 
 
 @mcp.tool()
@@ -396,7 +398,7 @@ def memory_delete(key: str) -> Dict[str, Any]:
 
 
 @mcp.tool()
-def memory_search(query: str, tags: List[str] = []) -> List[Dict[str, Any]]:
+def memory_search(query: str, tags: List[str] = []) -> Dict[str, Any]:
     """Search memories by text query and/or tags.
 
     Args:
@@ -407,10 +409,11 @@ def memory_search(query: str, tags: List[str] = []) -> List[Dict[str, Any]]:
     results = store.search(query, tags=tags or None)
     tag_info = f" tags=[{', '.join(tags)}]" if tags else ""
     _get_activity_log().record("searched", query or "*", f"{len(results)} results{tag_info}")
-    return [
+    items = [
         {"key": m.key, "value": m.value[:200], "tags": m.tags}
         for m in results
     ]
+    return {"results": items, "count": len(items)}
 
 
 # ══════════════════════════════════════════════════════════════════════
@@ -455,10 +458,10 @@ def assemble_context(budget: int, blocks: List[Dict[str, Any]]) -> Dict[str, Any
 
 
 @mcp.tool()
-def list_blocks(blocks: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+def list_blocks(blocks: List[Dict[str, Any]]) -> Dict[str, Any]:
     """Return a summary of the provided blocks including token counts."""
     block_objs = _dicts_to_blocks(blocks)
-    return [
+    items = [
         {
             "index": i,
             "content_preview": b.content[:80],
@@ -468,6 +471,7 @@ def list_blocks(blocks: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
         }
         for i, b in enumerate(block_objs)
     ]
+    return {"blocks": items, "count": len(items)}
 
 
 @mcp.tool()
@@ -482,7 +486,7 @@ def submit_feedback(assembly_id: str, block_content: str, helpful: bool) -> Dict
 
 
 @mcp.tool()
-def list_templates() -> List[Dict[str, Any]]:
+def list_templates() -> Dict[str, Any]:
     """List all context templates in the active profile.
 
     Returns templates with name, description, tag_filter, key_filter, and budget.
@@ -491,17 +495,18 @@ def list_templates() -> List[Dict[str, Any]]:
     from src.storage.templates import TemplateStore
     try:
         ts = TemplateStore(_get_db())
-        return [
+        items = [
             {"name": t.name, "description": t.description, "tag_filter": t.tag_filter,
              "key_filter": t.key_filter, "budget": t.budget}
             for t in ts.list()
         ]
     except sqlite3.OperationalError:
-        return []
+        items = []
+    return {"templates": items, "count": len(items)}
 
 
 @mcp.tool()
-def suggest_templates() -> List[Dict[str, Any]]:
+def suggest_templates() -> Dict[str, Any]:
     """Suggest new context templates based on memory tag and key-prefix clusters.
 
     Analyzes the active profile's memories and suggests templates that don't exist yet.
@@ -575,7 +580,8 @@ def suggest_templates() -> List[Dict[str, Any]]:
         })
 
     suggestions.sort(key=lambda s: s["memory_count"], reverse=True)
-    return suggestions[:12]
+    items = suggestions[:12]
+    return {"suggestions": items, "count": len(items)}
 
 
 @mcp.tool()
