@@ -215,9 +215,10 @@ def _dir_key(data_dir: Optional[Path] = None) -> str:
 
 def _get_tfidf() -> TFIDFEngine:
     key = _dir_key()
-    if key not in _tfidf_cache:
-        _tfidf_cache[key] = TFIDFEngine()
-    return _tfidf_cache[key]
+    with _lock:
+        if key not in _tfidf_cache:
+            _tfidf_cache[key] = TFIDFEngine()
+        return _tfidf_cache[key]
 
 
 def set_data_dir(data_dir: Path) -> None:

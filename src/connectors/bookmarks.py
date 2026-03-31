@@ -24,27 +24,27 @@ class _TextExtractor(HTMLParser):
         self.text = []
         self.title = ""
         self._in_title = False
-        self._skip = False
+        self._skip_depth: int = 0
         self._skip_tags = {"script", "style", "noscript", "nav", "footer", "header"}
 
     def handle_starttag(self, tag, attrs):
         if tag == "title":
             self._in_title = True
         if tag in self._skip_tags:
-            self._skip = True
+            self._skip_depth += 1
 
     def handle_endtag(self, tag):
         if tag == "title":
             self._in_title = False
         if tag in self._skip_tags:
-            self._skip = False
+            self._skip_depth = max(0, self._skip_depth - 1)
         if tag in ("p", "div", "br", "li", "h1", "h2", "h3", "h4", "h5", "h6", "tr"):
             self.text.append("\n")
 
     def handle_data(self, data):
         if self._in_title:
             self.title += data
-        if not self._skip:
+        if self._skip_depth == 0:
             self.text.append(data)
 
     def get_text(self) -> str:
@@ -185,5 +185,5 @@ class BookmarkConnector(ConnectorPlugin):
                 store.delete(m.key)
                 result.removed += 1
 
-        self._update_sync_stats(len(synced_keys))
+        self._update_sync_stats(len(synced_keys), result)
         return result

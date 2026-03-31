@@ -180,9 +180,12 @@ class TestMCPServerProfile:
         monkeypatch.setattr(mcp_mod, "_activity_log", None)
         monkeypatch.setattr(mcp_mod, "_db_path", ProfileManager().active_db_path)
 
-        results = mcp_mod.memory_search(query="Buero")
-        assert len(results) >= 1
-        assert any(r["key"] == "ha/test-automation" for r in results)
+        result = mcp_mod.memory_search(query="Buero")
+        assert isinstance(result, dict)
+        assert "results" in result
+        assert "count" in result
+        assert result["count"] >= 1
+        assert any(r["key"] == "ha/test-automation" for r in result["results"])
 
     def test_mcp_memory_list_uses_active_profile(self, profile_env, monkeypatch):
         import src.interfaces.mcp_server as mcp_mod
@@ -192,9 +195,12 @@ class TestMCPServerProfile:
         monkeypatch.setattr(mcp_mod, "_activity_log", None)
         monkeypatch.setattr(mcp_mod, "_db_path", ProfileManager().active_db_path)
 
-        results = mcp_mod.memory_list()
-        assert len(results) == 3
-        keys = [r["key"] for r in results]
+        result = mcp_mod.memory_list()
+        assert isinstance(result, dict)
+        assert "memories" in result
+        assert "count" in result
+        assert result["count"] == 3
+        keys = [r["key"] for r in result["memories"]]
         assert "default/only" not in keys
 
     def test_mcp_does_not_use_default_db_when_profile_active(self, profile_env, monkeypatch):

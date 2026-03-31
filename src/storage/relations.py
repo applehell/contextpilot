@@ -1,6 +1,7 @@
 """Memory relations — manual and auto-detected links between memories."""
 from __future__ import annotations
 
+import sqlite3
 import time
 from dataclasses import dataclass
 from typing import List
@@ -31,7 +32,7 @@ class RelationStore:
                 (source_key, target_key, relation_type, time.time()),
             )
             self._db.conn.commit()
-        except Exception:
+        except sqlite3.IntegrityError:
             raise ValueError(f"Relation already exists: {source_key} -> {target_key} ({relation_type})")
         row = self._db.conn.execute(
             "SELECT id, source_key, target_key, relation_type, created_at FROM memory_relations WHERE source_key = ? AND target_key = ? AND relation_type = ?",

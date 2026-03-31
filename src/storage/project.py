@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import sqlite3
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -72,7 +73,7 @@ class ProjectStore:
                 (meta.name, meta.description, meta.created_at, meta.last_used),
             )
             self._db.conn.commit()
-        except Exception:
+        except sqlite3.IntegrityError:
             self._db.conn.rollback()
             existing = self._db.conn.execute(
                 "SELECT 1 FROM projects WHERE name = ?", (meta.name,)

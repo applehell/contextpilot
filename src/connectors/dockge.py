@@ -127,7 +127,7 @@ class DockgeConnector(ConnectorPlugin):
                 store.delete(m.key)
                 result.removed += 1
 
-        self._update_sync_stats(len(synced_keys))
+        self._update_sync_stats(len(synced_keys), result)
         return result
 
     def _find_stacks(self, stacks_dir: Path) -> List[tuple]:
@@ -204,12 +204,6 @@ class DockgeConnector(ConnectorPlugin):
                 files = env_file if isinstance(env_file, list) else [env_file]
                 parts.append(f"Env files: {', '.join(str(f) for f in files)}")
 
-            if env_data:
-                parts.append("Env (.env file):")
-                for k, v in env_data.items():
-                    val = v if include_env else "***"
-                    parts.append(f"  {k}={val}")
-
             restart = svc_cfg.get("restart", "")
             if restart:
                 parts.append(f"Restart: {restart}")
@@ -221,6 +215,13 @@ class DockgeConnector(ConnectorPlugin):
                 elif isinstance(depends, dict):
                     parts.append(f"Depends on: {', '.join(depends.keys())}")
 
+            parts.append("")
+
+        if env_data:
+            parts.append("## Environment (.env file)")
+            for k, v in env_data.items():
+                val = v if include_env else "***"
+                parts.append(f"  {k}={val}")
             parts.append("")
 
         top_networks = compose.get("networks")

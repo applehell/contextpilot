@@ -51,7 +51,7 @@ class WeightAdjuster:
         median_usage = all_counts[mid] if all_counts else 1
 
         import math
-        usage_signal = math.log2(usage_count + 1) / math.log2(median_usage + 2)
+        usage_signal = math.log2(usage_count + 1) / math.log2(max(median_usage, 1) + 1)
         usage_signal = max(0.2, min(3.0, usage_signal))
 
         feedback_score = self._store.get_feedback_score(bh)
@@ -101,7 +101,7 @@ class WeightAdjuster:
             mid = len(all_counts) // 2
             median_usage = all_counts[mid] if all_counts else 1
 
-            usage_signal = math.log2(usage_count + 1) / math.log2(median_usage + 2)
+            usage_signal = math.log2(usage_count + 1) / math.log2(max(median_usage, 1) + 1)
             usage_signal = max(0.2, min(3.0, usage_signal))
 
             feedback_score = self._store.get_feedback_score(bh)

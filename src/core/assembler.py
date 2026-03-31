@@ -97,7 +97,10 @@ class Assembler:
             tokens_for_block = budget - other_tokens
             working[idx] = self._truncate(working[idx], tokens_for_block)
             if total() <= budget:
-                return self._sorted(working)
+                break
+
+        # Remove blocks that were truncated to empty content
+        working = [b for b in working if b.content]
 
         return self._sorted(working)
 

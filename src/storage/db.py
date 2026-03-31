@@ -264,6 +264,7 @@ class Database:
             return 0
 
     def _set_version(self, version: int) -> None:
+        version = int(version)
         self._conn.execute(f"PRAGMA user_version = {version}")
 
     def _migrate(self) -> None:

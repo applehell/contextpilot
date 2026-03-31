@@ -79,8 +79,6 @@ class _BitwardenAPI:
         for item in data.get("ciphers", []):
             if item.get("type") != SECURE_NOTE_TYPE:
                 continue
-            if item.get("type") in BLOCKED_TYPES:
-                continue
             fid = item.get("folderId")
             if allowed_folder_ids is not None:
                 if fid not in allowed_folder_ids:
@@ -172,11 +170,6 @@ class BitwardenConnector(ConnectorPlugin):
             return result
 
         for item in notes:
-            if item.get("type") != SECURE_NOTE_TYPE:
-                continue
-            if item.get("type") in BLOCKED_TYPES:
-                continue
-
             name = item.get("name", "Untitled")
             folder_id = item.get("folderId")
             folder_name = folder_map.get(folder_id, "No Folder") if folder_id else "No Folder"
@@ -205,7 +198,7 @@ class BitwardenConnector(ConnectorPlugin):
                 store.delete(m.key)
                 result.removed += 1
 
-        self._update_sync_stats(len(synced_keys))
+        self._update_sync_stats(len(synced_keys), result)
         return result
 
     def _upsert(self, store, key, content, tags, folder_name, result):

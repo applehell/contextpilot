@@ -55,7 +55,8 @@ class TestAssembleContext:
         assert result["blocks"][0]["priority"] == "medium"
 
     def test_high_priority_block_retained(self):
-        result = assemble_context(budget=5, blocks=SAMPLE_BLOCKS)
+        # With a reasonable budget, high-priority blocks are kept over others
+        result = assemble_context(budget=15, blocks=SAMPLE_BLOCKS)
         priorities = [b["priority"] for b in result["blocks"]]
         assert "high" in priorities
 
@@ -68,38 +69,44 @@ class TestAssembleContext:
 class TestListBlocks:
     def test_basic_list(self):
         result = list_blocks(SAMPLE_BLOCKS)
-        assert len(result) == 3
+        assert isinstance(result, dict)
+        assert "blocks" in result
+        assert "count" in result
+        assert result["count"] == 3
+        assert len(result["blocks"]) == 3
 
     def test_indices(self):
         result = list_blocks(SAMPLE_BLOCKS)
-        for i, item in enumerate(result):
+        for i, item in enumerate(result["blocks"]):
             assert item["index"] == i
 
     def test_token_counts(self):
         result = list_blocks(SAMPLE_BLOCKS)
-        for item in result:
+        for item in result["blocks"]:
             assert "token_count" in item
             assert item["token_count"] > 0
 
     def test_content_preview(self):
         result = list_blocks(SAMPLE_BLOCKS)
-        for item in result:
+        for item in result["blocks"]:
             assert "content_preview" in item
             assert len(item["content_preview"]) <= 80
 
     def test_priorities(self):
         result = list_blocks(SAMPLE_BLOCKS)
-        assert result[0]["priority"] == "high"
-        assert result[1]["priority"] == "medium"
-        assert result[2]["priority"] == "low"
+        blocks = result["blocks"]
+        assert blocks[0]["priority"] == "high"
+        assert blocks[1]["priority"] == "medium"
+        assert blocks[2]["priority"] == "low"
 
     def test_empty_list(self):
         result = list_blocks([])
-        assert result == []
+        assert result["blocks"] == []
+        assert result["count"] == 0
 
     def test_default_priority(self):
         result = list_blocks([{"content": "plain content"}])
-        assert result[0]["priority"] == "medium"
+        assert result["blocks"][0]["priority"] == "medium"
 
 
 class TestSubmitFeedback:
@@ -139,9 +146,13 @@ class TestGetBlockWeight:
 
 
 class TestListTemplates:
-    def test_returns_list(self):
+    def test_returns_envelope(self):
         result = list_templates()
-        assert isinstance(result, list)
+        assert isinstance(result, dict)
+        assert "templates" in result
+        assert "count" in result
+        assert isinstance(result["templates"], list)
+        assert result["count"] == len(result["templates"])
 
     def test_template_fields(self):
         from src.storage.templates import TemplateStore, ContextTemplate
@@ -150,7 +161,7 @@ class TestListTemplates:
         ts.save(ContextTemplate(name="_test_tpl", description="Test", tag_filter=["t"], budget=100))
         try:
             result = list_templates()
-            tpl = next(t for t in result if t["name"] == "_test_tpl")
+            tpl = next(t for t in result["templates"] if t["name"] == "_test_tpl")
             assert tpl["description"] == "Test"
             assert tpl["tag_filter"] == ["t"]
             assert tpl["budget"] == 100
@@ -188,15 +199,20 @@ class TestAssembleTemplate:
 
 
 class TestSuggestTemplates:
-    def test_empty_returns_empty(self):
+    def test_empty_returns_envelope(self):
         result = suggest_templates()
-        assert isinstance(result, list)
+        assert isinstance(result, dict)
+        assert "suggestions" in result
+        assert "count" in result
+        assert isinstance(result["suggestions"], list)
+        assert result["count"] == len(result["suggestions"])
 
     def test_suggests_by_prefix_or_tag(self):
         result = suggest_templates()
-        if not result:
+        suggestions = result["suggestions"]
+        if not suggestions:
             return
-        for s in result:
+        for s in suggestions:
             assert "name" in s
             assert "reason" in s
             assert s["reason"] in ("key_prefix", "tag_cluster", "all")
@@ -264,15 +280,20 @@ class TestInputValidation:
 
     def test_memory_search_special_chars(self):
         result = memory_search(query="test* AND (foo)")
-        assert isinstance(result, list)
+        assert isinstance(result, dict)
+        assert "results" in result
+        assert "count" in result
+        assert isinstance(result["results"], list)
 
     def test_memory_search_empty(self):
         result = memory_search(query="")
-        assert isinstance(result, list)
+        assert isinstance(result, dict)
+        assert isinstance(result["results"], list)
 
     def test_memory_search_quotes(self):
         result = memory_search(query='"hello world"')
-        assert isinstance(result, list)
+        assert isinstance(result, dict)
+        assert isinstance(result["results"], list)
 
     # -- register_skill validation --
 
@@ -284,11 +305,15 @@ class TestInputValidation:
 
     def test_list_templates_empty_db(self):
         result = list_templates()
-        assert isinstance(result, list)
+        assert isinstance(result, dict)
+        assert "templates" in result
+        assert "count" in result
 
     def test_suggest_templates_empty(self):
         result = suggest_templates()
-        assert isinstance(result, list)
+        assert isinstance(result, dict)
+        assert "suggestions" in result
+        assert "count" in result
 
     def test_assemble_template_nonexistent(self):
         result = assemble_template(name="xyz_nonexistent")

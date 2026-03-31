@@ -203,7 +203,9 @@ class ConnectorPlugin(ABC):
         self._config["_sync_history"] = history[:20]
         self._save()
 
-    def _update_sync_stats(self, count: int) -> None:
+    def _update_sync_stats(self, count: int, result: Optional[SyncResult] = None) -> None:
         self._config["_last_sync"] = time.time()
         self._config["_synced_count"] = count
         self._save()
+        if result is not None:
+            self._record_sync(result)

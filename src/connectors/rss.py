@@ -106,17 +106,17 @@ def _parse_atom_entries(root: ET.Element, max_items: int, include_content: bool)
     return feed_title, entries
 
 
+def _strip_ns(tag: str) -> str:
+    return tag.split("}")[-1] if "}" in tag else tag
+
+
 def _parse_feed(xml_text: str, max_items: int, include_content: bool) -> tuple:
     root = ET.fromstring(xml_text)
-    if root.tag == "rss":
+    tag = _strip_ns(root.tag)
+    if tag == "rss":
         return _parse_rss_items(root, max_items, include_content)
-    if root.tag == f"{_ATOM_NS}feed":
+    if tag == "feed":
         return _parse_atom_entries(root, max_items, include_content)
-    if root.tag == "feed":
-        return _parse_atom_entries(
-            ET.fromstring(xml_text.replace('xmlns=', 'xmlns:atom=')),
-            max_items, include_content,
-        ) if root.find("entry") is None else _parse_atom_entries(root, max_items, include_content)
     raise ValueError(f"Unknown feed format: <{root.tag}>")
 
 
@@ -277,5 +277,5 @@ class RSSConnector(ConnectorPlugin):
                 store.delete(m.key)
                 result.removed += 1
 
-        self._update_sync_stats(len(synced_keys))
+        self._update_sync_stats(len(synced_keys), result)
         return result

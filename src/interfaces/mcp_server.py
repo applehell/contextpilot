@@ -7,6 +7,7 @@ from typing import Any, Dict, List, Optional
 from mcp.server.fastmcp import FastMCP
 
 from src.core.assembler import Assembler
+from src.core.token_budget import TokenBudget
 import re
 
 from src.core.block import Block, Priority
@@ -21,6 +22,8 @@ from src.storage.memory import Memory, MemoryStore
 from src.storage.memory_activity import MemoryActivityLog
 from src.storage.profiles import ProfileManager
 from src.storage.usage import UsageStore, UsageRecord, FeedbackRecord, block_hash
+
+import threading
 
 from importlib.metadata import version as _pkg_version, PackageNotFoundError
 try:
@@ -44,6 +47,7 @@ _db: Optional[Database] = None
 _usage_store: Optional[UsageStore] = None
 _memory_store: Optional[MemoryStore] = None
 _activity_log: Optional[MemoryActivityLog] = None
+_db_lock = threading.Lock()
 
 # ── Shared skill registry (singleton, accessible from GUI) ────────────
 
@@ -53,18 +57,19 @@ _registry = SkillRegistry.instance()
 def _get_db() -> Database:
     global _db, _db_path, _usage_store, _memory_store, _activity_log
     current_path = ProfileManager().active_db_path
-    if _db is None or _db_path != current_path:
-        if _db is not None:
-            try:
-                _db.close()
-            except Exception:
-                pass
-        _db_path = current_path
-        _db = Database(_db_path)
-        _usage_store = None
-        _memory_store = None
-        _activity_log = None
-    return _db
+    with _db_lock:
+        if _db is None or _db_path != current_path:
+            if _db is not None:
+                try:
+                    _db.close()
+                except Exception:
+                    pass
+            _db_path = current_path
+            _db = Database(_db_path)
+            _usage_store = None
+            _memory_store = None
+            _activity_log = None
+        return _db
 
 
 def _get_usage_store() -> UsageStore:
@@ -332,7 +337,7 @@ def memory_list(tag: str = "") -> Dict[str, Any]:
             "key": m.key,
             "value": m.value[:200],
             "tags": m.tags,
-            "token_count": len(m.value.split()) * 2,
+            "token_count": TokenBudget.estimate(m.value),
         }
         for m in memories
     ]
@@ -520,9 +525,9 @@ def suggest_templates() -> Dict[str, Any]:
     try:
         memories = store.list()
     except Exception:
-        return []
+        return {"count": 0, "suggestions": []}
     if not memories:
-        return []
+        return {"count": 0, "suggestions": []}
 
     tag_counts: Dict[str, int] = {}
     prefix_counts: Dict[str, int] = {}
