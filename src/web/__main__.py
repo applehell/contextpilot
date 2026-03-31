@@ -17,13 +17,13 @@ _mcp_process = None
 def _start_mcp(port: int, host: str = "0.0.0.0") -> subprocess.Popen:
     proc = subprocess.Popen(
         [sys.executable, "-m", "src.interfaces.mcp_server",
-         "--transport", "sse", "--host", host, "--port", str(port)],
-        stdout=subprocess.PIPE,
-        stderr=subprocess.STDOUT,
+         "--transport", "streamable-http", "--host", host, "--port", str(port)],
+        stdout=sys.stdout,
+        stderr=sys.stderr,
     )
     # Register in Claude config
     from src.core.claude_config import register_mcp
-    register_mcp(port=port, transport="sse")
+    register_mcp(port=port, transport="streamable-http")
     return proc
 
 

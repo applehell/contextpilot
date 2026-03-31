@@ -28,7 +28,7 @@ try:
 except PackageNotFoundError:
     APP_VERSION = "dev"
 
-mcp = FastMCP("context-pilot")
+mcp = FastMCP("context-pilot", stateless_http=True)
 mcp._mcp_server.version = APP_VERSION
 
 _assembler = Assembler(compressors=[
@@ -153,7 +153,7 @@ def _block_to_dict(b: Block) -> Dict[str, Any]:
 def register_skill(
     name: str,
     description: str,
-    context_hints: List[str] = [],
+    context_hints: Optional[List[str]] = None,
 ) -> Dict[str, Any]:
     """Register an external skill/agent with Context Pilot.
 
@@ -170,7 +170,7 @@ def register_skill(
     """
     if not name or not name.strip():
         return {"error": "Skill name must not be empty."}
-    _registry.register(name, description, context_hints)
+    _registry.register(name, description, context_hints or [])
     return {
         "status": "registered",
         "skill_name": name,
@@ -221,7 +221,7 @@ def heartbeat(name: str) -> Dict[str, Any]:
 def get_skill_context(
     skill_name: str,
     token_budget: int = 4000,
-    blocks: List[Dict[str, Any]] = [],
+    blocks: Optional[List[Dict[str, Any]]] = None,
 ) -> Dict[str, Any]:
     """Get relevant context blocks for a registered skill.
 
@@ -356,7 +356,7 @@ def memory_get(key: str) -> Dict[str, Any]:
 
 
 @mcp.tool()
-def memory_set(key: str, value: str, tags: List[str] = []) -> Dict[str, Any]:
+def memory_set(key: str, value: str, tags: Optional[List[str]] = None) -> Dict[str, Any]:
     """Create or update a memory.
 
     Args:
@@ -398,7 +398,7 @@ def memory_delete(key: str) -> Dict[str, Any]:
 
 
 @mcp.tool()
-def memory_search(query: str, tags: List[str] = []) -> Dict[str, Any]:
+def memory_search(query: str, tags: Optional[List[str]] = None) -> Dict[str, Any]:
     """Search memories by text query and/or tags.
 
     Args:
