@@ -53,7 +53,64 @@ function init() {
 
     initTheme();
     initKeyboardShortcuts();
+    initMobileNav();
+    initCollapsibleHeader();
+    updateFabVisibility('dashboard');
     startup();
+}
+
+// ═══════════════════════════════════════════════════════════════
+// MOBILE NAVIGATION
+// ═══════════════════════════════════════════════════════════════
+
+function initMobileNav() {
+    const moreBtn = document.getElementById('mobile-more-btn');
+    const moreMenu = document.getElementById('mobile-more-menu');
+    if (!moreBtn || !moreMenu) return;
+
+    const hiddenTabs = document.querySelectorAll('nav#main-nav .tab[data-mobile-priority="0"]');
+    hiddenTabs.forEach(tab => {
+        const clone = tab.cloneNode(true);
+        clone.style.display = '';
+        clone.addEventListener('click', () => {
+            showTab(clone.dataset.tab, clone);
+            moreMenu.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+            clone.classList.add('active');
+            document.querySelectorAll('nav#main-nav .tab[data-tab]').forEach(t => t.classList.remove('active'));
+            moreBtn.classList.add('active');
+            moreMenu.classList.remove('active');
+        });
+        moreMenu.appendChild(clone);
+    });
+
+    moreBtn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        moreMenu.classList.toggle('active');
+    });
+
+    document.addEventListener('click', (e) => {
+        if (!moreMenu.contains(e.target) && e.target !== moreBtn) {
+            moreMenu.classList.remove('active');
+        }
+    });
+}
+
+function initCollapsibleHeader() {
+    const header = document.querySelector('header');
+    if (!header) return;
+    let lastScrollY = 0;
+    const threshold = 60;
+
+    const onScroll = () => {
+        const y = window.scrollY;
+        if (y > threshold && y > lastScrollY) {
+            header.classList.add('header-collapsed');
+        } else if (y < lastScrollY - 10 || y <= threshold) {
+            header.classList.remove('header-collapsed');
+        }
+        lastScrollY = y;
+    };
+    window.addEventListener('scroll', onScroll, { passive: true });
 }
 
 // ═══════════════════════════════════════════════════════════════
@@ -380,6 +437,15 @@ function showTab(name, clickedBtn) {
         });
     }
 
+    // Sync More menu active state on mobile
+    const _mm = document.getElementById('mobile-more-menu');
+    const _mb = document.getElementById('mobile-more-btn');
+    if (_mm && _mb) {
+        _mm.querySelectorAll('.tab').forEach(t => t.classList.toggle('active', t.dataset.tab === name));
+        _mb.classList.toggle('active', !!_mm.querySelector('.tab.active'));
+        _mm.classList.remove('active');
+    }
+
     const main = document.querySelector('main');
     if (name === 'graph') {
         main.style.maxWidth = 'none';
@@ -389,7 +455,7 @@ function showTab(name, clickedBtn) {
         main.style.padding = '';
     }
 
-    if (name === 'dashboard') loadDashboard();
+    if (name === 'dashboard') { resetEventBadge(); loadDashboard(); }
     if (name === 'memories') loadMemories();
     if (name === 'skills') loadSkills();
     if (name === 'graph') loadGraph();
@@ -397,6 +463,8 @@ function showTab(name, clickedBtn) {
     if (name === 'sources') { loadScheduler(); loadConnectors(); loadFolders(); loadWebhooks(); }
     if (name === 'assembler') loadTemplates();
     if (name === 'settings') loadSettings();
+
+    updateFabVisibility(name);
 }
 
 // ═══════════════════════════════════════════════════════════════
@@ -415,6 +483,7 @@ function connectSSE() {
     eventSource.onopen = () => {
         const el = document.getElementById('sse-status');
         if (el) el.innerHTML = '<span class="sse-dot connected"></span>live';
+        setBotState('connected');
     };
 
     eventSource.onmessage = (e) => {
@@ -425,12 +494,15 @@ function connectSSE() {
             appendActivityItem(event);
             // Pulse the bot on non-api events
             if (event.category !== 'api') { botBusy(); setTimeout(botIdle, 600); }
+            // Increment event badge when not on dashboard
+            if (event.category !== 'api') incrementEventBadge();
         } catch (err) { console.error('SSE parse error:', err); }
     };
 
     eventSource.onerror = () => {
         const el = document.getElementById('sse-status');
         if (el) el.innerHTML = '<span class="sse-dot disconnected"></span>reconnecting...';
+        setBotState('error');
     };
 }
 
@@ -623,6 +695,7 @@ async function loadDashboardStats() {
         if (trashEl) { trashEl.textContent = d.trash_count; }
 
         // Top tags chart
+        if (d.top_tags && d.top_tags.length) updateTagColors(d.top_tags);
         const tagsEl = document.getElementById('dash-top-tags');
         if (tagsEl && d.top_tags.length) {
             const maxCount = d.top_tags[0].count;
@@ -927,19 +1000,13 @@ function renderMemories(data) {
         if (isNew) badge = '<span class="badge badge-new">NEW</span> ';
         else if (isModified) badge = '<span class="badge badge-upd">UPD</span> ';
 
-        let age = '';
         const ts = m.updated_at || m.created_at;
-        if (ts) {
-            const delta = now - ts;
-            if (delta < 3600) age = Math.floor(delta / 60) + 'm ago';
-            else if (delta < 86400) age = Math.floor(delta / 3600) + 'h ago';
-            else age = Math.floor(delta / 86400) + 'd ago';
-        }
+        const age = ts ? 'vor ' + relativeTime(ts) : '';
 
         const stateClass = isNew ? ' new' : isModified ? ' updated' : '';
         const cbHtml = bulkMode ? '<input type="checkbox" class="bulk-cb" data-key="' + escapeAttr(m.key) + '" onclick="event.stopPropagation()">' : '';
         const tagsHtml = (m.tags || []).length
-            ? m.tags.map(t => '<span class="tag" onclick="event.stopPropagation();clickTag(\'' + escapeAttr(t) + '\')">#' + escapeHtml(t) + '</span>').join(' ')
+            ? m.tags.map(t => '<span class="tag' + getTagColorClass(t) + '" onclick="event.stopPropagation();clickTag(\'' + escapeAttr(t) + '\')">#' + escapeHtml(t) + '</span>').join(' ')
             : '';
 
         const pinned = m.pinned || false;
@@ -1036,7 +1103,7 @@ async function toggleAccordion(headerEl) {
             const rendered = renderMarkdown(val);
 
             const tagsHtml = (m.tags || []).length
-                ? m.tags.map(t => '<span class="tag" onclick="event.stopPropagation();clickTag(\'' + escapeAttr(t) + '\')">#' + escapeHtml(t) + '</span>').join(' ')
+                ? m.tags.map(t => '<span class="tag' + getTagColorClass(t) + '" onclick="event.stopPropagation();clickTag(\'' + escapeAttr(t) + '\')">#' + escapeHtml(t) + '</span>').join(' ')
                 : '';
 
             let ttlHtml = '';
@@ -1291,6 +1358,18 @@ async function saveNewMemory() {
         }
     }
     destroyEditor();
+    closeModal();
+    // Optimistic UI: insert placeholder at top of list
+    const list = document.getElementById('memory-list');
+    let optimisticEl = null;
+    if (list) {
+        const tagsHtml = tags.map(t => `<span class="tag">#${escapeHtml(t)}</span>`).join(' ');
+        optimisticEl = document.createElement('div');
+        optimisticEl.className = 'memory-item inserting';
+        optimisticEl.dataset.optimisticKey = key;
+        optimisticEl.innerHTML = `<div class="main"><div class="key"><span class="badge badge-new">NEW</span> ${escapeHtml(key)}</div><div class="preview">${escapeHtml(value.substring(0, 150))}</div><div class="meta">${tagsHtml}</div></div>`;
+        list.prepend(optimisticEl);
+    }
     const tid = showToast('Creating memory', key);
     try {
         const res = await fetch('/api/memories', {
@@ -1300,20 +1379,53 @@ async function saveNewMemory() {
         });
         if (res.ok) {
             completeToast(tid, 'Created', false);
-            closeModal();
             loadMemories();
         } else {
             completeToast(tid, 'Create failed: ' + res.status, true);
+            if (optimisticEl) optimisticEl.remove();
         }
-    } catch (e) { completeToast(tid, 'Error: ' + e.message, true); }
+    } catch (e) {
+        completeToast(tid, 'Error: ' + e.message, true);
+        if (optimisticEl) optimisticEl.remove();
+    }
 }
 
 async function deleteMemory(key) {
     if (!confirm(`Delete "${key}"?`)) return;
+    // Optimistic UI: remove from list immediately
+    const list = document.getElementById('memory-list');
+    const items = list?.querySelectorAll('.memory-item');
+    let removedEl = null, removedSibling = null;
+    if (items) {
+        for (const item of items) {
+            if (item.querySelector('.key')?.textContent?.includes(key)) {
+                removedEl = item;
+                removedSibling = item.nextSibling;
+                item.classList.add('removing');
+                setTimeout(() => item.remove(), 300);
+                break;
+            }
+        }
+    }
     try {
-        await fetch(memoryUrl(key), {method: 'DELETE'});
-        loadMemories();
-    } catch (e) { console.error(e); }
+        const res = await fetch(memoryUrl(key), {method: 'DELETE'});
+        if (res.ok) {
+            notify('Memory deleted: ' + key, 'success');
+        } else {
+            // Rollback
+            if (removedEl && list) {
+                removedEl.classList.remove('removing');
+                list.insertBefore(removedEl, removedSibling);
+            }
+            notify('Delete failed: ' + res.status, 'error');
+        }
+    } catch (e) {
+        if (removedEl && list) {
+            removedEl.classList.remove('removing');
+            list.insertBefore(removedEl, removedSibling);
+        }
+        notify('Delete failed: ' + e.message, 'error');
+    }
 }
 
 async function searchMemories() {
@@ -1516,7 +1628,12 @@ async function exportMemories() {
         a.href = URL.createObjectURL(blob);
         a.download = `context-pilot-export${tag ? '-' + tag : ''}.json`;
         a.click();
-    } catch (e) { console.error(e); }
+        const count = Array.isArray(data) ? data.length : (data.memories?.length || '?');
+        notify(`Exported ${count} memories`, 'success');
+    } catch (e) {
+        notify('Export failed: ' + e.message, 'error');
+        console.error(e);
+    }
 }
 
 // ═══════════════════════════════════════════════════════════════
@@ -1861,12 +1978,15 @@ async function importFile(input, type) {
         const d = await res.json();
         if (d.status === 'imported') {
             statusEl.textContent = `${d.count} memories imported from ${d.filename}`;
+            notify(`${d.count} memories imported from ${d.filename}`, 'success', 5000);
             loadDashboard();
         } else {
             statusEl.textContent = d.message || 'Import failed';
+            notify(d.message || 'Import failed', 'error', 5000);
         }
     } catch (e) {
         statusEl.textContent = 'Error: ' + e.message;
+        notify('Import error: ' + e.message, 'error');
     }
     input.value = '';
 }
@@ -2032,6 +2152,7 @@ async function submitNewProfile() {
         if (res.ok) {
             const d = await res.json();
             closeModal();
+            notify(`Profile "${name}" created` + (d.imported > 0 ? `, ${d.imported} memories imported` : ''), 'success', 5000);
             loadProfiles();
             if (d.imported > 0) {
                 document.getElementById('import-status').textContent = `Profile "${name}" created, ${d.imported} memories imported.`;
@@ -2040,7 +2161,7 @@ async function submitNewProfile() {
             }
         } else {
             const d = await res.json();
-            alert(d.detail || 'Failed to create profile');
+            notify(d.detail || 'Failed to create profile', 'error');
         }
     } catch (e) { alert('Error: ' + e.message); }
 }
@@ -2072,8 +2193,8 @@ async function renameProfile(pid, currentName, currentDesc) {
         if (!newName) return;
         try {
             const res = await fetch(`/api/profiles/${encodeURIComponent(pid)}?new_name=${encodeURIComponent(newName)}&description=${encodeURIComponent(desc)}`, { method: 'PUT' });
-            if (res.ok) { closeModal(); loadProfiles(); }
-            else { const d = await res.json(); alert(d.detail || 'Error'); }
+            if (res.ok) { closeModal(); notify('Profile renamed', 'success'); loadProfiles(); }
+            else { const d = await res.json(); notify(d.detail || 'Rename failed', 'error'); }
         } catch (e) { console.error(e); }
     });
 }
@@ -2432,6 +2553,9 @@ const _connIcons = {
 
 async function loadConnectors() {
     const el = document.getElementById('connectors-list');
+    if (el && (!_allConnectors || _allConnectors.length === 0)) {
+        showSkeleton('connectors-list', {rows: 6, type: 'cards'});
+    }
     try {
         const res = await fetch('/api/connectors');
         _allConnectors = await res.json();
@@ -2509,8 +2633,13 @@ function renderConnectorCard(c) {
 }
 
 async function enableConnector(name, enabled) {
-    await fetch(`/api/connectors/${encodeURIComponent(name)}/enable?enabled=${enabled}`, {method: 'POST'});
-    loadConnectors();
+    try {
+        await fetch(`/api/connectors/${encodeURIComponent(name)}/enable?enabled=${enabled}`, {method: 'POST'});
+        notify(`Connector "${name}" ${enabled ? 'enabled' : 'disabled'}`, 'info');
+        loadConnectors();
+    } catch (e) {
+        notify('Failed: ' + e.message, 'error');
+    }
 }
 
 function showConnectorSetup(name) {
@@ -2633,8 +2762,12 @@ async function removeConnector(name) {
     const purge = confirm('Also delete all synced memories?');
     try {
         await fetch(`/api/connectors/${encodeURIComponent(name)}?purge=${purge}`, { method: 'DELETE' });
+        notify(`Connector "${name}" disconnected`, 'success');
         loadConnectors();
-    } catch (e) { console.error(e); }
+    } catch (e) {
+        notify('Disconnect failed: ' + e.message, 'error');
+        console.error(e);
+    }
 }
 
 // ═══════════════════════════════════════════════════════════════
@@ -3661,51 +3794,112 @@ async function deletePreset(name) {
 // GLOBAL SEARCH
 // ═══════════════════════════════════════════════════════════════
 
+let gsSelectedIndex = -1;
+let gsItems = [];
+
 function openGlobalSearch() {
     const overlay = document.getElementById('global-search-overlay');
     overlay.classList.add('active');
     const input = document.getElementById('global-search-input');
     input.value = '';
     input.focus();
-    document.getElementById('global-search-results').innerHTML = '';
+    gsSelectedIndex = -1;
+    gsItems = [];
+    document.getElementById('global-search-results').innerHTML =
+        '<div class="global-search-hint">Type to search memories, templates, connectors...</div>';
 
     overlay.addEventListener('click', e => {
         if (e.target === overlay) closeGlobalSearch();
     });
+
+    input.addEventListener('keydown', globalSearchKeyNav);
 }
 
 function closeGlobalSearch() {
+    const input = document.getElementById('global-search-input');
+    if (input) input.removeEventListener('keydown', globalSearchKeyNav);
     document.getElementById('global-search-overlay').classList.remove('active');
+    gsSelectedIndex = -1;
+    gsItems = [];
+}
+
+function globalSearchKeyNav(e) {
+    const el = document.getElementById('global-search-results');
+    const items = el.querySelectorAll('.global-search-item');
+    if (!items.length) return;
+
+    if (e.key === 'ArrowDown') {
+        e.preventDefault();
+        gsSelectedIndex = Math.min(gsSelectedIndex + 1, items.length - 1);
+        updateGsSelection(items);
+    } else if (e.key === 'ArrowUp') {
+        e.preventDefault();
+        gsSelectedIndex = Math.max(gsSelectedIndex - 1, 0);
+        updateGsSelection(items);
+    } else if (e.key === 'Enter' && gsSelectedIndex >= 0 && gsSelectedIndex < gsItems.length) {
+        e.preventDefault();
+        const item = gsItems[gsSelectedIndex];
+        globalSearchSelect(item.type, item.label);
+    }
+}
+
+function updateGsSelection(items) {
+    items.forEach((it, i) => {
+        it.classList.toggle('gs-selected', i === gsSelectedIndex);
+    });
+    if (items[gsSelectedIndex]) {
+        items[gsSelectedIndex].scrollIntoView({ block: 'nearest' });
+    }
 }
 
 async function globalSearch() {
     const q = document.getElementById('global-search-input').value.trim();
     const el = document.getElementById('global-search-results');
-    if (!q) { el.innerHTML = ''; return; }
+    if (!q) {
+        el.innerHTML = '<div class="global-search-hint">Type to search memories, templates, connectors...</div>';
+        gsItems = [];
+        gsSelectedIndex = -1;
+        return;
+    }
 
     clearTimeout(debounceTimers['globalSearch']);
     debounceTimers['globalSearch'] = setTimeout(async () => {
         try {
             const res = await fetch(`/api/global-search?q=${encodeURIComponent(q)}`);
             const d = await res.json();
-            let items = [];
-            d.memories.forEach(m => items.push({ type: 'memory', label: m.key, detail: m.preview }));
-            d.templates.forEach(t => items.push({ type: 'template', label: t.name, detail: t.description }));
-            d.connectors.forEach(c => items.push({ type: 'connector', label: c.display_name || c.name, detail: '' }));
-            d.folders.forEach(f => items.push({ type: 'folder', label: f.name, detail: f.path }));
 
-            if (items.length === 0) {
+            // Build grouped results
+            const groups = [
+                { key: 'Memories', items: (d.memories || []).map(m => ({ type: 'memory', label: m.key, detail: m.preview })) },
+                { key: 'Templates', items: (d.templates || []).map(t => ({ type: 'template', label: t.name, detail: t.description })) },
+                { key: 'Connectors', items: (d.connectors || []).map(c => ({ type: 'connector', label: c.display_name || c.name, detail: '' })) },
+                { key: 'Folders', items: (d.folders || []).map(f => ({ type: 'folder', label: f.name, detail: f.path })) },
+            ];
+
+            gsItems = [];
+            let html = '';
+            groups.forEach(g => {
+                if (!g.items.length) return;
+                html += `<div class="global-search-group-label">${g.key} (${g.items.length})</div>`;
+                g.items.forEach(item => {
+                    const idx = gsItems.length;
+                    gsItems.push(item);
+                    html += `<div class="global-search-item" data-gs-idx="${idx}" onclick="globalSearchSelect('${escapeAttr(item.type)}', '${escapeAttr(item.label)}')">
+                        <span class="global-search-type">${item.type}</span>
+                        <div style="flex:1;min-width:0;">
+                            <div style="font-weight:500;">${escapeHtml(item.label)}</div>
+                            ${item.detail ? '<div style="font-size:11px;color:var(--text-muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">' + escapeHtml(item.detail) + '</div>' : ''}
+                        </div>
+                    </div>`;
+                });
+            });
+
+            if (gsItems.length === 0) {
                 el.innerHTML = '<div style="padding:16px;text-align:center;color:var(--text-muted);">No results</div>';
-                return;
+            } else {
+                el.innerHTML = html;
             }
-
-            el.innerHTML = items.map(item => `<div class="global-search-item" onclick="globalSearchSelect('${escapeAttr(item.type)}', '${escapeAttr(item.label)}')">
-                <span class="global-search-type">${item.type}</span>
-                <div style="flex:1;min-width:0;">
-                    <div style="font-weight:500;">${escapeHtml(item.label)}</div>
-                    ${item.detail ? '<div style="font-size:11px;color:var(--text-muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">' + escapeHtml(item.detail) + '</div>' : ''}
-                </div>
-            </div>`).join('');
+            gsSelectedIndex = -1;
         } catch (e) { console.error(e); }
     }, 300);
 }
@@ -4056,19 +4250,102 @@ function completeToast(id, detail, isError) {
     }, isError ? 8000 : 4000);
 }
 
+// ═══════════════════════════════════════════════════════════════
+// NOTIFICATION TOASTS (simple type-based)
+// ═══════════════════════════════════════════════════════════════
+
+const _toastIcons = { success: '\u2713', error: '!', warning: '\u26A0', info: '\u2139' };
+
+function notify(message, type = 'info', duration = 3000) {
+    const container = document.getElementById('progress-toast');
+    if (!container) return;
+    const id = 'notify-' + (++toastCounter);
+    const icon = _toastIcons[type] || _toastIcons.info;
+    const html = `<div class="toast toast-${type}" id="${id}">
+        <span class="toast-icon">${icon}</span>
+        <span class="toast-message">${escapeHtml(message)}</span>
+        <button class="toast-close" onclick="this.closest('.toast').style.animation='toastOut 0.3s ease forwards';setTimeout(()=>document.getElementById('${id}')?.remove(),300)">&times;</button>
+    </div>`;
+    container.insertAdjacentHTML('beforeend', html);
+    if (duration > 0) {
+        setTimeout(() => {
+            const el = document.getElementById(id);
+            if (el) {
+                el.style.animation = 'toastOut 0.3s ease forwards';
+                setTimeout(() => el.remove(), 300);
+            }
+        }, duration);
+    }
+}
+
+// ═══════════════════════════════════════════════════════════════
+// BUTTON LOADING STATE
+// ═══════════════════════════════════════════════════════════════
+
+async function withLoading(btn, asyncFn) {
+    if (!btn || btn.classList.contains('btn-loading')) return;
+    btn.classList.add('btn-loading');
+    btn.disabled = true;
+    const spinner = document.getElementById('header-ops-spinner');
+    if (spinner) spinner.classList.add('active');
+    try {
+        return await asyncFn();
+    } finally {
+        btn.classList.remove('btn-loading');
+        btn.disabled = false;
+        if (spinner) spinner.classList.remove('active');
+    }
+}
+
+// ═══════════════════════════════════════════════════════════════
+// EVENT BADGE (counts SSE events since last dashboard view)
+// ═══════════════════════════════════════════════════════════════
+
+let _eventBadgeCount = 0;
+
+function incrementEventBadge() {
+    const activeTab = document.querySelector('.tab.active')?.dataset?.tab;
+    if (activeTab === 'dashboard') return;
+    _eventBadgeCount++;
+    const badge = document.getElementById('event-badge');
+    if (badge) {
+        badge.textContent = _eventBadgeCount > 99 ? '99+' : _eventBadgeCount;
+        badge.classList.remove('pulse');
+        void badge.offsetWidth;
+        badge.classList.add('pulse');
+    }
+}
+
+function resetEventBadge() {
+    _eventBadgeCount = 0;
+    const badge = document.getElementById('event-badge');
+    if (badge) badge.textContent = '';
+}
+
 // Bot animation
 let botTimer = null;
 function botBusy() {
     const bot = document.getElementById('header-bot');
-    if (bot) bot.classList.add('speaking');
+    if (bot) { bot.classList.add('speaking', 'busy'); }
+    const spinner = document.getElementById('header-ops-spinner');
+    if (spinner) spinner.classList.add('active');
     clearTimeout(botTimer);
 }
 function botIdle() {
     clearTimeout(botTimer);
     botTimer = setTimeout(() => {
         const bot = document.getElementById('header-bot');
-        if (bot) bot.classList.remove('speaking');
+        if (bot) { bot.classList.remove('speaking', 'busy'); }
+        const spinner = document.getElementById('header-ops-spinner');
+        if (spinner) spinner.classList.remove('active');
     }, 400);
+}
+
+function setBotState(state) {
+    const bot = document.getElementById('header-bot');
+    if (!bot) return;
+    bot.classList.remove('speaking', 'busy', 'error', 'connected');
+    if (state) bot.classList.add(state);
 }
 
 // Skeleton loading
@@ -4104,4 +4381,109 @@ function showSkeleton(elementId, opts = {}) {
 function contentLoaded(elementId) {
     const el = document.getElementById(elementId);
     if (el) el.classList.add('content-loaded');
+}
+
+// ═══════════════════════════════════════════════════════════════
+// FLOATING ACTION BUTTON (FAB)
+// ═══════════════════════════════════════════════════════════════
+
+function updateFabVisibility(tabName) {
+    const fab = document.getElementById('fab-container');
+    if (!fab) return;
+    const show = (tabName === 'dashboard' || tabName === 'memories');
+    fab.style.display = show ? 'flex' : 'none';
+    if (!show) fab.classList.remove('open');
+}
+
+function toggleFab() {
+    const fab = document.getElementById('fab-container');
+    if (fab) fab.classList.toggle('open');
+}
+
+function fabAction(action) {
+    const fab = document.getElementById('fab-container');
+    if (fab) fab.classList.remove('open');
+
+    if (action === 'memory') {
+        showTab('memories', null);
+        setTimeout(() => openNewMemoryModal(), 100);
+    } else if (action === 'import') {
+        showTab('dashboard', null);
+        setTimeout(() => {
+            const importPanel = document.querySelector('[data-import="claude-md"]');
+            if (importPanel) importPanel.closest('.panel')?.scrollIntoView({ behavior: 'smooth' });
+        }, 100);
+    } else if (action === 'search') {
+        openGlobalSearch();
+    }
+}
+
+// Close FAB when clicking outside
+document.addEventListener('click', e => {
+    const fab = document.getElementById('fab-container');
+    if (fab && fab.classList.contains('open') && !fab.contains(e.target)) {
+        fab.classList.remove('open');
+    }
+});
+
+// ═══════════════════════════════════════════════════════════════
+// OPERATION STATUS BAR
+// ═══════════════════════════════════════════════════════════════
+
+function showOperation(id, message) {
+    const bar = document.getElementById('ops-bar');
+    if (!bar) return;
+    let item = document.getElementById('ops-' + id);
+    if (item) {
+        item.querySelector('.ops-text').textContent = message;
+        return;
+    }
+    const html = `<div class="ops-item" id="ops-${escapeAttr(id)}">
+        <div class="ops-spinner"></div>
+        <span class="ops-text">${escapeHtml(message)}</span>
+    </div>`;
+    bar.insertAdjacentHTML('beforeend', html);
+}
+
+function hideOperation(id) {
+    const item = document.getElementById('ops-' + id);
+    if (!item) return;
+    item.style.animation = 'opsSlideOut 0.25s ease forwards';
+    setTimeout(() => item.remove(), 250);
+}
+
+// ═══════════════════════════════════════════════════════════════
+// TAG COLOR CODING
+// ═══════════════════════════════════════════════════════════════
+
+let _topTagColors = {};
+
+function updateTagColors(tags) {
+    if (!tags || !tags.length) return;
+    _topTagColors = {};
+    const sorted = [...tags].sort((a, b) => (b.count || 0) - (a.count || 0));
+    sorted.slice(0, 5).forEach((t, i) => {
+        _topTagColors[t.tag || t] = i;
+    });
+}
+
+function getTagColorClass(tag) {
+    if (tag in _topTagColors) return ' tag-color-' + _topTagColors[tag];
+    return '';
+}
+
+// ═══════════════════════════════════════════════════════════════
+// RELATIVE TIME FORMATTING
+// ═══════════════════════════════════════════════════════════════
+
+function relativeTime(ts) {
+    if (!ts) return '';
+    const now = Date.now() / 1000;
+    const delta = now - ts;
+    if (delta < 60) return 'gerade eben';
+    if (delta < 3600) return Math.floor(delta / 60) + ' Min.';
+    if (delta < 86400) return Math.floor(delta / 3600) + ' Std.';
+    if (delta < 604800) return Math.floor(delta / 86400) + ' Tage';
+    if (delta < 2592000) return Math.floor(delta / 604800) + ' Wochen';
+    return Math.floor(delta / 2592000) + ' Monate';
 }
