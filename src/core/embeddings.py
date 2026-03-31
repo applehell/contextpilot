@@ -12,6 +12,7 @@ import os
 import re
 import sqlite3
 import struct
+import threading
 from collections import Counter
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
@@ -66,7 +67,7 @@ def _cosine_sim(a: List[float], b: List[float]) -> float:
 
 
 class EmbeddingStore:
-    """Stores and queries embeddings in SQLite."""
+    """Stores and queries embeddings in SQLite (thread-safe)."""
 
     def __init__(self, db_path: Optional[Path] = None) -> None:
         path = db_path or (_DATA_DIR / "embeddings.db")
@@ -81,42 +82,51 @@ class EmbeddingStore:
             updated_at REAL NOT NULL
         )""")
         self._conn.commit()
+        self._db_lock = threading.Lock()
 
     def close(self) -> None:
-        self._conn.close()
+        with self._db_lock:
+            self._conn.close()
 
     def has(self, key: str, content_hash: str) -> bool:
-        row = self._conn.execute(
-            "SELECT content_hash, backend FROM embeddings WHERE key = ?", (key,)
-        ).fetchone()
+        with self._db_lock:
+            row = self._conn.execute(
+                "SELECT content_hash, backend FROM embeddings WHERE key = ?", (key,)
+            ).fetchone()
         return row is not None and row[0] == content_hash and row[1] == _backend
 
     def store(self, key: str, content_hash: str, vector: List[float]) -> None:
         import time
-        self._conn.execute(
-            "INSERT OR REPLACE INTO embeddings (key, content_hash, vector, backend, updated_at) VALUES (?, ?, ?, ?, ?)",
-            (key, content_hash, _pack_vector(vector), _backend, time.time()),
-        )
-        self._conn.commit()
+        with self._db_lock:
+            self._conn.execute(
+                "INSERT OR REPLACE INTO embeddings (key, content_hash, vector, backend, updated_at) VALUES (?, ?, ?, ?, ?)",
+                (key, content_hash, _pack_vector(vector), _backend, time.time()),
+            )
+            self._conn.commit()
 
     def get(self, key: str) -> Optional[List[float]]:
-        row = self._conn.execute("SELECT vector FROM embeddings WHERE key = ?", (key,)).fetchone()
+        with self._db_lock:
+            row = self._conn.execute("SELECT vector FROM embeddings WHERE key = ?", (key,)).fetchone()
         return _unpack_vector(row[0]) if row else None
 
     def all_vectors(self) -> List[Tuple[str, List[float]]]:
-        rows = self._conn.execute("SELECT key, vector FROM embeddings").fetchall()
+        with self._db_lock:
+            rows = self._conn.execute("SELECT key, vector FROM embeddings").fetchall()
         return [(r[0], _unpack_vector(r[1])) for r in rows]
 
     def remove(self, key: str) -> None:
-        self._conn.execute("DELETE FROM embeddings WHERE key = ?", (key,))
-        self._conn.commit()
+        with self._db_lock:
+            self._conn.execute("DELETE FROM embeddings WHERE key = ?", (key,))
+            self._conn.commit()
 
     def count(self) -> int:
-        row = self._conn.execute("SELECT count(*) FROM embeddings").fetchone()
+        with self._db_lock:
+            row = self._conn.execute("SELECT count(*) FROM embeddings").fetchone()
         return row[0] if row else 0
 
     def stats(self) -> Dict[str, Any]:
-        row = self._conn.execute("SELECT count(*), max(updated_at) FROM embeddings").fetchone()
+        with self._db_lock:
+            row = self._conn.execute("SELECT count(*), max(updated_at) FROM embeddings").fetchone()
         return {
             "count": row[0] if row else 0,
             "last_updated": row[1] if row else None,
@@ -190,30 +200,65 @@ class TFIDFEngine:
 
 
 # ═══════════════════════════════════════════════════════════════
-# Public API
+# Per-profile caching & thread safety
 # ═══════════════════════════════════════════════════════════════
 
-_tfidf_engine = TFIDFEngine()
-_embedding_store: Optional[EmbeddingStore] = None
+_lock = threading.Lock()
+_tfidf_cache: Dict[str, TFIDFEngine] = {}
+_embedding_stores: Dict[str, EmbeddingStore] = {}
 _embedding_data_dir: Optional[Path] = None
 
 
+def _dir_key(data_dir: Optional[Path] = None) -> str:
+    return str(data_dir or _embedding_data_dir or _DATA_DIR)
+
+
+def _get_tfidf() -> TFIDFEngine:
+    key = _dir_key()
+    if key not in _tfidf_cache:
+        _tfidf_cache[key] = TFIDFEngine()
+    return _tfidf_cache[key]
+
+
 def set_data_dir(data_dir: Path) -> None:
-    """Set the data directory and reset the store."""
-    global _embedding_store, _embedding_data_dir
-    _embedding_data_dir = data_dir
-    if _embedding_store is not None:
-        _embedding_store.close()
-    _embedding_store = None
+    """Switch to a different profile's data directory.
+
+    The old store stays in the cache so switching back is instant.
+    """
+    global _embedding_data_dir
+    with _lock:
+        _embedding_data_dir = data_dir
+        # Pre-warm: ensure store exists in cache (lazy-opened on next access)
+
+
+def get_active_dir() -> Path:
+    return _embedding_data_dir or _DATA_DIR
 
 
 def _get_store() -> EmbeddingStore:
-    global _embedding_store
-    if _embedding_store is None:
-        path = (_embedding_data_dir or _DATA_DIR) / "embeddings.db"
-        _embedding_store = EmbeddingStore(path)
-    return _embedding_store
+    key = _dir_key()
+    with _lock:
+        if key not in _embedding_stores:
+            path = Path(key) / "embeddings.db"
+            _embedding_stores[key] = EmbeddingStore(path)
+        return _embedding_stores[key]
 
+
+def close_all_stores() -> None:
+    """Close all cached stores (for cleanup in tests)."""
+    with _lock:
+        for store in _embedding_stores.values():
+            try:
+                store.close()
+            except Exception:
+                pass
+        _embedding_stores.clear()
+        _tfidf_cache.clear()
+
+
+# ═══════════════════════════════════════════════════════════════
+# Public API
+# ═══════════════════════════════════════════════════════════════
 
 def embed_text(text: str) -> List[float]:
     """Compute embedding for a text string."""
@@ -221,19 +266,34 @@ def embed_text(text: str) -> List[float]:
         model = _get_model()
         return model.encode(text).tolist()
     else:
-        return _tfidf_engine.vectorize(text)
+        return _get_tfidf().vectorize(text)
 
 
-def index_memories(memories: list) -> Dict[str, int]:
-    """Index all memories. Returns stats."""
+def index_memories(memories: list, profile_dir: Optional[Path] = None) -> Dict[str, int]:
+    """Index all memories for the current (or given) profile. Returns stats.
+
+    If profile_dir is provided, it's compared to the active dir —
+    if they differ the call is a no-op (profile switched mid-index).
+    """
+    with _lock:
+        active = get_active_dir()
+    if profile_dir is not None and str(profile_dir) != str(active):
+        return {"indexed": 0, "skipped": 0, "total": 0, "backend": _backend, "aborted": True}
+
     store = _get_store()
     indexed = 0
     skipped = 0
 
     if _backend == "tfidf":
-        _tfidf_engine.build_idf([f"{m.key} {m.value}" for m in memories])
+        _get_tfidf().build_idf([f"{m.key} {m.value}" for m in memories])
 
     for m in memories:
+        # Check for profile switch mid-loop
+        with _lock:
+            if profile_dir is not None and str(profile_dir) != str(get_active_dir()):
+                return {"indexed": indexed, "skipped": skipped, "total": len(memories),
+                        "backend": _backend, "aborted": True}
+
         text = f"{m.key} {' '.join(m.tags)} {m.value}"
         content_hash = hashlib.sha256(text.encode()).hexdigest()[:16]
 
@@ -268,7 +328,7 @@ def semantic_search(query: str, limit: int = 10) -> List[Tuple[str, float]]:
     """Search memories by semantic similarity. Returns [(key, score), ...]."""
     store = _get_store()
 
-    if _backend == "tfidf" and _tfidf_engine._doc_count == 0:
+    if _backend == "tfidf" and _get_tfidf()._doc_count == 0:
         return []
 
     query_vec = embed_text(query)

@@ -1470,6 +1470,7 @@ def create_app(db_path: Optional[Path] = None) -> FastAPI:
             _init_db(new_path)
             _reload_profile_deps()
             _events.emit("profile", "switch", pm.active_name)
+            _trigger_background_index()
             return {"status": "switched", "active": pid, "name": pm.active_name}
         except KeyError as e:
             raise HTTPException(404, str(e))
@@ -2082,31 +2083,45 @@ def create_app(db_path: Optional[Path] = None) -> FastAPI:
 
     # --- Semantic Search ---
 
-    from src.core.embeddings import index_memories as _index_memories, semantic_search as _semantic_search, get_backend as _embed_backend, index_single_memory as _index_single, remove_from_index as _remove_from_index
+    from src.core.embeddings import index_memories as _index_memories, semantic_search as _semantic_search, get_backend as _embed_backend, index_single_memory as _index_single, remove_from_index as _remove_from_index, get_active_dir as _embed_active_dir
 
     import threading
+    _index_lock = threading.Lock()
     _index_state = {"status": "idle", "indexed": 0, "skipped": 0, "total": 0, "backend": _embed_backend()}
 
-    def _run_index_background():
-        _index_state["status"] = "running"
-        _events.emit("system", "index-start", "embeddings", "Background indexing started")
+    def _run_index_background(profile_dir=None):
+        if not _index_lock.acquire(blocking=False):
+            return
         try:
+            target_dir = profile_dir or _embed_active_dir()
+            _index_state.update(status="running", indexed=0, skipped=0, total=0)
+            _events.emit("system", "index-start", "embeddings", f"Background indexing started ({target_dir.name})")
             store = _get_memory_store()
             memories = store.list()
             _index_state["total"] = len(memories)
-            stats = _index_memories(memories)
-            _index_state.update(status="done", indexed=stats["indexed"], skipped=stats["skipped"], backend=stats["backend"])
-            _events.emit("system", "index", "embeddings", f"{stats['indexed']} indexed, {stats['skipped']} skipped ({stats['backend']})")
+            stats = _index_memories(memories, profile_dir=target_dir)
+            if stats.get("aborted"):
+                _index_state.update(status="aborted")
+                _events.emit("system", "index-abort", "embeddings", "Profile changed during indexing")
+            else:
+                _index_state.update(status="done", indexed=stats["indexed"], skipped=stats["skipped"], backend=stats["backend"])
+                _events.emit("system", "index", "embeddings", f"{stats['indexed']} indexed, {stats['skipped']} skipped ({stats['backend']})")
         except Exception as e:
             _index_state["status"] = "error"
             _events.emit("system", "index-error", "embeddings", str(e))
+        finally:
+            _index_lock.release()
+
+    def _trigger_background_index():
+        """Start background index for current profile (non-blocking)."""
+        t = threading.Thread(target=_run_index_background, daemon=True)
+        t.start()
 
     @app.post("/api/embeddings/index")
     async def index_embeddings():
         if _index_state["status"] == "running":
             return {"status": "already_running", **_index_state}
-        t = threading.Thread(target=_run_index_background, daemon=True)
-        t.start()
+        _trigger_background_index()
         return {"status": "started"}
 
     @app.get("/api/embeddings/index/status")
@@ -2282,8 +2297,7 @@ def create_app(db_path: Optional[Path] = None) -> FastAPI:
         pass
 
     # Build search index in background on startup
-    t = threading.Thread(target=_run_index_background, daemon=True)
-    t.start()
+    _trigger_background_index()
 
     return app
 
