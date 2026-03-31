@@ -204,7 +204,6 @@ async function startup() {
         ['Loading version...', 30, () => loadVersion()],
         ['Loading profiles...', 50, () => loadProfiles()],
         ['Loading dashboard...', 70, () => loadDashboard()],
-        ['Building search index...', 90, () => rebuildIndex({silent: true})],
         ['Ready', 100, () => {}],
     ];
 
@@ -1472,17 +1471,34 @@ async function semanticSearch() {
 }
 
 async function rebuildIndex({silent = false} = {}) {
-    const tid = silent ? null : showToast('Building search index', 'Computing embeddings...');
-    if (!silent) botBusy();
+    const tid = silent ? null : showToast('Building search index', 'Started in background...');
     try {
         const res = await fetch('/api/embeddings/index', { method: 'POST' });
         const d = await res.json();
-        if (tid) completeToast(tid, `${d.indexed} indexed, ${d.skipped} skipped (${d.backend})`, false);
+        if (d.status === 'already_running') {
+            if (tid) completeToast(tid, 'Already running', false);
+            return;
+        }
+        if (tid) {
+            // Poll for completion
+            const poll = setInterval(async () => {
+                try {
+                    const sr = await fetch('/api/embeddings/index/status');
+                    const st = await sr.json();
+                    if (st.status === 'done') {
+                        clearInterval(poll);
+                        completeToast(tid, `${st.indexed} indexed, ${st.skipped} skipped (${st.backend})`, false);
+                    } else if (st.status === 'error') {
+                        clearInterval(poll);
+                        completeToast(tid, 'Failed', true);
+                    }
+                } catch (_) { clearInterval(poll); }
+            }, 1000);
+        }
     } catch (e) {
         if (tid) completeToast(tid, 'Failed: ' + e.message, true);
         console.error('rebuildIndex failed:', e);
     }
-    finally { if (!silent) botIdle(); }
 }
 
 // ═══════════════════════════════════════════════════════════════

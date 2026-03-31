@@ -2084,13 +2084,34 @@ def create_app(db_path: Optional[Path] = None) -> FastAPI:
 
     from src.core.embeddings import index_memories as _index_memories, semantic_search as _semantic_search, get_backend as _embed_backend, index_single_memory as _index_single, remove_from_index as _remove_from_index
 
+    import threading
+    _index_state = {"status": "idle", "indexed": 0, "skipped": 0, "total": 0, "backend": _embed_backend()}
+
+    def _run_index_background():
+        _index_state["status"] = "running"
+        _events.emit("system", "index-start", "embeddings", "Background indexing started")
+        try:
+            store = _get_memory_store()
+            memories = store.list()
+            _index_state["total"] = len(memories)
+            stats = _index_memories(memories)
+            _index_state.update(status="done", indexed=stats["indexed"], skipped=stats["skipped"], backend=stats["backend"])
+            _events.emit("system", "index", "embeddings", f"{stats['indexed']} indexed, {stats['skipped']} skipped ({stats['backend']})")
+        except Exception as e:
+            _index_state["status"] = "error"
+            _events.emit("system", "index-error", "embeddings", str(e))
+
     @app.post("/api/embeddings/index")
     async def index_embeddings():
-        store = _get_memory_store()
-        memories = store.list()
-        stats = _index_memories(memories)
-        _events.emit("system", "index", "embeddings", f"{stats['indexed']} indexed, {stats['skipped']} skipped ({stats['backend']})")
-        return stats
+        if _index_state["status"] == "running":
+            return {"status": "already_running", **_index_state}
+        t = threading.Thread(target=_run_index_background, daemon=True)
+        t.start()
+        return {"status": "started"}
+
+    @app.get("/api/embeddings/index/status")
+    async def index_status():
+        return _index_state
 
     @app.get("/api/embeddings/stats")
     async def embedding_stats():
@@ -2259,6 +2280,10 @@ def create_app(db_path: Optional[Path] = None) -> FastAPI:
             _events.emit("system", "ttl-cleanup", f"{expired} expired memories removed at startup")
     except Exception:
         pass
+
+    # Build search index in background on startup
+    t = threading.Thread(target=_run_index_background, daemon=True)
+    t.start()
 
     return app
 
