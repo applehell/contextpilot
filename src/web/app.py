@@ -1,6 +1,7 @@
 """Context Pilot Web App — FastAPI backend with HTMX frontend."""
 from __future__ import annotations
 
+import html
 import json
 import re
 import time
@@ -8,7 +9,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 from fastapi import FastAPI, File, HTTPException, Query, Request, UploadFile
-from fastapi.responses import HTMLResponse, Response
+from fastapi.responses import HTMLResponse, JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from pydantic import BaseModel
@@ -35,6 +36,10 @@ from src.storage.profiles import ProfileManager, DEFAULT_ID
 from src.storage.usage import UsageStore, FeedbackRecord, block_hash
 
 import os
+
+MAX_UPLOAD_BYTES = 50 * 1024 * 1024  # 50 MB
+
+API_KEY = os.environ.get("CONTEXTPILOT_API_KEY")
 
 WEB_DIR = Path(__file__).parent
 _DATA_DIR = Path(os.environ.get("CONTEXTPILOT_DATA_DIR", str(Path.home() / ".contextpilot")))
@@ -180,6 +185,13 @@ class FolderSourceUpdate(BaseModel):
 _secret_detector = SecretDetector()
 
 
+def _estimate_total_tokens(db: Database) -> int:
+    """Estimate total tokens using SQL aggregate (chars / 3.5 approximation)."""
+    row = db.conn.execute("SELECT SUM(LENGTH(value)) FROM memories").fetchone()
+    total_chars = row[0] if row and row[0] else 0
+    return int(total_chars / 3.5)
+
+
 def _init_db(db_path: Optional[Path] = None) -> None:
     global _db, _project_store, _memory_store, _usage_store
     if _db is not None:
@@ -213,7 +225,23 @@ def create_app(db_path: Optional[Path] = None) -> FastAPI:
         response.headers["X-Content-Type-Options"] = "nosniff"
         response.headers["X-Frame-Options"] = "SAMEORIGIN"
         response.headers["Referrer-Policy"] = "same-origin"
+        response.headers["Content-Security-Policy"] = (
+            "default-src 'self'; "
+            "script-src 'self' 'unsafe-inline' 'unsafe-eval' https://unpkg.com https://cdn.jsdelivr.net; "
+            "style-src 'self' 'unsafe-inline' https://unpkg.com https://cdn.jsdelivr.net; "
+            "img-src 'self' data:; "
+            "connect-src 'self'; "
+            "font-src 'self' https://unpkg.com https://cdn.jsdelivr.net"
+        )
         return response
+
+    @app.middleware("http")
+    async def api_key_auth(request: Request, call_next):
+        if API_KEY and request.url.path.startswith("/api/") and request.url.path not in ("/health",):
+            key = request.headers.get("X-API-Key") or request.query_params.get("api_key")
+            if key != API_KEY:
+                return JSONResponse(status_code=401, content={"error": "Unauthorized"})
+        return await call_next(request)
 
     # --- HTML ---
 
@@ -245,8 +273,8 @@ def create_app(db_path: Optional[Path] = None) -> FastAPI:
         import shutil
 
         store = _get_memory_store()
-        memories = store.list()
-        total_tokens = sum(TokenBudget.estimate(m.value) for m in memories)
+        memory_count = store.count()
+        total_tokens = _estimate_total_tokens(_get_db())
 
         registry = SkillRegistry.instance()
         all_skills = registry.list_all()
@@ -286,7 +314,7 @@ def create_app(db_path: Optional[Path] = None) -> FastAPI:
                 "errors": _request_count["errors"],
             },
             "memories": {
-                "count": len(memories),
+                "count": memory_count,
                 "tokens": total_tokens,
                 "tags": len(store.tags()),
             },
@@ -673,7 +701,7 @@ def create_app(db_path: Optional[Path] = None) -> FastAPI:
         store = _get_memory_store()
         all_tags = set()
         tag_scores: Dict[str, int] = {}
-        for m in store.list():
+        for m in store.list(limit=200, sort="updated", order="desc"):
             for tag in m.tags:
                 all_tags.add(tag)
                 tag_words = set(_tokenize(f"{m.key} {m.value}"))
@@ -797,6 +825,8 @@ def create_app(db_path: Optional[Path] = None) -> FastAPI:
     @app.post("/api/import/json")
     async def import_json(file: UploadFile = File(...)):
         content = await file.read()
+        if len(content) > MAX_UPLOAD_BYTES:
+            raise HTTPException(413, "File too large (max 50 MB)")
         store = _get_memory_store()
         try:
             count = store.import_json(content.decode("utf-8"), merge=True)
@@ -870,20 +900,33 @@ def create_app(db_path: Optional[Path] = None) -> FastAPI:
     @app.get("/api/dashboard/stats")
     async def dashboard_stats():
         store = _get_memory_store()
-        memories = store.list()
+        total_count = store.count()
+        total_tokens = _estimate_total_tokens(_get_db())
+
+        db = _get_db()
         now = time.time()
         day_ago = now - 86400
         week_ago = now - 604800
 
+        row = db.conn.execute("SELECT count(*) FROM memories WHERE created_at > ?", (day_ago,)).fetchone()
+        new_today = row[0] if row else 0
+        row = db.conn.execute("SELECT count(*) FROM memories WHERE updated_at > ? AND created_at <= ?", (day_ago, day_ago)).fetchone()
+        updated_today = row[0] if row else 0
+        row = db.conn.execute("SELECT count(*) FROM memories WHERE created_at > ? OR updated_at > ?", (week_ago, week_ago)).fetchone()
+        new_this_week = row[0] if row else 0
+
+        pinned_count = 0
+        try:
+            row = db.conn.execute("SELECT count(*) FROM memories WHERE pinned = 1").fetchone()
+            pinned_count = row[0] if row else 0
+        except Exception:
+            pass
+
+        # Tag counts and size distribution still need iteration but use paginated access
         tag_counts: Dict[str, int] = {}
         size_dist = {"small": 0, "medium": 0, "large": 0}
-        new_today = 0
-        updated_today = 0
-        new_this_week = 0
-        total_tokens = 0
-        for m in memories:
+        for m in store.list():
             tokens = TokenBudget.estimate(m.value)
-            total_tokens += tokens
             if tokens < 100:
                 size_dist["small"] += 1
             elif tokens < 500:
@@ -892,21 +935,15 @@ def create_app(db_path: Optional[Path] = None) -> FastAPI:
                 size_dist["large"] += 1
             for t in m.tags:
                 tag_counts[t] = tag_counts.get(t, 0) + 1
-            if m.created_at > day_ago:
-                new_today += 1
-            elif m.updated_at > day_ago:
-                updated_today += 1
-            if m.created_at > week_ago or m.updated_at > week_ago:
-                new_this_week += 1
 
         top_tags = sorted(tag_counts.items(), key=lambda x: -x[1])[:10]
         return {
-            "total": len(memories),
+            "total": total_count,
             "total_tokens": total_tokens,
             "new_today": new_today,
             "updated_today": updated_today,
             "new_this_week": new_this_week,
-            "pinned": sum(1 for m in memories if m.pinned),
+            "pinned": pinned_count,
             "size_distribution": size_dist,
             "top_tags": [{"tag": t, "count": c} for t, c in top_tags],
             "trash_count": len(store.trash_list()),
@@ -917,15 +954,17 @@ def create_app(db_path: Optional[Path] = None) -> FastAPI:
     @app.post("/api/reports/summary")
     async def generate_summary_report():
         store = _get_memory_store()
-        memories = store.list()
+        total_count = store.count()
         now = time.time()
         day_ago = now - 86400
 
-        new_memories = [m for m in memories if m.created_at > day_ago]
-        updated_memories = [m for m in memories if m.updated_at > day_ago and m.created_at <= day_ago]
+        db = _get_db()
+        new_memories = store.list(sort="created", order="desc")
+        new_memories = [m for m in new_memories if m.created_at > day_ago]
+        updated_memories = [m for m in store.list(sort="updated", order="desc") if m.updated_at > day_ago and m.created_at <= day_ago]
 
         lines = [f"Context Pilot Report ({time.strftime('%Y-%m-%d %H:%M')})", ""]
-        lines.append(f"Total: {len(memories)} memories")
+        lines.append(f"Total: {total_count} memories")
         lines.append(f"New today: {len(new_memories)}")
         lines.append(f"Updated today: {len(updated_memories)}")
 
@@ -940,20 +979,20 @@ def create_app(db_path: Optional[Path] = None) -> FastAPI:
 
         report = "\n".join(lines)
 
-        from src.core.webhooks import WebhookManager
-        wm = WebhookManager(_get_profile_dir())
-        sent = 0
-        for wh in wm.list():
-            try:
-                wm.send(wh.name, report)
-                sent += 1
-            except Exception:
-                pass
+        webhooks_sent = 0
+        try:
+            from src.core.webhooks import WebhookManager
+            wm = WebhookManager(_get_profile_dir())
+            results = wm.notify("report.summary", report)
+            webhooks_sent = sum(1 for r in results if r.get("ok"))
+        except Exception:
+            pass
 
-        return {"report": report, "webhooks_sent": sent}
+        return {"report": report, "webhooks_sent": webhooks_sent}
 
     @app.get("/api/export-memories")
     async def export_memories(tag: str = Query("")):
+        # Legitimately needs all data for export
         store = _get_memory_store()
         if tag:
             memories = store.search("", tags=[tag])
@@ -1001,7 +1040,7 @@ def create_app(db_path: Optional[Path] = None) -> FastAPI:
                 "id": m.key,
                 "label": label,
                 "group": group,
-                "title": f"<b>{m.key}</b><br>Tags: {', '.join(m.tags) or 'none'}<br>{tokens} tokens",
+                "title": f"<b>{html.escape(m.key)}</b><br>Tags: {html.escape(', '.join(m.tags) or 'none')}<br>{tokens} tokens",
                 "value": size,
                 "tags": m.tags,
             })
@@ -1127,7 +1166,7 @@ def create_app(db_path: Optional[Path] = None) -> FastAPI:
         pm = ProfileManager()
         profiles = pm.list()
         store = _get_memory_store()
-        memory_count = len(store.list())
+        memory_count = store.count()
         connectors = ConnectorRegistry.instance(_get_profile_dir())
         configured_connectors = [c.name for c in connectors.list() if c.configured]
         folders = FolderManager(_get_profile_dir())
@@ -1147,8 +1186,8 @@ def create_app(db_path: Optional[Path] = None) -> FastAPI:
     @app.get("/api/dashboard")
     async def dashboard():
         store = _get_memory_store()
-        memories = store.list()
-        total_tokens = sum(TokenBudget.estimate(m.value) for m in memories)
+        memory_count = store.count()
+        total_tokens = _estimate_total_tokens(_get_db())
         all_tags = store.tags()
 
         registry = SkillRegistry.instance()
@@ -1158,7 +1197,7 @@ def create_app(db_path: Optional[Path] = None) -> FastAPI:
         activity_entries = MemoryActivityLog(_db).recent(10)
 
         return {
-            "memory_count": len(memories),
+            "memory_count": memory_count,
             "memory_tokens": total_tokens,
             "tag_count": len(all_tags),
             "skill_total": len(all_skills),
@@ -1373,6 +1412,8 @@ def create_app(db_path: Optional[Path] = None) -> FastAPI:
         import tempfile
         store = _get_memory_store()
         content = await file.read()
+        if len(content) > MAX_UPLOAD_BYTES:
+            raise HTTPException(413, "File too large (max 50 MB)")
         with tempfile.NamedTemporaryFile(suffix=".md", delete=False) as f:
             f.write(content)
             tmp_path = Path(f.name)
@@ -1393,6 +1434,8 @@ def create_app(db_path: Optional[Path] = None) -> FastAPI:
         import tempfile
         store = _get_memory_store()
         content = await file.read()
+        if len(content) > MAX_UPLOAD_BYTES:
+            raise HTTPException(413, "File too large (max 50 MB)")
         with tempfile.NamedTemporaryFile(suffix=".md", delete=False) as f:
             f.write(content)
             tmp_path = Path(f.name)
@@ -1413,6 +1456,8 @@ def create_app(db_path: Optional[Path] = None) -> FastAPI:
         import tempfile
         store = _get_memory_store()
         content = await file.read()
+        if len(content) > MAX_UPLOAD_BYTES:
+            raise HTTPException(413, "File too large (max 50 MB)")
         with tempfile.NamedTemporaryFile(suffix=".db", delete=False) as f:
             f.write(content)
             tmp_path = Path(f.name)
@@ -1577,6 +1622,8 @@ def create_app(db_path: Optional[Path] = None) -> FastAPI:
     async def import_profile_zip(file: UploadFile = File(...), name: str = Query("")):
         pm = ProfileManager()
         content = await file.read()
+        if len(content) > MAX_UPLOAD_BYTES:
+            raise HTTPException(413, "File too large (max 50 MB)")
         try:
             p = pm.import_profile(content, name or None)
             _events.emit("profile", "import-zip", p.name, f"from {file.filename}")
@@ -1587,9 +1634,13 @@ def create_app(db_path: Optional[Path] = None) -> FastAPI:
     # --- Secrets / Sensitivity ---
 
     @app.get("/api/sensitivity")
-    async def memory_sensitivity():
+    async def memory_sensitivity(
+        page: int = Query(1, ge=1),
+        page_size: int = Query(100, ge=1, le=500),
+    ):
         store = _get_memory_store()
-        memories = store.list()
+        offset = (page - 1) * page_size
+        memories = store.list(limit=page_size, offset=offset)
         results = []
         for m in memories:
             report = _secret_detector.scan(f"{m.key}\n{m.value}")
@@ -2076,10 +2127,13 @@ def create_app(db_path: Optional[Path] = None) -> FastAPI:
     # --- Duplicate Detection ---
 
     @app.get("/api/duplicates")
-    async def find_duplicates_api(threshold: float = Query(0.6, ge=0.3, le=1.0)):
+    async def find_duplicates_api(
+        threshold: float = Query(0.6, ge=0.3, le=1.0),
+        limit: int = Query(500, ge=10, le=2000),
+    ):
         from src.core.duplicates import find_duplicates
         store = _get_memory_store()
-        groups = find_duplicates(store.list(), threshold)
+        groups = find_duplicates(store.list(limit=limit), threshold)
         return [{"keys": g.keys, "similarity": g.similarity, "sample": g.sample} for g in groups]
 
     @app.get("/api/similar/{key:path}")
@@ -2431,4 +2485,5 @@ def create_app(db_path: Optional[Path] = None) -> FastAPI:
     return app
 
 
-app = create_app(ProfileManager().active_db_path)
+_custom_db = os.environ.get("CONTEXTPILOT_DB_PATH")
+app = create_app(Path(_custom_db) if _custom_db else ProfileManager().active_db_path)

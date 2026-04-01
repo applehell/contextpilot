@@ -3,6 +3,7 @@ import tiktoken
 
 
 _DEFAULT_ENCODING = "cl100k_base"
+_ENCODING_CACHE: dict = {}
 
 
 class TokenBudget:
@@ -13,8 +14,9 @@ class TokenBudget:
 
     @classmethod
     def estimate(cls, text: str, encoding_name: str = _DEFAULT_ENCODING) -> int:
-        enc = tiktoken.get_encoding(encoding_name)
-        return len(enc.encode(text))
+        if encoding_name not in _ENCODING_CACHE:
+            _ENCODING_CACHE[encoding_name] = tiktoken.get_encoding(encoding_name)
+        return len(_ENCODING_CACHE[encoding_name].encode(text))
 
     @property
     def used(self) -> int:

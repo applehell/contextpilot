@@ -241,6 +241,7 @@ class Database:
             path.parent.mkdir(parents=True, exist_ok=True)
             self._conn = sqlite3.connect(str(path), check_same_thread=check_same_thread)
         self._conn.execute("PRAGMA journal_mode=WAL")
+        self._conn.execute("PRAGMA busy_timeout = 5000")
         self._conn.execute("PRAGMA foreign_keys=ON")
         self._conn.row_factory = sqlite3.Row
         self._enable_auto_vacuum()
@@ -275,7 +276,13 @@ class Database:
         current = self._current_version()
         for ver in sorted(MIGRATIONS.keys()):
             if ver > current:
-                for stmt in MIGRATIONS[ver]:
-                    self._conn.execute(stmt)
+                self._conn.execute("SAVEPOINT migration")
+                try:
+                    for stmt in MIGRATIONS[ver]:
+                        self._conn.execute(stmt)
+                    self._conn.execute("RELEASE migration")
+                except Exception:
+                    self._conn.execute("ROLLBACK TO migration")
+                    raise
                 self._set_version(ver)
         self._conn.commit()

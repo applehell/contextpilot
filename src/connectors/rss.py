@@ -10,6 +10,11 @@ from pathlib import Path
 
 import requests
 
+try:
+    import defusedxml.ElementTree as SafeET
+except ImportError:
+    SafeET = None
+
 from ..storage.memory import Memory, MemoryStore
 from .base import ConfigField, ConnectorPlugin, SyncResult
 
@@ -111,7 +116,10 @@ def _strip_ns(tag: str) -> str:
 
 
 def _parse_feed(xml_text: str, max_items: int, include_content: bool) -> tuple:
-    root = ET.fromstring(xml_text)
+    if SafeET:
+        root = SafeET.fromstring(xml_text)
+    else:
+        root = ET.fromstring(xml_text)
     tag = _strip_ns(root.tag)
     if tag == "rss":
         return _parse_rss_items(root, max_items, include_content)

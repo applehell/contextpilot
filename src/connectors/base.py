@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import json
 import os
+import stat
 import time
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
@@ -79,6 +80,10 @@ class ConnectorPlugin(ABC):
 
     def _save(self) -> None:
         self._config_path.write_text(json.dumps(self._config, indent=2))
+        try:
+            self._config_path.chmod(stat.S_IRUSR | stat.S_IWUSR)
+        except OSError:
+            pass  # Docker volumes may not support chmod
 
     @property
     def configured(self) -> bool:

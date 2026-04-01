@@ -272,6 +272,24 @@ class TestEdgeCases:
 # Coverage gap: _truncate already-fits branch (assembler.py line 99)
 # ---------------------------------------------------------------------------
 
+class TestAssembleTracked:
+    def test_input_blocks_not_mutated_by_assembly(self):
+        """assemble_tracked must deep-copy input_blocks so assembly doesn't leak mutations."""
+        content = "word " * 200
+        block = make_block(content, Priority.HIGH)
+        a = Assembler()
+        result = a.assemble_tracked([block], budget=5)
+        # The stored input_blocks snapshot must still have the original content
+        assert result.input_blocks[0].content == content
+
+    def test_dropped_blocks_detected(self):
+        high = make_block("important", Priority.HIGH)
+        low = make_block("filler " * 100, Priority.LOW)
+        a = Assembler()
+        result = a.assemble_tracked([high, low], budget=high.token_count)
+        assert len(result.dropped_blocks) >= 1
+
+
 class TestTruncateAlreadyFits:
     def test_truncate_returns_copy_when_content_fits(self):
         """Block content is shorter than token_limit → early return on line 99."""

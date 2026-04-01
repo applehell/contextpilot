@@ -298,3 +298,12 @@ class TestSearchCount:
             count = store.search_count(q, tags=tags, source=src)
             results = store.search(q, tags=tags, source=src)
             assert count == len(results), f"Mismatch for q={q!r}, tags={tags}, source={src!r}"
+
+
+class TestFtsKeyCap:
+    def test_search_with_many_results_no_crash(self, store: MemoryStore) -> None:
+        """Inserting many memories and searching should not crash from unbounded IN clause."""
+        for i in range(600):
+            store.set(Memory(key=f"item/{i}", value=f"common keyword data {i}"))
+        results = store.search("common")
+        assert len(results) >= 1

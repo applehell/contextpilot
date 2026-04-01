@@ -1,6 +1,7 @@
 """Tests for the global EventBus."""
 from __future__ import annotations
 
+import threading
 import pytest
 
 from src.core.events import Event, EventBus
@@ -112,6 +113,26 @@ class TestSubscribe:
         assert not q2.empty()
         bus.unsubscribe(q1)
         bus.unsubscribe(q2)
+
+
+class TestThreadSafety:
+    def test_emit_from_background_thread(self, bus):
+        errors = []
+
+        def worker():
+            try:
+                for i in range(20):
+                    bus.emit("thread", "test", f"item-{i}")
+            except Exception as e:
+                errors.append(e)
+
+        threads = [threading.Thread(target=worker) for _ in range(4)]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join()
+        assert errors == []
+        assert len(bus.recent(limit=200)) > 0
 
 
 class TestSingleton:

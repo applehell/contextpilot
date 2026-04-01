@@ -1,8 +1,12 @@
 """Webhook notifications — send alerts via WAHA (WhatsApp) or generic HTTP webhooks."""
 from __future__ import annotations
 
+import ipaddress
 import json
 import os
+import stat
+import tempfile
+import urllib.parse
 import urllib.request
 import urllib.error
 from dataclasses import dataclass, field
@@ -40,7 +44,21 @@ class WebhookManager:
         return {"hooks": {}}
 
     def _save(self) -> None:
-        self._config_path.write_text(json.dumps(self._config, indent=2))
+        tmp_fd, tmp_path = tempfile.mkstemp(dir=str(self._config_path.parent), suffix=".tmp")
+        try:
+            with os.fdopen(tmp_fd, 'w') as f:
+                json.dump(self._config, f, indent=2)
+            os.replace(tmp_path, str(self._config_path))
+        except BaseException:
+            try:
+                os.unlink(tmp_path)
+            except OSError:
+                pass
+            raise
+        try:
+            self._config_path.chmod(stat.S_IRUSR | stat.S_IWUSR)
+        except OSError:
+            pass
 
     def list(self) -> List[WebhookConfig]:
         return [WebhookConfig(name=n, **d) for n, d in self._config["hooks"].items()]
@@ -86,14 +104,36 @@ class WebhookManager:
         return results
 
 
+_BLOCKED_HOSTS = {"169.254.169.254", "metadata.google.internal"}
+
+
+def _validate_url(url: str) -> None:
+    parsed = urllib.parse.urlparse(url)
+    if parsed.scheme not in ("http", "https"):
+        raise ValueError(f"Blocked scheme: {parsed.scheme}")
+    host = parsed.hostname or ""
+    if host in _BLOCKED_HOSTS:
+        raise ValueError(f"Blocked host: {host}")
+    try:
+        addr = ipaddress.ip_address(host)
+        if addr.is_private or addr.is_loopback or addr.is_link_local:
+            raise ValueError(f"Blocked private address: {addr}")
+    except ValueError as e:
+        if "Blocked" in str(e):
+            raise
+        # hostname, not IP — allow
+
+
 def _send_waha(hook: WebhookConfig, message: str) -> None:
+    url = f"{hook.url}/api/sendText"
+    _validate_url(url)
     payload = json.dumps({
         "chatId": hook.chat_id,
         "text": message,
         "session": hook.session,
     }).encode()
     req = urllib.request.Request(
-        f"{hook.url}/api/sendText",
+        url,
         data=payload,
         headers={"Content-Type": "application/json"},
     )
@@ -102,6 +142,7 @@ def _send_waha(hook: WebhookConfig, message: str) -> None:
 
 
 def _send_generic(hook: WebhookConfig, event: str, message: str) -> None:
+    _validate_url(hook.url)
     payload = json.dumps({"event": event, "message": message}).encode()
     req = urllib.request.Request(
         hook.url,

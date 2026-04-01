@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "context-pilot"
-version = "4.0.0"
+version = "4.1.0"
 description = "Smart context and memory management for AI models — Web App + MCP Server"
 readme = "README.md"
 license = {text = "MIT"}

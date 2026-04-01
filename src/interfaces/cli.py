@@ -549,11 +549,11 @@ def feedback_show(ctx: click.Context, assembly_id: str, fmt: str) -> None:
 @click.pass_context
 def web(ctx: click.Context, host: str, port: int, reload: bool) -> None:
     """Start the Context Pilot web server."""
+    import os
     import uvicorn
-    from src.web.app import create_app
 
     db_path = ctx.obj.get("db_path", DEFAULT_DB_PATH)
-    create_app(db_path)
+    os.environ["CONTEXTPILOT_DB_PATH"] = str(db_path)
     uvicorn.run("src.web.app:app", host=host, port=port, reload=reload)
 
 

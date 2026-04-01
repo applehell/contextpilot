@@ -133,3 +133,49 @@ class TestMigration:
         version = db.conn.execute("PRAGMA user_version").fetchone()[0]
         assert version == SCHEMA_VERSION
         db.close()
+
+    def test_failing_migration_rolls_back(self, tmp_path: Path) -> None:
+        """A bad migration should not advance user_version."""
+        db_path = tmp_path / "fail_migrate.db"
+        conn = sqlite3.connect(str(db_path))
+        conn.execute("PRAGMA journal_mode=WAL")
+        for stmt in MIGRATIONS[1]:
+            conn.execute(stmt)
+        conn.execute("PRAGMA user_version = 1")
+        conn.commit()
+        conn.close()
+
+        bad_migrations = {
+            2: ["CREATE TABLE good_table (id INTEGER PRIMARY KEY)",
+                "THIS IS INVALID SQL"],
+        }
+        import src.storage.db as db_module
+        original = db_module.MIGRATIONS
+        db_module.MIGRATIONS = {1: MIGRATIONS[1], **bad_migrations}
+        try:
+            with pytest.raises(sqlite3.OperationalError):
+                Database(db_path)
+        finally:
+            db_module.MIGRATIONS = original
+
+        conn = sqlite3.connect(str(db_path))
+        version = conn.execute("PRAGMA user_version").fetchone()[0]
+        assert version == 1  # should NOT have advanced to 2
+        tables = {r[0] for r in conn.execute(
+            "SELECT name FROM sqlite_master WHERE type='table'").fetchall()}
+        assert "good_table" not in tables  # rolled back
+        conn.close()
+
+
+class TestPragmas:
+    def test_busy_timeout_set(self) -> None:
+        db = Database(None)
+        timeout = db.conn.execute("PRAGMA busy_timeout").fetchone()[0]
+        assert timeout == 5000
+        db.close()
+
+    def test_wal_mode(self, tmp_path: Path) -> None:
+        db = Database(tmp_path / "wal_test.db")
+        mode = db.conn.execute("PRAGMA journal_mode").fetchone()[0]
+        assert mode == "wal"
+        db.close()

@@ -91,19 +91,31 @@ class TelegramConnector(ConnectorPlugin):
         prefix = f"{self.name}/"
         synced_keys = set()
 
+        self._config.setdefault("_last_offset", 0)
+
         try:
-            updates = _api_call(token, "getUpdates", {"limit": message_limit, "allowed_updates": '["message","channel_post"]'})
+            params = {"limit": message_limit, "allowed_updates": '["message","channel_post"]'}
+            params["offset"] = self._config.get("_last_offset", 0)
+            updates = _api_call(token, "getUpdates", params)
         except Exception as e:
             result.errors.append(f"Failed to fetch updates: {e}")
             self._update_sync_stats(0)
             return result
 
         messages = []
+        max_update_id = 0
         for update in updates:
+            uid = update.get("update_id", 0)
+            if uid > max_update_id:
+                max_update_id = uid
             msg = update.get("message") or update.get("channel_post")
             if not msg:
                 continue
             messages.append(msg)
+
+        if max_update_id > 0:
+            self._config["_last_offset"] = max_update_id + 1
+            self._save()
 
         result.total_remote = len(messages)
 

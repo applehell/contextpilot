@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="https://img.shields.io/badge/version-4.0.0-blue?style=flat-square" alt="Version">
+  <img src="https://img.shields.io/badge/version-4.1.0-blue?style=flat-square" alt="Version">
   <img src="https://img.shields.io/docker/pulls/applehell/contextpilot?style=flat-square&color=blue" alt="Docker Pulls">
   <img src="https://img.shields.io/docker/image-size/applehell/contextpilot/latest?style=flat-square&color=blue" alt="Image Size">
   <img src="https://img.shields.io/badge/python-3.11+-3776AB?style=flat-square&logo=python&logoColor=white" alt="Python">
@@ -293,7 +293,7 @@ export CONTEXTPILOT_MCP_URL=http://your-server:8400/sse  # MCP Server
 | Tag | Description |
 |---|---|
 | [`applehell/contextpilot:latest`](https://hub.docker.com/r/applehell/contextpilot/tags) | Latest stable release |
-| [`applehell/contextpilot:4.0.0`](https://hub.docker.com/r/applehell/contextpilot/tags) | Specific version |
+| [`applehell/contextpilot:4.1.0`](https://hub.docker.com/r/applehell/contextpilot/tags) | Specific version |
 
 ### Volumes
 
@@ -553,7 +553,7 @@ python -m src.web --reload    # Hot-reload
 | **AI Integration** | MCP Server (FastMCP), tiktoken |
 | **Connectors** | requests, openpyxl, PyJWT, pykeepass, PyYAML |
 | **Security** | DOMPurify, Security Headers, non-root Docker |
-| **Deployment** | Docker (arm64 + amd64), 958+ tests |
+| **Deployment** | Docker (arm64 + amd64), 1052+ tests |
 
 ---
 

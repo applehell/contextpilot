@@ -69,8 +69,12 @@ class EventBus:
             dead = set()
             for q in list(self._subscribers):
                 try:
-                    q.put_nowait(event)
-                except asyncio.QueueFull:
+                    try:
+                        loop = asyncio.get_running_loop()
+                        loop.call_soon_threadsafe(q.put_nowait, event)
+                    except RuntimeError:
+                        q.put_nowait(event)
+                except (RuntimeError, asyncio.QueueFull):
                     dead.add(q)
             self._subscribers -= dead
 

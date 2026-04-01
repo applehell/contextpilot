@@ -458,7 +458,10 @@ class MemoryStore:
                 ).fetchall()
             except sqlite3.OperationalError:
                 rows = []
+            MAX_FTS_KEYS = 500
             fts_keys = {r["key"] for r in rows}
+            if len(fts_keys) > MAX_FTS_KEYS:
+                fts_keys = set(list(fts_keys)[:MAX_FTS_KEYS])
             like_pattern = f"%{q}%"
             like_rows = self._db.conn.execute(
                 f"""SELECT key, value, tags, metadata, created_at, updated_at{extra}
@@ -516,7 +519,10 @@ class MemoryStore:
             except sqlite3.OperationalError:
                 fts_rows = []
 
+            MAX_FTS_KEYS = 500
             fts_keys = {r["key"] for r in fts_rows}
+            if len(fts_keys) > MAX_FTS_KEYS:
+                fts_keys = set(list(fts_keys)[:MAX_FTS_KEYS])
             like_pattern = f"%{q}%"
             if fts_keys:
                 like_rows = self._db.conn.execute(

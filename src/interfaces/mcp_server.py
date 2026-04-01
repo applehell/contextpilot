@@ -1,10 +1,18 @@
-"""Context Pilot MCP Server — exposes assembler, memories, and skill registry as MCP tools."""
+"""Context Pilot MCP Server — exposes assembler, memories, and skill registry as MCP tools.
+
+NOTE: The MCP streamable-http transport does not support middleware-level auth.
+If the MCP server is exposed on a network, place it behind a reverse proxy
+(e.g. nginx/caddy) that enforces authentication via CONTEXTPILOT_API_KEY header.
+"""
 from __future__ import annotations
 
+import logging
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 from mcp.server.fastmcp import FastMCP
+
+logger = logging.getLogger(__name__)
 
 from src.core.assembler import Assembler
 from src.core.token_budget import TokenBudget
@@ -61,8 +69,8 @@ def _get_db() -> Database:
             if _db is not None:
                 try:
                     _db.close()
-                except Exception:
-                    pass
+                except Exception as e:
+                    logger.warning("Failed to close DB: %s", e)
             _db_path = current_path
             _db = Database(_db_path)
             _usage_store = None
@@ -234,7 +242,8 @@ def get_skill_context(
                     priority=Priority.MEDIUM,
                     compress_hint=hint,
                 ))
-        except Exception:
+        except Exception as e:
+            logger.warning("Failed to load memories as block pool: %s", e)
             pool = []
 
     if not pool:
@@ -245,8 +254,8 @@ def get_skill_context(
     try:
         usage = _get_usage_store()
         history = usage.get_skill_relevance(skill_name)
-    except Exception:
-        pass
+    except Exception as e:
+        logger.warning("Failed to load skill relevance history: %s", e)
 
     # Score and select
     scores = _relevance.score_blocks(pool, skill_name, hints, history)
@@ -265,8 +274,8 @@ def get_skill_context(
             usage.record_skill_relevance(skill_name, block_hash(b.content), included=True)
         for b in dropped:
             usage.record_skill_relevance(skill_name, block_hash(b.content), included=False)
-    except Exception:
-        pass
+    except Exception as e:
+        logger.warning("Failed to record skill relevance: %s", e)
 
     _registry.add_blocks_served(skill_name, len(assembled))
 
@@ -609,8 +618,8 @@ def assemble_context(budget: int, blocks: List[Dict[str, Any]]) -> Dict[str, Any
                 token_count=b.token_count,
             ))
         store.record_usage(records)
-    except Exception:
-        pass
+    except Exception as e:
+        logger.warning("Failed to record assembly usage: %s", e)
 
     return {
         "budget": budget,
@@ -683,7 +692,8 @@ def suggest_templates() -> Dict[str, Any]:
     store = _get_memory_store()
     try:
         memories = store.list()
-    except Exception:
+    except Exception as e:
+        logger.warning("Failed to list memories for template suggestions: %s", e)
         return {"count": 0, "suggestions": []}
     if not memories:
         return {"count": 0, "suggestions": []}
@@ -796,8 +806,8 @@ def assemble_template(name: str) -> Dict[str, Any]:
             for b in assembly.input_blocks
         ]
         _get_usage_store().record_usage(records)
-    except Exception:
-        pass
+    except Exception as e:
+        logger.warning("Failed to record template usage: %s", e)
 
     def _result(b: Block) -> Dict[str, Any]:
         d = _block_to_dict(b)

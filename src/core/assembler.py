@@ -107,7 +107,7 @@ class Assembler:
     def assemble_tracked(self, blocks: List[Block], budget: int) -> AssemblyResult:
         """Assemble blocks and return an AssemblyResult with tracking metadata."""
         assembly_id = uuid.uuid4().hex[:12]
-        input_blocks = [copy.copy(b) for b in blocks]
+        input_blocks = [copy.deepcopy(b) for b in blocks]
         result_blocks = self.assemble(blocks, budget)
 
         # Determine which blocks were dropped

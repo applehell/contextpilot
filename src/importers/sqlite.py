@@ -119,6 +119,17 @@ def import_generic_sqlite(path: Path, table: str, key_col: str, value_col: str,
         conn.close()
         raise ValueError(f"Table '{table}' not found in database.")
 
+    columns = {row[1] for row in conn.execute(f"PRAGMA table_info([{table}])").fetchall()}
+    if key_col not in columns:
+        conn.close()
+        raise ValueError(f"Column '{key_col}' not found in table '{table}'")
+    if value_col not in columns:
+        conn.close()
+        raise ValueError(f"Column '{value_col}' not found in table '{table}'")
+    if tag_col and tag_col not in columns:
+        conn.close()
+        raise ValueError(f"Column '{tag_col}' not found in table '{table}'")
+
     rows = conn.execute(f"SELECT * FROM [{table}]").fetchall()
     conn.close()
 

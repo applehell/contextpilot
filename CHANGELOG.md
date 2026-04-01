@@ -1,5 +1,44 @@
 # Changelog
 
+## v4.1.0 — 2026-04-01
+
+Security hardening, bug fixes, and performance improvements. 22 bugs fixed, 94 new tests.
+
+### Security Fixes
+- **API Key Authentication** — optional `CONTEXTPILOT_API_KEY` env var protects all `/api/` endpoints
+- **SSRF Protection** — webhook URLs validated against private IPs, metadata hosts, non-http schemes
+- **SQL Injection Fix** — SQLite importer validates column names against actual table schema
+- **XSS Fix** — Knowledge Graph tooltips now HTML-escaped
+- **ZIP Path Traversal** — profile import rejects entries with `../../` paths
+- **XXE Protection** — RSS parser uses `defusedxml` when available
+- **CSP Headers** — Content-Security-Policy added to all responses
+- **Upload Size Limit** — all upload endpoints capped at 50 MB
+- **Credential Protection** — connector config files now `chmod 0600`
+- **IMAP Error Sanitization** — exception messages no longer leak credentials
+
+### Bug Fixes
+- **Atomic Config Writes** — `~/.claude.json` and webhook configs use tempfile + rename
+- **`wm.send()` AttributeError** — replaced with correct `wm.notify()` call
+- **tiktoken Caching** — encoding object cached at module level (was re-created every call)
+- **EventBus Thread Safety** — `emit()` uses `call_soon_threadsafe()` for asyncio queues
+- **Assembler Deep Copy** — `assemble_tracked()` uses `deepcopy` to prevent mutation leakage
+- **DB Migration Rollback** — each migration wrapped in SAVEPOINT with rollback on failure
+- **FTS IN-clause Cap** — search limited to 500 FTS keys to prevent SQLite variable overflow
+- **Telegram Offset Tracking** — `getUpdates` offset now persisted between syncs
+- **`--db-path` CLI Fix** — path passed via env var so uvicorn respects it
+- **MCP Error Logging** — replaced 7x `except Exception: pass` with `logger.warning()`
+- **Embeddings Race Guard** — profile switch during indexing now detected and aborted
+
+### Performance
+- **SQL Aggregates** — `/health`, `/api/dashboard`, `/api/dashboard/stats` use `COUNT(*)` instead of loading all memories
+- **PRAGMA busy_timeout** — 5s timeout prevents SQLITE_BUSY errors under concurrent load
+- **Suggest-tags Pagination** — no longer loads entire memory store
+
+### Stats
+- 1052 tests (was 958), 62% coverage (was 58%)
+- 22 bugs fixed across 3 severity batches
+- `defusedxml>=0.7.1` added as dependency
+
 ## v4.0.0 — 2026-04-01
 
 Major release: 12 new features, 147 new tests, hybrid semantic search, auto-context for Claude Code.

@@ -208,8 +208,8 @@ class EmailConnector(ConnectorPlugin):
                     acc["user"], acc["password"],
                     acc.get("ssl", True),
                 )
-            except Exception as e:
-                result.errors.append(f"{acc_name}: connection failed: {e}")
+            except Exception:
+                result.errors.append(f"{acc_name}: connection failed")
                 continue
 
             try:

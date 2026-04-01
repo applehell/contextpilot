@@ -2,6 +2,8 @@
 from __future__ import annotations
 
 import json
+import os
+import tempfile
 from pathlib import Path
 from typing import Optional
 
@@ -17,7 +19,14 @@ def _load_config() -> dict:
 
 
 def _save_config(config: dict) -> None:
-    CLAUDE_CONFIG.write_text(json.dumps(config, indent=2))
+    tmp_fd, tmp_path = tempfile.mkstemp(dir=str(CLAUDE_CONFIG.parent), suffix=".tmp")
+    try:
+        with os.fdopen(tmp_fd, 'w') as f:
+            json.dump(config, f, indent=2)
+        os.replace(tmp_path, str(CLAUDE_CONFIG))
+    except:
+        os.unlink(tmp_path)
+        raise
 
 
 def register_mcp(port: int = DEFAULT_PORT, transport: str = "sse") -> None:

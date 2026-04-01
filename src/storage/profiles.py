@@ -516,6 +516,10 @@ class ProfileManager:
             for entry in names:
                 if entry in ("profile.json", "data.db"):
                     continue
+                # Path traversal check
+                target = (profile_dir / entry).resolve()
+                if not str(target).startswith(str(profile_dir.resolve())):
+                    continue  # Skip malicious entries
                 zf.extract(entry, str(profile_dir))
 
         ProfileManager.invalidate()

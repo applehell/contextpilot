@@ -302,7 +302,10 @@ def index_memories(memories: list, profile_dir: Optional[Path] = None) -> Dict[s
             skipped += 1
             continue
 
+        current_dir = _embedding_data_dir
         vec = embed_text(text)
+        if _embedding_data_dir != current_dir:
+            break  # Profile switched during indexing
         store.store(m.key, content_hash, vec)
         indexed += 1
 
