@@ -5,7 +5,7 @@ import re
 from collections import defaultdict
 from typing import Dict, List
 
-from src.storage.memory import Memory
+from ..storage.memory import Memory
 
 IP_RE = re.compile(r"\b(?:\d{1,3}\.){3}\d{1,3}\b")
 URL_RE = re.compile(r"https?://[^\s)<>\"']+")
@@ -24,7 +24,9 @@ def detect_dependencies(memories: List[Memory]) -> List[Dict]:
         for other_key in keys:
             if other_key == m.key:
                 continue
-            if other_key in m.value:
+            if len(other_key) < 4:
+                continue
+            if re.search(r"\b" + re.escape(other_key) + r"\b", m.value):
                 results.append({
                     "source_key": m.key,
                     "target_key": other_key,

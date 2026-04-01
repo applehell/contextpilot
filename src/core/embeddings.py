@@ -343,3 +343,109 @@ def semantic_search(query: str, limit: int = 10) -> List[Tuple[str, float]]:
 
     results.sort(key=lambda x: -x[1])
     return results[:limit]
+
+
+def hybrid_search(
+    query: str,
+    store,
+    top_k: int = 20,
+    fts_weight: float = 0.4,
+    semantic_weight: float = 0.6,
+) -> List[Dict[str, Any]]:
+    """Fuse FTS and semantic search results into a single ranked list.
+
+    Args:
+        query: Search text.
+        store: A MemoryStore instance (used for FTS via store.search()).
+        top_k: Number of results to return.
+        fts_weight: Weight for FTS scores (0-1).
+        semantic_weight: Weight for semantic scores (0-1).
+
+    Returns:
+        List of dicts with keys: key, value, score, tags, method.
+    """
+    if not query or not query.strip():
+        return []
+
+    # Step 1: FTS results
+    fts_memories = store.search(query, limit=top_k * 2)
+    fts_scores: Dict[str, float] = {}
+    memory_data: Dict[str, Any] = {}
+    for i, m in enumerate(fts_memories):
+        # FTS rank: first result gets highest score, linearly decreasing
+        fts_scores[m.key] = max(0.0, 1.0 - i / max(len(fts_memories), 1))
+        memory_data[m.key] = {"value": m.value, "tags": m.tags}
+
+    # Step 2: Semantic results
+    sem_results = semantic_search(query, limit=top_k * 2)
+    sem_scores: Dict[str, float] = {}
+    for key, score in sem_results:
+        sem_scores[key] = score
+
+    # If semantic search returned nothing, fall back to FTS-only
+    if not sem_scores:
+        results = []
+        for key, fts_s in sorted(fts_scores.items(), key=lambda x: -x[1]):
+            data = memory_data.get(key, {})
+            results.append({
+                "key": key,
+                "value": data.get("value", ""),
+                "score": round(fts_s, 4),
+                "tags": data.get("tags", []),
+                "method": "fts",
+            })
+        return results[:top_k]
+
+    # Step 3: Normalize both score sets to 0-1 range
+    def _normalize(scores: Dict[str, float]) -> Dict[str, float]:
+        if not scores:
+            return {}
+        min_s = min(scores.values())
+        max_s = max(scores.values())
+        rng = max_s - min_s
+        if rng == 0:
+            return {k: 1.0 for k in scores}
+        return {k: (v - min_s) / rng for k, v in scores.items()}
+
+    norm_fts = _normalize(fts_scores)
+    norm_sem = _normalize(sem_scores)
+
+    # Step 4: Fuse scores
+    all_keys = set(norm_fts.keys()) | set(norm_sem.keys())
+    fused: Dict[str, float] = {}
+    for key in all_keys:
+        f = norm_fts.get(key, 0.0)
+        s = norm_sem.get(key, 0.0)
+        fused[key] = fts_weight * f + semantic_weight * s
+
+    # Step 5: Sort and build output
+    # Load memory data for keys found only via semantic search
+    for key in all_keys:
+        if key not in memory_data:
+            try:
+                m = store.get(key)
+                memory_data[key] = {"value": m.value, "tags": m.tags}
+            except (KeyError, Exception):
+                memory_data[key] = {"value": "", "tags": []}
+
+    sorted_keys = sorted(fused.keys(), key=lambda k: -fused[k])
+    results = []
+    for key in sorted_keys[:top_k]:
+        data = memory_data.get(key, {})
+        in_fts = key in norm_fts
+        in_sem = key in norm_sem
+        if in_fts and in_sem:
+            method = "hybrid"
+        elif in_fts:
+            method = "fts"
+        else:
+            method = "semantic"
+        results.append({
+            "key": key,
+            "value": data.get("value", ""),
+            "score": round(fused[key], 4),
+            "tags": data.get("tags", []),
+            "method": method,
+        })
+
+    return results

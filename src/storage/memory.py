@@ -21,6 +21,7 @@ class Memory:
     updated_at: float = field(default_factory=time.time)
     pinned: bool = False
     expires_at: Optional[float] = None
+    category: str = "persistent"
 
     @property
     def is_expired(self) -> bool:
@@ -57,6 +58,7 @@ class Memory:
             "updated_at": self.updated_at,
             "pinned": self.pinned,
             "expires_at": self.expires_at,
+            "category": self.category,
         }
         d["ttl_label"] = self.ttl_label
         return d
@@ -72,18 +74,24 @@ class Memory:
             updated_at=d.get("updated_at", time.time()),
             pinned=d.get("pinned", False),
             expires_at=d.get("expires_at"),
+            category=d.get("category", "persistent"),
         )
 
 
 def _row_to_memory(row) -> Memory:
     pinned = False
     expires_at = None
+    category = "persistent"
     try:
         pinned = bool(row["pinned"])
     except (IndexError, KeyError):
         pass
     try:
         expires_at = row["expires_at"]
+    except (IndexError, KeyError):
+        pass
+    try:
+        category = row["category"] or "persistent"
     except (IndexError, KeyError):
         pass
     try:
@@ -103,16 +111,20 @@ def _row_to_memory(row) -> Memory:
         updated_at=row["updated_at"],
         pinned=pinned,
         expires_at=expires_at,
+        category=category,
     )
 
 
 class MemoryStore:
     """SQLite-backed memory storage with FTS5 full-text search."""
 
+    CATEGORY_TTL = {"session": 86400, "ephemeral": 3600}
+
     def __init__(self, db: Database) -> None:
         self._db = db
         self._has_pin: Optional[bool] = None
         self._has_expires: Optional[bool] = None
+        self._has_cat: Optional[bool] = None
 
     def _has_pinned_column(self) -> bool:
         if self._has_pin is None:
@@ -132,30 +144,50 @@ class MemoryStore:
                 self._has_expires = False
         return self._has_expires
 
+    def _has_category_column(self) -> bool:
+        if self._has_cat is None:
+            try:
+                self._db.conn.execute("SELECT category FROM memories LIMIT 0")
+                self._has_cat = True
+            except sqlite3.OperationalError:
+                self._has_cat = False
+        return self._has_cat
+
     def _extra_cols(self) -> str:
         parts = []
         if self._has_pinned_column():
             parts.append("pinned")
         if self._has_expires_column():
             parts.append("expires_at")
+        if self._has_category_column():
+            parts.append("category")
         return (", " + ", ".join(parts)) if parts else ""
 
     def list(self, limit: int = 0, offset: int = 0, source: str = "",
-             sort: str = "key", order: str = "asc") -> List[Memory]:
+             sort: str = "key", order: str = "asc", category: str = None) -> List[Memory]:
         allowed_sorts = {"key": "key", "updated": "updated_at", "created": "created_at",
                          "size": "length(value)", "expires": "expires_at"}
         sort_col = allowed_sorts.get(sort, "key")
         order_dir = "DESC" if order == "desc" else "ASC"
         has_pin = self._has_pinned_column()
+        has_cat = self._has_category_column()
 
         cols = "key, value, tags, metadata, created_at, updated_at" + self._extra_cols()
 
         sql = f"SELECT {cols} FROM memories"
         params: list = []
+        conditions = []
 
         if source:
-            sql += " WHERE key LIKE ?"
+            conditions.append("key LIKE ?")
             params.append(f"{source}/%")
+
+        if category and has_cat:
+            conditions.append("category = ?")
+            params.append(category)
+
+        if conditions:
+            sql += " WHERE " + " AND ".join(conditions)
 
         if has_pin:
             sql += f" ORDER BY pinned DESC, {sort_col} {order_dir}"
@@ -175,6 +207,23 @@ class MemoryStore:
         else:
             row = self._db.conn.execute("SELECT count(*) FROM memories").fetchone()
         return row[0] if row else 0
+
+    def category_stats(self) -> dict:
+        """Return count of memories per category."""
+        stats = {"persistent": 0, "session": 0, "ephemeral": 0}
+        if not self._has_category_column():
+            stats["persistent"] = self.count()
+            return stats
+        rows = self._db.conn.execute(
+            "SELECT COALESCE(category, 'persistent') as cat, count(*) as cnt FROM memories GROUP BY cat"
+        ).fetchall()
+        for r in rows:
+            cat = r["cat"]
+            if cat in stats:
+                stats[cat] = r["cnt"]
+            else:
+                stats["persistent"] += r["cnt"]
+        return stats
 
     def sources(self) -> List[dict]:
         """Return distinct source prefixes with counts."""
@@ -203,9 +252,14 @@ class MemoryStore:
             raise ValueError("Memory key must not be empty.")
         has_pin = self._has_pinned_column()
         has_exp = self._has_expires_column()
+        has_cat = self._has_category_column()
         existing = self._db.conn.execute(
             "SELECT created_at FROM memories WHERE key = ?", (memory.key,)
         ).fetchone()
+
+        # Auto-set expires_at for category-based TTL on new memories
+        if not existing and memory.expires_at is None and memory.category in self.CATEGORY_TTL:
+            memory.expires_at = time.time() + self.CATEGORY_TTL[memory.category]
 
         # If updating and reset_ttl is True and memory has a TTL duration in metadata, recalculate
         if existing and reset_ttl and memory.expires_at is not None:
@@ -217,14 +271,17 @@ class MemoryStore:
             memory.created_at = existing["created_at"]
             memory.updated_at = time.time()
             exp_clause = ", expires_at = ?" if has_exp else ""
+            cat_clause = ", category = ?" if has_cat else ""
             params = [memory.value, json.dumps(memory.tags), json.dumps(memory.metadata),
                       memory.created_at, memory.updated_at]
             if has_exp:
                 params.append(memory.expires_at)
+            if has_cat:
+                params.append(memory.category)
             params.append(memory.key)
             self._db.conn.execute(
                 f"""UPDATE memories SET value = ?, tags = ?, metadata = ?,
-                   created_at = ?, updated_at = ?{exp_clause} WHERE key = ?""",
+                   created_at = ?, updated_at = ?{exp_clause}{cat_clause} WHERE key = ?""",
                 params,
             )
         else:
@@ -240,6 +297,10 @@ class MemoryStore:
                 cols += ", expires_at"
                 vals += ", ?"
                 params.append(memory.expires_at)
+            if has_cat:
+                cols += ", category"
+                vals += ", ?"
+                params.append(memory.category)
             self._db.conn.execute(
                 f"INSERT INTO memories ({cols}) VALUES ({vals})", params,
             )
@@ -429,6 +490,69 @@ class MemoryStore:
         if limit > 0:
             return results[offset:offset + limit]
         return results
+
+    def search_count(self, query: str, tags: Optional[List[str]] = None,
+                     source: str = "") -> int:
+        """Count matching memories without loading data."""
+        q = query.strip()
+        tag_set: Optional[Set[str]] = set(tags) if tags else None
+
+        if q:
+            escaped_q = q.replace('"', '""')
+            escaped_q = re.sub(r'[*()\{\}\[\]^~:]', ' ', escaped_q)
+            for kw in ('AND', 'OR', 'NOT', 'NEAR'):
+                escaped_q = re.sub(r'\b' + kw + r'\b', kw.lower(), escaped_q)
+            fts_query = '"' + escaped_q + '"'
+
+            # FTS matches
+            try:
+                fts_rows = self._db.conn.execute(
+                    """SELECT m.key, m.tags
+                       FROM memories m
+                       JOIN memories_fts fts ON m.rowid = fts.rowid
+                       WHERE memories_fts MATCH ?""",
+                    (fts_query,),
+                ).fetchall()
+            except sqlite3.OperationalError:
+                fts_rows = []
+
+            fts_keys = {r["key"] for r in fts_rows}
+            like_pattern = f"%{q}%"
+            if fts_keys:
+                like_rows = self._db.conn.execute(
+                    f"""SELECT key, tags
+                       FROM memories
+                       WHERE (key LIKE ? OR value LIKE ?) AND key NOT IN (
+                         SELECT key FROM memories WHERE key IN ({",".join("?" * len(fts_keys))})
+                       )""",
+                    (like_pattern, like_pattern, *fts_keys),
+                ).fetchall()
+            else:
+                like_rows = self._db.conn.execute(
+                    """SELECT key, tags
+                       FROM memories
+                       WHERE key LIKE ? OR value LIKE ?""",
+                    (like_pattern, like_pattern),
+                ).fetchall()
+            all_rows = list(fts_rows) + list(like_rows)
+        else:
+            all_rows = self._db.conn.execute(
+                "SELECT key, tags FROM memories"
+            ).fetchall()
+
+        count = 0
+        for r in all_rows:
+            if tag_set:
+                try:
+                    row_tags = set(json.loads(r["tags"]))
+                except (json.JSONDecodeError, TypeError):
+                    row_tags = set()
+                if not tag_set.issubset(row_tags):
+                    continue
+            if source and not r["key"].startswith(f"{source}/"):
+                continue
+            count += 1
+        return count
 
     def tags(self) -> List[str]:
         all_tags: Set[str] = set()

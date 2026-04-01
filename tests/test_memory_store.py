@@ -244,3 +244,57 @@ class TestMemoryStoreEdgeCases:
         results = store.search("", tags=[tag])
         assert len(results) == 1
         assert results[0].key == "tagged"
+
+
+class TestSearchCount:
+    def test_count_all(self, store: MemoryStore) -> None:
+        store.set(Memory(key="a", value="hello"))
+        store.set(Memory(key="b", value="world"))
+        assert store.search_count("") == 2
+
+    def test_count_with_query(self, store: MemoryStore) -> None:
+        store.set(Memory(key="doc1", value="the quick brown fox"))
+        store.set(Memory(key="doc2", value="lazy dog"))
+        assert store.search_count("quick") == 1
+
+    def test_count_with_tags(self, store: MemoryStore) -> None:
+        store.set(Memory(key="a", value="x", tags=["config", "prod"]))
+        store.set(Memory(key="b", value="y", tags=["config"]))
+        store.set(Memory(key="c", value="z", tags=["debug"]))
+        assert store.search_count("", tags=["config"]) == 2
+
+    def test_count_with_query_and_tags(self, store: MemoryStore) -> None:
+        store.set(Memory(key="db-host", value="localhost", tags=["config"]))
+        store.set(Memory(key="db-port", value="5432", tags=["config"]))
+        store.set(Memory(key="note", value="localhost info", tags=["notes"]))
+        assert store.search_count("localhost", tags=["config"]) == 1
+
+    def test_count_with_source(self, store: MemoryStore) -> None:
+        store.set(Memory(key="proj/a", value="x"))
+        store.set(Memory(key="proj/b", value="y"))
+        store.set(Memory(key="other/c", value="z"))
+        assert store.search_count("", source="proj") == 2
+
+    def test_count_with_query_and_source(self, store: MemoryStore) -> None:
+        store.set(Memory(key="proj/a", value="hello world"))
+        store.set(Memory(key="proj/b", value="goodbye"))
+        store.set(Memory(key="other/c", value="hello again"))
+        assert store.search_count("hello", source="proj") == 1
+
+    def test_count_empty_store(self, store: MemoryStore) -> None:
+        assert store.search_count("") == 0
+        assert store.search_count("anything") == 0
+
+    def test_count_matches_search_len(self, store: MemoryStore) -> None:
+        store.set(Memory(key="a", value="foo bar", tags=["t1"]))
+        store.set(Memory(key="b", value="foo baz", tags=["t1", "t2"]))
+        store.set(Memory(key="c", value="bar qux", tags=["t2"]))
+        for q, tags, src in [
+            ("foo", None, ""),
+            ("", ["t1"], ""),
+            ("foo", ["t1"], ""),
+            ("bar", ["t2"], ""),
+        ]:
+            count = store.search_count(q, tags=tags, source=src)
+            results = store.search(q, tags=tags, source=src)
+            assert count == len(results), f"Mismatch for q={q!r}, tags={tags}, source={src!r}"

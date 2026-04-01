@@ -82,6 +82,35 @@ class RelationStore:
         self._db.conn.commit()
         return cursor.rowcount
 
+    def get_related_keys(self, key: str) -> List[str]:
+        """Return all keys related to the given key (both as source and target)."""
+        rows = self._db.conn.execute(
+            "SELECT source_key, target_key FROM memory_relations WHERE source_key = ? OR target_key = ?",
+            (key, key),
+        ).fetchall()
+        related = set()
+        for r in rows:
+            if r["source_key"] != key:
+                related.add(r["source_key"])
+            if r["target_key"] != key:
+                related.add(r["target_key"])
+        return sorted(related)
+
+    def get_graph(self, limit: int = 200) -> dict:
+        """Return a graph representation for visualization."""
+        rows = self._db.conn.execute(
+            "SELECT source_key, target_key, relation_type FROM memory_relations ORDER BY created_at DESC LIMIT ?",
+            (limit,),
+        ).fetchall()
+        node_ids = set()
+        edges = []
+        for r in rows:
+            node_ids.add(r["source_key"])
+            node_ids.add(r["target_key"])
+            edges.append({"from": r["source_key"], "to": r["target_key"], "type": r["relation_type"]})
+        nodes = [{"id": nid, "label": nid} for nid in sorted(node_ids)]
+        return {"nodes": nodes, "edges": edges}
+
     def _row_to_relation(self, r) -> Relation:
         return Relation(
             id=r["id"], source_key=r["source_key"], target_key=r["target_key"],

@@ -4,6 +4,7 @@ from __future__ import annotations
 import io
 import json
 import shutil
+import threading
 import time
 import uuid
 import zipfile
@@ -38,11 +39,27 @@ class Profile:
 class ProfileManager:
     """Manages multiple knowledge-base profiles, each backed by its own SQLite DB."""
 
+    _instance: Optional[ProfileManager] = None
+    _instance_lock: threading.Lock = threading.Lock()
+
     def __init__(self) -> None:
         PROFILES_DIR.mkdir(parents=True, exist_ok=True)
         self._config = self._load_config()
         self._migrate_legacy()
         self._ensure_default()
+
+    @classmethod
+    def instance(cls) -> ProfileManager:
+        if cls._instance is None:
+            with cls._instance_lock:
+                if cls._instance is None:
+                    cls._instance = cls()
+        return cls._instance
+
+    @classmethod
+    def invalidate(cls) -> None:
+        with cls._instance_lock:
+            cls._instance = None
 
     def _load_config(self) -> Dict:
         if CONFIG_FILE.exists():
@@ -166,6 +183,7 @@ class ProfileManager:
         if description:
             self._config["profiles"][pid]["description"] = description
         self._save_config()
+        ProfileManager.invalidate()
 
     def create(self, name: str, description: str = "") -> Profile:
         # Check name uniqueness
@@ -188,6 +206,7 @@ class ProfileManager:
         }
         self._config["profiles"][pid] = profile_data
         self._save_config()
+        ProfileManager.invalidate()
         return Profile(**profile_data, memory_count=0)
 
     def switch(self, pid: str) -> Path:
@@ -195,6 +214,7 @@ class ProfileManager:
             raise KeyError(f"Profile '{pid}' not found.")
         self._config["active"] = pid
         self._save_config()
+        ProfileManager.invalidate()
         return self.active_db_path
 
     def delete(self, pid: str) -> None:
@@ -215,6 +235,7 @@ class ProfileManager:
             profile_dir = db_path.parent
             if profile_dir.exists() and profile_dir != PROFILES_DIR:
                 shutil.rmtree(profile_dir, ignore_errors=True)
+        ProfileManager.invalidate()
 
     def duplicate(self, source_pid: str, new_name: str, description: str = "") -> Profile:
         source = self._config["profiles"].get(source_pid)
@@ -497,4 +518,5 @@ class ProfileManager:
                     continue
                 zf.extract(entry, str(profile_dir))
 
+        ProfileManager.invalidate()
         return new_profile

@@ -1,5 +1,31 @@
 # Changelog
 
+## v4.0.0 — 2026-04-01
+
+Major release: 12 new features, 147 new tests, hybrid semantic search, auto-context for Claude Code.
+
+### New Features
+- **Hybrid Semantic Search** — fuses FTS5 keyword + TF-IDF semantic scores with configurable weights. Available via `/api/semantic-search?mode=hybrid` and MCP `memory_search(semantic=True)`
+- **Auto-Context MCP Tool** — `get_context_for_task(description)` finds relevant memories, assigns priorities, and assembles within a token budget automatically
+- **Memory Auto-Capture** — `capture_learnings(learnings)` batch-saves session insights with auto-tagging and merge mode for existing keys
+- **Memory Categories** — `persistent` (default), `session` (24h auto-TTL), `ephemeral` (1h auto-TTL). New DB schema v13
+- **Memory Relations** — bidirectional cross-references with `GET /api/memories/{key}/related` and MCP `get_related_memories(key)`
+- **Backup & Restore** — create, list, restore, delete backups via `POST/GET/DELETE /api/backups`
+- **Analytics Dashboard** — top memories, tag stats, connector stats, memory growth via `/api/analytics/*` endpoints
+- **Inbound Webhooks** — `POST /api/inbound/{token}` for pushing memories from external services (n8n, Home Assistant)
+
+### Improvements
+- **Deduplicated `_detect_compress_hint`** — extracted to shared `src/core/compress_detect.py`, removed 3 copies
+- **Fixed double-query in search** — new `search_count()` method replaces full table scan for pagination counts
+- **ProfileManager caching** — singleton with thread-safe double-check locking, invalidation on mutations
+- **DependencyDetector** — word-boundary matching replaces substring check, minimum key length guard (>= 4 chars)
+- **26 MCP tools** (was 23): +`get_context_for_task`, +`capture_learnings`, +`get_related_memories`
+
+### Stats
+- 958 tests (was 811), 58% coverage (was 55%)
+- 13 new files, 10 modified files
+- Schema v13 (was v12)
+
 ## v3.5.1 — 2026-03-29
 
 MCP compatibility fix for Claude Code.

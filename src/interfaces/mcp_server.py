@@ -8,7 +8,6 @@ from mcp.server.fastmcp import FastMCP
 
 from src.core.assembler import Assembler
 from src.core.token_budget import TokenBudget
-import re
 
 from src.core.block import Block, Priority
 from src.core.compressors.bullet_extract import BulletExtractCompressor
@@ -109,36 +108,7 @@ def _dicts_to_blocks(raw: List[Dict[str, Any]]) -> List[Block]:
     return blocks
 
 
-_CODE_INDICATORS = re.compile(
-    r"(```|def |class |function |import |from |curl |export |const |let |var )"
-)
-_STEP_INDICATORS = re.compile(
-    r"^(\d+[.)]\s|[-*]\s|#{1,3}\s)", re.MULTILINE
-)
-_KV_INDICATORS = re.compile(
-    r"^[A-Za-z][^:=\n]{0,40}(?::[ \t]|[ \t]*=[ \t])", re.MULTILINE
-)
-
-
-def _detect_compress_hint(text: str) -> Optional[str]:
-    """Auto-detect the best compressor for a memory's content."""
-    code_matches = len(_CODE_INDICATORS.findall(text))
-    step_matches = len(_STEP_INDICATORS.findall(text))
-    kv_matches = len(_KV_INDICATORS.findall(text))
-
-    # Code-heavy content
-    if code_matches >= 3:
-        return "code_compact"
-    # Step-based / workflow content → mermaid
-    if step_matches >= 3:
-        return "mermaid"
-    # Key-value structured content
-    if kv_matches >= 3:
-        return "yaml_struct"
-    # General prose
-    if len(text) > 200:
-        return "bullet_extract"
-    return None
+from src.core.compress_detect import detect_compress_hint as _detect_compress_hint
 
 
 def _block_to_dict(b: Block) -> Dict[str, Any]:
@@ -361,25 +331,25 @@ def memory_get(key: str) -> Dict[str, Any]:
 
 
 @mcp.tool()
-def memory_set(key: str, value: str, tags: Optional[List[str]] = None) -> Dict[str, Any]:
+def memory_set(key: str, value: str, tags: Optional[List[str]] = None, category: str = "persistent") -> Dict[str, Any]:
     """Create or update a memory.
 
     Args:
         key: Unique memory key.
         value: Memory content.
         tags: List of tags.
+        category: Memory category — "persistent" (no TTL), "session" (24h TTL), or "ephemeral" (1h TTL).
     """
     if not key or not key.strip():
         return {"error": "Memory key must not be empty."}
     store = _get_memory_store()
-    # Determine if this is a create or update
     is_update = False
     try:
         store.get(key)
         is_update = True
     except KeyError:
         pass
-    store.set(Memory(key=key, value=value, tags=tags or []))
+    store.set(Memory(key=key, value=value, tags=tags or [], category=category))
     op = "updated" if is_update else "created"
     tag_info = f" tags=[{', '.join(tags)}]" if tags else ""
     _get_activity_log().record(op, key, f"{len(value)} chars{tag_info}")
@@ -403,14 +373,32 @@ def memory_delete(key: str) -> Dict[str, Any]:
 
 
 @mcp.tool()
-def memory_search(query: str, tags: Optional[List[str]] = None) -> Dict[str, Any]:
+def memory_search(query: str, tags: Optional[List[str]] = None, semantic: bool = False) -> Dict[str, Any]:
     """Search memories by text query and/or tags.
 
     Args:
         query: Search text.
         tags: Tags to filter by. Leave empty for no tag filter.
+        semantic: When True, use hybrid search (FTS + semantic similarity).
     """
     store = _get_memory_store()
+
+    if semantic and query and query.strip():
+        from src.core.embeddings import hybrid_search
+        hybrid_results = hybrid_search(query, store)
+        # Apply tag filter if specified
+        if tags:
+            tag_set = set(tags)
+            hybrid_results = [r for r in hybrid_results if tag_set.issubset(set(r.get("tags", [])))]
+        tag_info = f" tags=[{', '.join(tags)}]" if tags else ""
+        _get_activity_log().record("searched", query or "*", f"{len(hybrid_results)} results (hybrid){tag_info}")
+        items = [
+            {"key": r["key"], "value": r["value"][:200], "tags": r["tags"],
+             "score": r.get("score", 0), "method": r.get("method", "hybrid")}
+            for r in hybrid_results
+        ]
+        return {"results": items, "count": len(items)}
+
     results = store.search(query, tags=tags or None)
     tag_info = f" tags=[{', '.join(tags)}]" if tags else ""
     _get_activity_log().record("searched", query or "*", f"{len(results)} results{tag_info}")
@@ -419,6 +407,177 @@ def memory_search(query: str, tags: Optional[List[str]] = None) -> Dict[str, Any
         for m in results
     ]
     return {"results": items, "count": len(items)}
+
+
+# ══════════════════════════════════════════════════════════════════════
+# AUTO-CONTEXT & AUTO-CAPTURE
+# ══════════════════════════════════════════════════════════════════════
+
+@mcp.tool()
+def get_context_for_task(
+    task_description: str,
+    budget: int = 4000,
+    include_tags: Optional[List[str]] = None,
+) -> Dict[str, Any]:
+    """Find relevant memories for a task and assemble them within a token budget.
+
+    Uses hybrid search to find related memories, assigns priorities,
+    and assembles the result within the given token budget.
+
+    Args:
+        task_description: Description of the task to find context for.
+        budget: Maximum token budget for the assembled context (default 4000).
+        include_tags: Optional list of tags to filter memories by.
+    """
+    if not task_description or not task_description.strip():
+        return {"blocks": [], "total_tokens": 0, "memories_considered": 0, "memories_included": 0}
+
+    store = _get_memory_store()
+
+    # Find relevant memories via hybrid search (or FTS fallback)
+    from src.core.embeddings import hybrid_search
+    results = hybrid_search(task_description, store, top_k=30)
+
+    # Apply tag filter if specified
+    if include_tags:
+        tag_set = set(include_tags)
+        results = [r for r in results if tag_set.issubset(set(r.get("tags", [])))]
+
+    if not results:
+        return {"blocks": [], "total_tokens": 0, "memories_considered": 0, "memories_included": 0}
+
+    memories_considered = len(results)
+
+    # Convert to Blocks with priority assignment
+    blocks = []
+    for i, r in enumerate(results):
+        if i < 5:
+            priority = Priority.HIGH
+        elif i < 15:
+            priority = Priority.MEDIUM
+        else:
+            priority = Priority.LOW
+        content = f"[{r['key']}] {r['value']}"
+        b = Block(content=content, priority=priority)
+        b.source_key = r["key"]
+        blocks.append(b)
+
+    # Assemble within budget
+    assembled = _assembler.assemble(blocks, budget)
+
+    output_blocks = []
+    for b in assembled:
+        output_blocks.append({
+            "key": b.source_key or "",
+            "content": b.content,
+            "priority": b.priority.value if hasattr(b.priority, "value") else str(b.priority),
+            "tokens": b.token_count,
+        })
+
+    return {
+        "blocks": output_blocks,
+        "total_tokens": sum(b.token_count for b in assembled),
+        "memories_considered": memories_considered,
+        "memories_included": len(assembled),
+    }
+
+
+@mcp.tool()
+def capture_learnings(learnings: List[Dict[str, Any]]) -> Dict[str, Any]:
+    """Capture multiple learnings as memories in a single call.
+
+    Each learning dict should have: key, value, tags (list), category (str).
+    Automatically adds 'source:auto-capture' and a date tag.
+    If a memory with the same key exists, appends to its value with a separator.
+
+    Args:
+        learnings: List of learning dicts with key, value, tags, category.
+    """
+    import time as _time
+    from datetime import date
+
+    store = _get_memory_store()
+    saved = 0
+    updated = 0
+    skipped = 0
+    keys: List[str] = []
+    today = date.today().isoformat()
+
+    for item in learnings:
+        key = item.get("key", "").strip() if item.get("key") else ""
+        value = item.get("value", "").strip() if item.get("value") else ""
+
+        if not key or not value:
+            skipped += 1
+            continue
+
+        tags = list(item.get("tags", []))
+        category = item.get("category", "persistent")
+
+        # Auto-tags
+        if "source:auto-capture" not in tags:
+            tags.append("source:auto-capture")
+        date_tag = f"captured:{today}"
+        if date_tag not in tags:
+            tags.append(date_tag)
+        if category and f"category:{category}" not in tags:
+            tags.append(f"category:{category}")
+
+        # Check if memory exists -> merge mode
+        try:
+            existing = store.get(key)
+            merged_value = existing.value + "\n---\n" + value
+            merged_tags = list(set(existing.tags + tags))
+            store.set(Memory(
+                key=key,
+                value=merged_value,
+                tags=merged_tags,
+                metadata=existing.metadata,
+                created_at=existing.created_at,
+            ))
+            updated += 1
+        except KeyError:
+            store.set(Memory(key=key, value=value, tags=tags))
+            saved += 1
+
+        keys.append(key)
+
+    return {"saved": saved, "updated": updated, "skipped": skipped, "keys": keys}
+
+
+@mcp.tool()
+def get_related_memories(key: str) -> Dict[str, Any]:
+    """Get memories related to the given key, including relation types.
+
+    Args:
+        key: The memory key to find relations for.
+    """
+    from src.storage.relations import RelationStore
+    db = _get_db()
+    rs = RelationStore(db)
+    relations = rs.get_relations(key)
+    store = _get_memory_store()
+    items = []
+    for r in relations:
+        other_key = r.target_key if r.source_key == key else r.source_key
+        try:
+            m = store.get(other_key)
+            items.append({
+                "key": other_key,
+                "value": m.value[:200],
+                "tags": m.tags,
+                "relation_type": r.relation_type,
+                "direction": "outgoing" if r.source_key == key else "incoming",
+            })
+        except KeyError:
+            items.append({
+                "key": other_key,
+                "value": "(deleted)",
+                "tags": [],
+                "relation_type": r.relation_type,
+                "direction": "outgoing" if r.source_key == key else "incoming",
+            })
+    return {"key": key, "related": items, "count": len(items)}
 
 
 # ══════════════════════════════════════════════════════════════════════

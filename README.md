@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="https://img.shields.io/badge/version-3.8.0-blue?style=flat-square" alt="Version">
+  <img src="https://img.shields.io/badge/version-4.0.0-blue?style=flat-square" alt="Version">
   <img src="https://img.shields.io/docker/pulls/applehell/contextpilot?style=flat-square&color=blue" alt="Docker Pulls">
   <img src="https://img.shields.io/docker/image-size/applehell/contextpilot/latest?style=flat-square&color=blue" alt="Image Size">
   <img src="https://img.shields.io/badge/python-3.11+-3776AB?style=flat-square&logo=python&logoColor=white" alt="Python">
@@ -101,11 +101,14 @@ python -m src.web --mcp-port 8500          # Custom MCP port
 | Capability | Details |
 |---|---|
 | **Create & Edit** | Modal editor with Markdown support (EasyMDE) |
-| **Search** | Full-text search via SQLite FTS5 |
+| **Search** | Full-text search via SQLite FTS5 + **hybrid semantic search** |
 | **Tags** | Clickable tag filtering, bulk tag operations |
+| **Categories** | `persistent`, `session` (24h TTL), `ephemeral` (1h TTL) — auto-expiry |
 | **TTL** | Time-to-live with auto-expiry, lifetime indicators |
 | **Pin** | Pin important memories to the top |
+| **Relations** | Cross-references between memories, bidirectional graph |
 | **Bulk Ops** | Multi-select, bulk delete, bulk TTL editing |
+| **Backup** | Create, list, restore, delete backups via API |
 | **Export** | JSON export (all or filtered by tag) |
 | **Diff View** | Compare memory versions side-by-side |
 
@@ -181,7 +184,9 @@ The Assembler optimizes your memories for AI consumption within a token budget:
 | Feature | Description |
 |---|---|
 | **Setup Wizard** | 7-step animated onboarding for fresh installs |
-| **Knowledge Graph** | Interactive vis.js network — nodes = memories, edges = shared tags |
+| **Knowledge Graph** | Interactive vis.js network — nodes = memories, edges = shared tags + relations |
+| **Analytics** | Top memories, tag stats, connector stats, memory growth, token usage |
+| **Inbound Webhooks** | Push memories from external services (n8n, Home Assistant) |
 | **Secrets Scanner** | Detects API keys, passwords, tokens, private keys (OWASP patterns) |
 | **Live Activity** | Real-time SSE event stream with color-coded category badges |
 | **Dark Mode** | System preference detection + manual toggle |
@@ -202,12 +207,15 @@ Claude Code ──→ MCP Server (SSE, Port 8400)
                    ├── memory_set / get / delete / search / list
                    ├── assemble_template / list_templates / suggest_templates
                    ├── get_skill_context    → relevance scoring + compression
+                   ├── get_context_for_task → auto-context assembly
+                   ├── capture_learnings    → batch-save session insights
+                   ├── get_related_memories → cross-references
                    ├── register_skill / heartbeat / list_registered_skills
                    ├── assemble_context / list_blocks
                    └── submit_feedback / get_block_weight
 ```
 
-**23 MCP Tools** covering: memory CRUD, template assembly, auto-suggest, skill registry, context assembly, and feedback.
+**26 MCP Tools** covering: memory CRUD, template assembly, auto-suggest, skill registry, context assembly, feedback, **hybrid search**, **auto-context**, and **learning capture**.
 
 **Profile-aware:** The MCP server follows profile switches in real-time — no restart needed.
 
@@ -285,7 +293,7 @@ export CONTEXTPILOT_MCP_URL=http://your-server:8400/sse  # MCP Server
 | Tag | Description |
 |---|---|
 | [`applehell/contextpilot:latest`](https://hub.docker.com/r/applehell/contextpilot/tags) | Latest stable release |
-| [`applehell/contextpilot:3.8.0`](https://hub.docker.com/r/applehell/contextpilot/tags) | Specific version |
+| [`applehell/contextpilot:4.0.0`](https://hub.docker.com/r/applehell/contextpilot/tags) | Specific version |
 
 ### Volumes
 
@@ -332,7 +340,7 @@ Connectors ──→ 17 sources (GitHub, Gitea, Paperless, Obsidian, Email,
                Notion, Teams, Telegram, RSS, Excel, Google Drive,
                KeePass, Bitwarden, Kubernetes, Dockge, Bookmarks, HA)
 
-Storage ──→ SQLite (WAL mode + FTS5, Schema v12)
+Storage ──→ SQLite (WAL mode + FTS5, Schema v13)
 ```
 
 ### Data Paths
@@ -375,7 +383,10 @@ Storage ──→ SQLite (WAL mode + FTS5, Schema v12)
 | `/api/memories/{key}` | PUT | Update memory |
 | `/api/memories/{key}` | DELETE | Delete memory |
 | `/api/memories/search` | GET | Full-text search + tag filter |
+| `/api/memories/category-stats` | GET | Memory count per category |
+| `/api/memories/{key}/related` | GET | Related memories (cross-references) |
 | `/api/memories/bulk-delete` | POST | Bulk delete |
+| `/api/semantic-search` | GET | Hybrid/semantic/keyword search (mode param) |
 | `/api/export-memories` | GET | Export as JSON |
 | `/api/memory-tags` | GET | All tags |
 
@@ -452,6 +463,24 @@ Storage ──→ SQLite (WAL mode + FTS5, Schema v12)
 
 </details>
 
+<details>
+<summary><strong>Analytics & Backup</strong></summary>
+
+| Endpoint | Method | Description |
+|---|---|---|
+| `/api/analytics/summary` | GET | Overview dashboard data |
+| `/api/analytics/top-memories` | GET | Most accessed memories |
+| `/api/analytics/top-tags` | GET | Most frequent tags |
+| `/api/analytics/connector-stats` | GET | Per-connector statistics |
+| `/api/analytics/memory-growth` | GET | Daily memory count growth |
+| `/api/backups` | GET | List backups |
+| `/api/backups` | POST | Create backup |
+| `/api/backups/{filename}/restore` | POST | Restore backup |
+| `/api/backups/{filename}` | DELETE | Delete backup |
+| `/api/inbound/{token}` | POST | Inbound webhook (push memories) |
+
+</details>
+
 ---
 
 ## Project Structure
@@ -460,8 +489,12 @@ Storage ──→ SQLite (WAL mode + FTS5, Schema v12)
 src/
   core/                        Core logic
     assembler.py               3-phase token-budget assembler
+    analytics.py               Usage analytics engine
+    backup.py                  Backup & restore manager
     block.py                   Block data model
+    compress_detect.py         Shared compression hint detection
     compressors/               7 compressors (bullet, mermaid, yaml, code, ...)
+    embeddings.py              TF-IDF embeddings + hybrid search
     events.py                  Global EventBus with SSE broadcast
     relevance.py               Relevance scoring engine
     secrets.py                 Secrets detector (OWASP patterns)
@@ -479,7 +512,7 @@ src/
     kubernetes.py, dockge.py   Infrastructure sources
     homeassistant.py           Smart Home source
   storage/                     SQLite persistence
-    db.py                      DB engine + migrations (v1-v12)
+    db.py                      DB engine + migrations (v1-v13)
     memory.py                  MemoryStore (CRUD + FTS5)
     profiles.py                Profile manager
     folders.py                 Folder source manager + file indexer
@@ -520,7 +553,7 @@ python -m src.web --reload    # Hot-reload
 | **AI Integration** | MCP Server (FastMCP), tiktoken |
 | **Connectors** | requests, openpyxl, PyJWT, pykeepass, PyYAML |
 | **Security** | DOMPurify, Security Headers, non-root Docker |
-| **Deployment** | Docker (arm64 + amd64), 697+ tests |
+| **Deployment** | Docker (arm64 + amd64), 958+ tests |
 
 ---
 

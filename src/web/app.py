@@ -74,30 +74,7 @@ def _get_usage_store() -> UsageStore:
     return _usage_store
 
 
-_CODE_INDICATORS = re.compile(
-    r"(```|def |class |function |import |from |curl |export |const |let |var )"
-)
-_STEP_INDICATORS = re.compile(
-    r"^(\d+[.)]\s|[-*]\s|#{1,3}\s)", re.MULTILINE
-)
-_KV_INDICATORS = re.compile(
-    r"^[A-Za-z][^:=\n]{0,40}(?::[ \t]|[ \t]*=[ \t])", re.MULTILINE
-)
-
-
-def _detect_compress_hint(text: str) -> Optional[str]:
-    code = len(_CODE_INDICATORS.findall(text))
-    steps = len(_STEP_INDICATORS.findall(text))
-    kv = len(_KV_INDICATORS.findall(text))
-    if code >= 3:
-        return "code_compact"
-    if steps >= 3:
-        return "mermaid"
-    if kv >= 3:
-        return "yaml_struct"
-    if len(text) > 200:
-        return "bullet_extract"
-    return None
+from src.core.compress_detect import detect_compress_hint as _detect_compress_hint
 
 
 def _make_assembler() -> Assembler:
@@ -136,6 +113,12 @@ class ProjectCreate(BaseModel):
     description: str = ""
 
 
+class InboundPayload(BaseModel):
+    key: str
+    value: str
+    tags: List[str] = []
+
+
 class ContextCreate(BaseModel):
     name: str
 
@@ -145,6 +128,7 @@ class MemoryIn(BaseModel):
     value: str
     tags: List[str] = []
     ttl_seconds: Optional[float] = None
+    category: str = "persistent"
 
 
 class FeedbackIn(BaseModel):
@@ -466,10 +450,12 @@ def create_app(db_path: Optional[Path] = None) -> FastAPI:
         source: str = Query(""),
         sort: str = Query("key"),
         order: str = Query("asc"),
+        category: str = Query(""),
     ):
         store = _get_memory_store()
         offset = (page - 1) * page_size
-        memories = store.list(limit=page_size, offset=offset, source=source, sort=sort, order=order)
+        cat = category if category else None
+        memories = store.list(limit=page_size, offset=offset, source=source, sort=sort, order=order, category=cat)
         total = store.count(source=source)
         return {
             "memories": [{**m.to_dict(), "tokens": TokenBudget.estimate(m.value), "bytes": len(m.value.encode("utf-8"))} for m in memories],
@@ -496,9 +482,7 @@ def create_app(db_path: Optional[Path] = None) -> FastAPI:
         tag_list = [t.strip() for t in tags.split(",") if t.strip()] if tags else None
         offset = (page - 1) * page_size
         results = store.search(q, tag_list, source=source, limit=page_size, offset=offset)
-        # Count total without pagination for UI
-        total_results = store.search(q, tag_list, source=source)
-        total = len(total_results)
+        total = store.search_count(q, tag_list, source=source)
         _events.emit("memory", "search", q or "(all)", f"{total} results" + (f", source={source}" if source else ""))
         return {
             "memories": [{**m.to_dict(), "tokens": TokenBudget.estimate(m.value), "bytes": len(m.value.encode("utf-8"))} for m in results],
@@ -533,6 +517,39 @@ def create_app(db_path: Optional[Path] = None) -> FastAPI:
             "expiring_7d": expiring_7d,
         }
 
+    @app.get("/api/memories/category-stats")
+    async def category_stats():
+        store = _get_memory_store()
+        return store.category_stats()
+
+    @app.get("/api/memories/{key:path}/related")
+    async def get_related_memories(key: str):
+        from src.storage.relations import RelationStore
+        rs = RelationStore(_db)
+        relations = rs.get_relations(key)
+        store = _get_memory_store()
+        items = []
+        for r in relations:
+            other_key = r.target_key if r.source_key == key else r.source_key
+            try:
+                m = store.get(other_key)
+                items.append({
+                    "key": other_key,
+                    "value": m.value[:200],
+                    "tags": m.tags,
+                    "relation_type": r.relation_type,
+                    "direction": "outgoing" if r.source_key == key else "incoming",
+                })
+            except KeyError:
+                items.append({
+                    "key": other_key,
+                    "value": "(deleted)",
+                    "tags": [],
+                    "relation_type": r.relation_type,
+                    "direction": "outgoing" if r.source_key == key else "incoming",
+                })
+        return {"key": key, "related": items, "count": len(items)}
+
     @app.get("/api/memories/{key:path}/versions")
     async def memory_versions(key: str, limit: int = Query(20, ge=1, le=100)):
         from src.storage.versions import VersionStore
@@ -558,7 +575,7 @@ def create_app(db_path: Optional[Path] = None) -> FastAPI:
             expires_at = time.time() + req.ttl_seconds
             metadata["ttl_seconds"] = req.ttl_seconds
         m = Memory(key=req.key, value=req.value, tags=req.tags,
-                   metadata=metadata, expires_at=expires_at)
+                   metadata=metadata, expires_at=expires_at, category=req.category)
         store.set(m)
         _index_single(m)
         _events.emit("memory", "create", req.key, f"tags={req.tags}")
@@ -1986,6 +2003,76 @@ def create_app(db_path: Optional[Path] = None) -> FastAPI:
         return {"content": content, "memory_count": len(memories),
                 "token_count": TokenBudget.estimate(content)}
 
+    # --- Backup & Restore ---
+
+    from src.core.backup import BackupManager
+
+    @app.post("/api/backups", status_code=201)
+    async def create_backup():
+        pm = ProfileManager()
+        bm = BackupManager(pm.active_data_dir)
+        try:
+            path = bm.create_backup()
+            stat = path.stat()
+            return {"filename": path.name, "size_bytes": stat.st_size}
+        except FileNotFoundError as e:
+            raise HTTPException(404, str(e))
+
+    @app.get("/api/backups")
+    async def list_backups():
+        pm = ProfileManager()
+        bm = BackupManager(pm.active_data_dir)
+        return bm.list_backups()
+
+    @app.post("/api/backups/{filename}/restore")
+    async def restore_backup(filename: str):
+        pm = ProfileManager()
+        bm = BackupManager(pm.active_data_dir)
+        try:
+            bm.restore_backup(filename)
+            return {"status": "restored", "filename": filename}
+        except ValueError as e:
+            raise HTTPException(400, str(e))
+
+    @app.delete("/api/backups/{filename}")
+    async def delete_backup(filename: str):
+        pm = ProfileManager()
+        bm = BackupManager(pm.active_data_dir)
+        try:
+            bm.delete_backup(filename)
+            return {"status": "deleted", "filename": filename}
+        except ValueError as e:
+            raise HTTPException(400, str(e))
+
+    # --- Analytics ---
+
+    from src.core.analytics import AnalyticsEngine
+
+    @app.get("/api/analytics/summary")
+    async def analytics_summary():
+        engine = AnalyticsEngine(_get_db(), _get_memory_store(), _get_usage_store())
+        return engine.summary()
+
+    @app.get("/api/analytics/top-memories")
+    async def analytics_top_memories(limit: int = Query(20, ge=1, le=100)):
+        engine = AnalyticsEngine(_get_db(), _get_memory_store(), _get_usage_store())
+        return engine.top_memories(limit)
+
+    @app.get("/api/analytics/top-tags")
+    async def analytics_top_tags(limit: int = Query(20, ge=1, le=100)):
+        engine = AnalyticsEngine(_get_db(), _get_memory_store(), _get_usage_store())
+        return engine.top_tags(limit)
+
+    @app.get("/api/analytics/connector-stats")
+    async def analytics_connector_stats():
+        engine = AnalyticsEngine(_get_db(), _get_memory_store(), _get_usage_store())
+        return engine.connector_stats()
+
+    @app.get("/api/analytics/memory-growth")
+    async def analytics_memory_growth(days: int = Query(30, ge=1, le=365)):
+        engine = AnalyticsEngine(_get_db(), _get_memory_store(), _get_usage_store())
+        return engine.memory_growth(days)
+
     # --- Duplicate Detection ---
 
     @app.get("/api/duplicates")
@@ -2134,14 +2221,39 @@ def create_app(db_path: Optional[Path] = None) -> FastAPI:
         return _get_embed_store().stats()
 
     @app.get("/api/semantic-search")
-    async def semantic_search_api(q: str = Query("", min_length=1), limit: int = Query(10, ge=1, le=50)):
-        results = _semantic_search(q, limit)
+    async def semantic_search_api(
+        q: str = Query("", min_length=1),
+        limit: int = Query(10, ge=1, le=50),
+        mode: str = Query("hybrid", pattern="^(keyword|semantic|hybrid)$"),
+    ):
         store = _get_memory_store()
+
+        if mode == "keyword":
+            memories = store.search(q, limit=limit)
+            return [
+                {**m.to_dict(), "similarity": 0, "method": "keyword"}
+                for m in memories
+            ]
+
+        if mode == "semantic":
+            results = _semantic_search(q, limit)
+            output = []
+            for key, score in results:
+                try:
+                    m = store.get(key)
+                    output.append({**m.to_dict(), "similarity": score, "method": "semantic"})
+                except KeyError:
+                    pass
+            return output
+
+        # mode == "hybrid"
+        from src.core.embeddings import hybrid_search as _hybrid_search
+        hybrid_results = _hybrid_search(q, store, top_k=limit)
         output = []
-        for key, score in results:
+        for r in hybrid_results:
             try:
-                m = store.get(key)
-                output.append({**m.to_dict(), "similarity": score})
+                m = store.get(r["key"])
+                output.append({**m.to_dict(), "similarity": r["score"], "method": r["method"]})
             except KeyError:
                 pass
         return output
@@ -2286,6 +2398,23 @@ def create_app(db_path: Optional[Path] = None) -> FastAPI:
         c._save()
         _events.emit("connector", "remove-account", "email", account_name)
         return {"status": "removed", "name": account_name, "remaining": len(accounts)}
+
+    # --- Inbound Webhook ---
+
+    @app.post("/api/inbound/{token}")
+    async def inbound_webhook(token: str, payload: InboundPayload):
+        expected = os.environ.get("CONTEXTPILOT_INBOUND_TOKEN")
+        if expected is None:
+            raise HTTPException(status_code=403, detail="Inbound webhooks not configured")
+        if token != expected:
+            raise HTTPException(status_code=403, detail="Invalid token")
+        if not payload.key or not payload.key.strip():
+            raise HTTPException(status_code=400, detail="Missing key")
+        if not payload.value or not payload.value.strip():
+            raise HTTPException(status_code=400, detail="Missing value")
+        store = _get_memory_store()
+        store.set(Memory(key=payload.key.strip(), value=payload.value.strip(), tags=payload.tags))
+        return {"status": "ok", "key": payload.key.strip()}
 
     # Cleanup expired memories on startup
     try:

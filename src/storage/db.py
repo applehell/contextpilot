@@ -5,7 +5,7 @@ import sqlite3
 from pathlib import Path
 from typing import Optional
 
-SCHEMA_VERSION = 12
+SCHEMA_VERSION = 13
 
 MIGRATIONS = {
     1: [
@@ -223,6 +223,10 @@ MIGRATIONS = {
         """DROP INDEX IF EXISTS idx_sbr_skill""",
         # -- run incremental vacuum to reclaim free pages --
         """PRAGMA incremental_vacuum""",
+    ],
+    13: [
+        # -- memory categories with retention policies --
+        """ALTER TABLE memories ADD COLUMN category TEXT DEFAULT 'persistent'""",
     ],
 }
 
