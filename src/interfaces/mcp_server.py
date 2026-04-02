@@ -6,13 +6,14 @@ If the MCP server is exposed on a network, place it behind a reverse proxy
 """
 from __future__ import annotations
 
-import logging
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 from mcp.server.fastmcp import FastMCP
 
-logger = logging.getLogger(__name__)
+from src.core.log import get_logger
+
+logger = get_logger("mcp_server")
 
 from src.core.assembler import Assembler
 from src.core.token_budget import TokenBudget
@@ -151,6 +152,7 @@ def register_skill(
 
     Returns registration confirmation with skill_id.
     """
+    logger.debug("MCP tool call: register_skill name=%s", name)
     if not name or not name.strip():
         return {"error": "Skill name must not be empty."}
     _registry.register(name, description, context_hints or [])
@@ -168,6 +170,7 @@ def unregister_skill(name: str) -> Dict[str, Any]:
     Args:
         name: The skill name used during registration.
     """
+    logger.debug("MCP tool call: unregister_skill name=%s", name)
     if _registry.unregister(name):
         return {"status": "unregistered", "skill_name": name}
     return {"status": "not_found", "skill_name": name}
@@ -218,6 +221,7 @@ def get_skill_context(
 
     Returns selected blocks with relevance scores.
     """
+    logger.debug("MCP tool call: get_skill_context skill=%s budget=%d", skill_name, token_budget)
     skill = _registry.get(skill_name)
     if skill is None:
         return {"error": f"Skill '{skill_name}' not registered. Call register_skill first."}
@@ -349,6 +353,7 @@ def memory_set(key: str, value: str, tags: Optional[List[str]] = None, category:
         tags: List of tags.
         category: Memory category — "persistent" (no TTL), "session" (24h TTL), or "ephemeral" (1h TTL).
     """
+    logger.debug("MCP tool call: memory_set key=%s", key)
     if not key or not key.strip():
         return {"error": "Memory key must not be empty."}
     store = _get_memory_store()
@@ -438,6 +443,7 @@ def get_context_for_task(
         budget: Maximum token budget for the assembled context (default 4000).
         include_tags: Optional list of tags to filter memories by.
     """
+    logger.debug("MCP tool call: get_context_for_task budget=%d", budget)
     if not task_description or not task_description.strip():
         return {"blocks": [], "total_tokens": 0, "memories_considered": 0, "memories_included": 0}
 
@@ -601,6 +607,7 @@ def assemble_context(budget: int, blocks: List[Dict[str, Any]]) -> Dict[str, Any
     ``priority`` (``"high"`` | ``"medium"`` | ``"low"``, default ``"medium"``)
     and ``compress_hint`` (str, name of a registered compressor).
     """
+    logger.debug("MCP tool call: assemble_context budget=%d blocks=%d", budget, len(blocks))
     if not budget or budget <= 0 or budget > 128000:
         return {"error": f"Invalid budget: {budget}. Must be between 1 and 128000."}
     block_objs = _dicts_to_blocks(blocks)

@@ -203,7 +203,7 @@ class TestMCPLogging:
     def test_mcp_server_has_logger(self):
         from src.interfaces import mcp_server
         assert hasattr(mcp_server, "logger")
-        assert mcp_server.logger.name == "src.interfaces.mcp_server"
+        assert mcp_server.logger.name == "contextpilot.mcp_server"
 
     def test_mcp_get_db_logs_close_error(self, caplog):
         """Verify that DB close errors are logged, not silently swallowed."""

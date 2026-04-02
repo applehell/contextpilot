@@ -1,223 +1,71 @@
-"""Context Pilot Web App — FastAPI backend with HTMX frontend."""
+"""Context Pilot Web App -- FastAPI backend with HTMX frontend."""
 from __future__ import annotations
 
-import html
-import json
-import re
+import os
 import time
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Optional
 
-from fastapi import FastAPI, File, HTTPException, Query, Request, UploadFile
-from fastapi.responses import HTMLResponse, JSONResponse, Response
+from fastapi import FastAPI, Request
+from fastapi.responses import HTMLResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
-from pydantic import BaseModel
 
-from src.core.assembler import Assembler
-from src.core.block import Block, Priority
-from src.core.compressors.bullet_extract import BulletExtractCompressor
-from src.core.compressors.mermaid import MermaidCompressor
-from src.core.compressors.yaml_struct import YamlStructCompressor
-from collections import defaultdict
-
-from src.core.token_budget import TokenBudget
-from src.storage.db import Database
-from src.storage.memory import Memory, MemoryStore
-from src.storage.project import ContextConfig, ProjectMeta, ProjectStore
-from src.core.compressors.code_compact import CodeCompactCompressor
-from src.core.secrets import SecretDetector
+from src.core.log import get_logger, setup_logging
 from src.core.skill_registry import SkillRegistry
-from src.storage.memory_activity import MemoryActivityLog
-from src.connectors.registry import ConnectorRegistry
-from src.core.events import EventBus
-from src.storage.folders import FolderManager
-from src.storage.profiles import ProfileManager, DEFAULT_ID
-from src.storage.usage import UsageStore, FeedbackRecord, block_hash
+from src.storage.profiles import ProfileManager
 
-import os
+import src.web.deps as _deps
 
-MAX_UPLOAD_BYTES = 50 * 1024 * 1024  # 50 MB
+logger = get_logger("web.app")
 
-API_KEY = os.environ.get("CONTEXTPILOT_API_KEY")
+from src.web.deps import (
+    API_KEY,
+    WEB_DIR,
+    _DATA_DIR,
+    _events,
+    _estimate_total_tokens,
+    _get_db,
+    _get_memory_store,
+    _init_db,
+    _trigger_background_index,
+    MAX_UPLOAD_BYTES,
+)
 
-WEB_DIR = Path(__file__).parent
-_DATA_DIR = Path(os.environ.get("CONTEXTPILOT_DATA_DIR", str(Path.home() / ".contextpilot")))
-DEFAULT_DB_PATH = _DATA_DIR / "data.db"
-
-_db: Optional[Database] = None
-_project_store: Optional[ProjectStore] = None
-_memory_store: Optional[MemoryStore] = None
-_usage_store: Optional[UsageStore] = None
-
-
-def _get_db() -> Database:
-    global _db
-    if _db is None:
-        _db = Database(DEFAULT_DB_PATH)
-    return _db
-
-
-def _get_project_store() -> ProjectStore:
-    global _project_store
-    if _project_store is None:
-        _project_store = ProjectStore(_get_db())
-    return _project_store
-
-
-def _get_memory_store() -> MemoryStore:
-    global _memory_store
-    if _memory_store is None:
-        _memory_store = MemoryStore(_get_db())
-    return _memory_store
-
-
-def _get_usage_store() -> UsageStore:
-    global _usage_store
-    if _usage_store is None:
-        _usage_store = UsageStore(_get_db())
-    return _usage_store
-
-
-from src.core.compress_detect import detect_compress_hint as _detect_compress_hint
-
-
-def _make_assembler() -> Assembler:
-    return Assembler(compressors=[
-        BulletExtractCompressor(),
-        YamlStructCompressor(),
-        MermaidCompressor(),
-        CodeCompactCompressor(),
-    ])
-
-
-def _block_to_dict(b: Block) -> Dict[str, Any]:
-    return {
-        "content": b.content,
-        "priority": b.priority.value,
-        "compress_hint": b.compress_hint,
-        "token_count": b.token_count,
-    }
-
-
-# --- Pydantic models ---
-
-class BlockIn(BaseModel):
-    content: str
-    priority: str = "medium"
-    compress_hint: Optional[str] = None
-
-
-class AssembleRequest(BaseModel):
-    blocks: List[BlockIn]
-    budget: int
-
-
-class ProjectCreate(BaseModel):
-    name: str
-    description: str = ""
-
-
-class InboundPayload(BaseModel):
-    key: str
-    value: str
-    tags: List[str] = []
-
-
-class ContextCreate(BaseModel):
-    name: str
-
-
-class MemoryIn(BaseModel):
-    key: str
-    value: str
-    tags: List[str] = []
-    ttl_seconds: Optional[float] = None
-    category: str = "persistent"
-
-
-class FeedbackIn(BaseModel):
-    assembly_id: str
-    block_content: str
-    helpful: bool
-
-
-class CompressRequest(BaseModel):
-    content: str
-    compress_hint: str
-
-
-class ProfileCreate(BaseModel):
-    name: str
-    description: str = ""
-    copy_from: str = ""
-    copy_tags: List[str] = []
-
-
-class ImportMemoriesRequest(BaseModel):
-    source_id: str
-    tags: List[str] = []
-    conflict_resolution: str = "skip"
-
-
-class EstimateRequest(BaseModel):
-    text: str
-
-
-class FolderSourceCreate(BaseModel):
-    name: str
-    path: str
-    extensions: List[str] = []
-    recursive: bool = True
-    description: str = ""
-
-
-class FolderSourceUpdate(BaseModel):
-    path: Optional[str] = None
-    extensions: Optional[List[str]] = None
-    recursive: Optional[bool] = None
-    enabled: Optional[bool] = None
-    description: Optional[str] = None
-
-
-# --- App ---
-
-_secret_detector = SecretDetector()
-
-
-def _estimate_total_tokens(db: Database) -> int:
-    """Estimate total tokens using SQL aggregate (chars / 3.5 approximation)."""
-    row = db.conn.execute("SELECT SUM(LENGTH(value)) FROM memories").fetchone()
-    total_chars = row[0] if row and row[0] else 0
-    return int(total_chars / 3.5)
-
-
-def _init_db(db_path: Optional[Path] = None) -> None:
-    global _db, _project_store, _memory_store, _usage_store
-    if _db is not None:
-        try:
-            _db.close()
-        except Exception:
-            pass
-    _db = Database(db_path, check_same_thread=False)
-    _project_store = ProjectStore(_db)
-    _memory_store = MemoryStore(_db)
-    _usage_store = UsageStore(_db)
-
-
-def _get_profile_dir() -> Path:
-    pm = ProfileManager()
-    return pm.active_data_dir
+from src.web.routers import (
+    memories,
+    connectors,
+    profiles,
+    assembly,
+    analytics,
+    system,
+    events,
+    graph,
+    folders,
+    projects,
+    import_routes,
+)
 
 
 def create_app(db_path: Optional[Path] = None) -> FastAPI:
+    setup_logging()
     _init_db(db_path)
 
     from src.interfaces.mcp_server import APP_VERSION
     app = FastAPI(title="Context Pilot", version=APP_VERSION)
+    logger.info("ContextPilot started, version=%s, db=%s", APP_VERSION, db_path)
 
     app.mount("/static", StaticFiles(directory=str(WEB_DIR / "static")), name="static")
     templates = Jinja2Templates(directory=str(WEB_DIR / "templates"))
+
+    @app.middleware("http")
+    async def api_version_rewrite(request: Request, call_next):
+        path = request.url.path
+        if path.startswith("/api/v1/"):
+            scope = request.scope
+            scope["path"] = "/api/" + path[8:]
+            scope["raw_path"] = scope["path"].encode("ascii")
+        return await call_next(request)
 
     @app.middleware("http")
     async def security_headers(request: Request, call_next):
@@ -228,18 +76,20 @@ def create_app(db_path: Optional[Path] = None) -> FastAPI:
         response.headers["Content-Security-Policy"] = (
             "default-src 'self'; "
             "script-src 'self' 'unsafe-inline' 'unsafe-eval' https://unpkg.com https://cdn.jsdelivr.net; "
-            "style-src 'self' 'unsafe-inline' https://unpkg.com https://cdn.jsdelivr.net; "
+            "style-src 'self' 'unsafe-inline' https://unpkg.com https://cdn.jsdelivr.net https://fonts.googleapis.com; "
             "img-src 'self' data:; "
             "connect-src 'self'; "
-            "font-src 'self' https://unpkg.com https://cdn.jsdelivr.net"
+            "font-src 'self' https://unpkg.com https://cdn.jsdelivr.net https://fonts.gstatic.com"
         )
         return response
 
     @app.middleware("http")
     async def api_key_auth(request: Request, call_next):
-        if API_KEY and request.url.path.startswith("/api/") and request.url.path not in ("/health",):
+        import sys
+        _api_key = sys.modules[__name__].API_KEY
+        if _api_key and request.url.path.startswith("/api/") and request.url.path not in ("/health",):
             key = request.headers.get("X-API-Key") or request.query_params.get("api_key")
-            if key != API_KEY:
+            if key != _api_key:
                 return JSONResponse(status_code=401, content={"error": "Unauthorized"})
         return await call_next(request)
 
@@ -253,7 +103,23 @@ def create_app(db_path: Optional[Path] = None) -> FastAPI:
 
     _start_time = time.time()
     _request_count = {"total": 0, "errors": 0}
-    _events = EventBus.instance()
+
+    @app.middleware("http")
+    async def rate_limit_middleware(request: Request, call_next):
+        rl = getattr(app.state, "rate_limiter", None)
+        if rl is None or not request.url.path.startswith("/api/"):
+            return await call_next(request)
+        client_ip = request.client.host if request.client else "unknown"
+        if not rl.is_allowed(client_ip):
+            retry_after = rl.get_retry_after(client_ip)
+            return JSONResponse(
+                status_code=429,
+                content={"error": "Rate limit exceeded", "retry_after": retry_after},
+                headers={"Retry-After": str(retry_after)},
+            )
+        response = await call_next(request)
+        response.headers["X-RateLimit-Remaining"] = str(rl.remaining(client_ip))
+        return response
 
     @app.middleware("http")
     async def _count_requests(request: Request, call_next):
@@ -281,7 +147,7 @@ def create_app(db_path: Optional[Path] = None) -> FastAPI:
         alive_skills = registry.list_alive()
 
         pm = ProfileManager()
-        profiles = pm.list()
+        profiles_list = pm.list()
 
         uptime = time.time() - _start_time
         days, rem = divmod(int(uptime), 86400)
@@ -301,14 +167,81 @@ def create_app(db_path: Optional[Path] = None) -> FastAPI:
                     db_size += sz
         disk = shutil.disk_usage(str(data_dir)) if data_dir.exists() else None
 
+        db = _get_db()
+        schema_version = db.conn.execute("PRAGMA user_version").fetchone()[0]
+
+        # Connector health
+        from src.connectors.registry import ConnectorRegistry
+        from src.web.deps import _get_profile_dir, _index_state
+        try:
+            connector_reg = ConnectorRegistry.instance(_get_profile_dir())
+            connector_list = connector_reg.list()
+            last_sync_errors = 0
+            for c in connector_list:
+                try:
+                    info = c.info()
+                    hist = info.get("sync_history", [])
+                    if hist and hist[0].get("errors", 0) > 0:
+                        last_sync_errors += 1
+                except Exception:
+                    pass
+            connectors_info = {
+                "total": len(connector_list),
+                "configured": sum(1 for c in connector_list if c.configured),
+                "enabled": sum(1 for c in connector_list if c.enabled),
+                "last_sync_errors": last_sync_errors,
+            }
+        except Exception:
+            connectors_info = None
+
+        # MCP status
+        try:
+            from src.core.claude_config import is_registered, get_current_config
+            mcp_config = get_current_config()
+            mcp_info = {
+                "registered": is_registered(),
+                "port": mcp_config.get("port") if mcp_config else None,
+            }
+        except Exception:
+            mcp_info = None
+
+        # Embeddings status
+        embeddings_info = {
+            "status": _index_state.get("status", "unknown"),
+            "indexed": _index_state.get("indexed", 0),
+            "backend": _index_state.get("backend", "unknown"),
+        }
+
+        # Backup status
+        try:
+            from src.core.backup import BackupManager as _HealthBM
+            _hbm = _HealthBM(pm.active_data_dir)
+            _hb_list = _hbm.list_backups()
+            _hb_age = _hbm.backup_age_hours()
+            backup_info = {
+                "last_backup_hours_ago": round(_hb_age, 1) if _hb_age is not None else None,
+                "backup_count": len(_hb_list),
+                "needs_backup": _hbm.needs_backup(max_age_hours=24),
+            }
+        except Exception:
+            backup_info = None
+
+        # Determine overall status
+        status = "healthy"
+        if connectors_info and connectors_info.get("last_sync_errors", 0) > 0:
+            status = "degraded"
+        if disk and disk.free / disk.total < 0.1:
+            status = "degraded"
+
         return {
-            "status": "healthy",
+            "status": status,
             "version": app.version,
             "uptime": uptime_str,
             "uptime_seconds": int(uptime),
             "python": platform.python_version(),
             "platform": f"{platform.system()} {platform.machine()}",
             "pid": os.getpid(),
+            "db_schema_version": schema_version,
             "requests": {
                 "total": _request_count["total"],
                 "errors": _request_count["errors"],
@@ -323,7 +256,7 @@ def create_app(db_path: Optional[Path] = None) -> FastAPI:
                 "alive": len(alive_skills),
             },
             "profiles": {
-                "count": len(profiles),
+                "count": len(profiles_list),
                 "active": pm.active_name,
             },
             "storage": {
@@ -333,2142 +266,35 @@ def create_app(db_path: Optional[Path] = None) -> FastAPI:
                 "disk_free_gb": round(disk.free / (1024**3), 2) if disk else None,
                 "disk_total_gb": round(disk.total / (1024**3), 2) if disk else None,
             },
+            "connectors": connectors_info,
+            "backup": backup_info,
+            "mcp": mcp_info,
+            "embeddings": embeddings_info,
         }
 
-    # --- Events (SSE + REST) ---
+    # --- API Version ---
 
-    from fastapi.responses import StreamingResponse
-
-    @app.get("/api/events")
-    async def get_events(limit: int = Query(50, ge=1, le=200), category: str = Query("")):
-        cat = category if category else None
-        return [e.to_dict() for e in _events.recent(limit, cat)]
-
-    @app.get("/api/events/stats")
-    async def event_stats():
-        return _events.stats()
-
-    @app.get("/api/events/stream")
-    async def event_stream():
-        q = _events.subscribe()
-
-        async def generate():
-            try:
-                while True:
-                    try:
-                        event = await asyncio.wait_for(q.get(), timeout=30)
-                        data = json.dumps(event.to_dict())
-                        yield f"data: {data}\n\n"
-                    except asyncio.TimeoutError:
-                        yield ": keepalive\n\n"
-            except asyncio.CancelledError:
-                pass
-            finally:
-                _events.unsubscribe(q)
-
-        import asyncio
-        return StreamingResponse(generate(), media_type="text/event-stream",
-                                 headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
-
-    # --- Token estimation ---
-
-    @app.post("/api/estimate")
-    async def estimate_tokens(req: EstimateRequest):
-        return {"tokens": TokenBudget.estimate(req.text)}
-
-    # --- Assemble ---
-
-    @app.post("/api/assemble")
-    async def assemble(req: AssembleRequest):
-        blocks = []
-        for b in req.blocks:
-            try:
-                prio = Priority(b.priority)
-            except ValueError:
-                raise HTTPException(400, f"Invalid priority value: {b.priority}")
-            blocks.append(Block(
-                content=b.content,
-                priority=prio,
-                compress_hint=b.compress_hint,
-            ))
-        assembler = _make_assembler()
-        result = assembler.assemble_tracked(blocks, req.budget)
-
-        store = _get_usage_store()
-        from src.storage.usage import UsageRecord
-        import time
-        records = [
-            UsageRecord(
-                block_hash=block_hash(b.content),
-                project_name=None,
-                context_name=None,
-                skill_name=None,
-                model_id=None,
-                included=True,
-                token_count=b.token_count,
-            )
-            for b in result.blocks
-        ]
-        store.record_usage(records)
-
+    @app.get("/api/version")
+    async def api_version():
         return {
-            "assembly_id": result.assembly_id,
-            "budget": result.budget,
-            "used_tokens": result.used_tokens,
-            "block_count": len(result.blocks),
-            "blocks": [_block_to_dict(b) for b in result.blocks],
-            "dropped_count": len(result.dropped_blocks),
-            "dropped": [_block_to_dict(b) for b in result.dropped_blocks],
+            "current": "v1",
+            "supported": ["v1"],
+            "deprecation_notice": None,
         }
 
-    # --- Projects ---
-
-    @app.get("/api/projects")
-    async def list_projects():
-        store = _get_project_store()
-        return [m.to_dict() for m in store.list_projects()]
-
-    @app.post("/api/projects", status_code=201)
-    async def create_project(req: ProjectCreate):
-        store = _get_project_store()
-        try:
-            store.create(ProjectMeta(name=req.name, description=req.description))
-            return {"status": "created", "name": req.name}
-        except FileExistsError as e:
-            raise HTTPException(409, str(e))
-
-    @app.get("/api/projects/{name}")
-    async def get_project(name: str):
-        store = _get_project_store()
-        try:
-            meta, contexts = store.load(name)
-            return {
-                "meta": meta.to_dict(),
-                "contexts": [c.to_dict() for c in contexts],
-            }
-        except FileNotFoundError as e:
-            raise HTTPException(404, str(e))
-
-    @app.delete("/api/projects/{name}")
-    async def delete_project(name: str):
-        store = _get_project_store()
-        try:
-            store.delete(name)
-            return {"status": "deleted", "name": name}
-        except FileNotFoundError as e:
-            raise HTTPException(404, str(e))
-
-    @app.post("/api/projects/{name}/contexts", status_code=201)
-    async def add_context(name: str, req: ContextCreate):
-        store = _get_project_store()
-        try:
-            store.add_context(name, ContextConfig(name=req.name))
-            return {"status": "created", "project": name, "context": req.name}
-        except FileNotFoundError as e:
-            raise HTTPException(404, str(e))
-        except ValueError as e:
-            raise HTTPException(409, str(e))
-
-    # --- Memories ---
-
-    @app.get("/api/memories")
-    async def list_memories(
-        page: int = Query(1, ge=1),
-        page_size: int = Query(50, ge=1, le=200),
-        source: str = Query(""),
-        sort: str = Query("key"),
-        order: str = Query("asc"),
-        category: str = Query(""),
-    ):
-        store = _get_memory_store()
-        offset = (page - 1) * page_size
-        cat = category if category else None
-        memories = store.list(limit=page_size, offset=offset, source=source, sort=sort, order=order, category=cat)
-        total = store.count(source=source)
-        return {
-            "memories": [{**m.to_dict(), "tokens": TokenBudget.estimate(m.value), "bytes": len(m.value.encode("utf-8"))} for m in memories],
-            "total": total,
-            "page": page,
-            "page_size": page_size,
-            "pages": max(1, (total + page_size - 1) // page_size),
-        }
-
-    @app.get("/api/memories/sources")
-    async def memory_sources():
-        store = _get_memory_store()
-        return store.sources()
-
-    @app.get("/api/memories/search")
-    async def search_memories(
-        q: str = Query(""),
-        tags: str = Query(""),
-        source: str = Query(""),
-        page: int = Query(1, ge=1),
-        page_size: int = Query(50, ge=1, le=200),
-    ):
-        store = _get_memory_store()
-        tag_list = [t.strip() for t in tags.split(",") if t.strip()] if tags else None
-        offset = (page - 1) * page_size
-        results = store.search(q, tag_list, source=source, limit=page_size, offset=offset)
-        total = store.search_count(q, tag_list, source=source)
-        _events.emit("memory", "search", q or "(all)", f"{total} results" + (f", source={source}" if source else ""))
-        return {
-            "memories": [{**m.to_dict(), "tokens": TokenBudget.estimate(m.value), "bytes": len(m.value.encode("utf-8"))} for m in results],
-            "total": total,
-            "page": page,
-            "page_size": page_size,
-            "pages": max(1, (total + page_size - 1) // page_size),
-        }
-
-    @app.get("/api/memories/expiring")
-    async def expiring_memories(hours: float = Query(24.0, ge=1)):
-        store = _get_memory_store()
-        memories = store.expiring_soon(within_hours=hours)
-        return [m.to_dict() for m in memories]
-
-    @app.get("/api/memories/ttl-stats")
-    async def ttl_stats():
-        store = _get_memory_store()
-        expired = store.expired_count()
-        expiring_24h = len(store.expiring_soon(24))
-        expiring_7d = len(store.expiring_soon(168))
-        total_with_ttl = 0
-        if store._has_expires_column():
-            row = store._db.conn.execute(
-                "SELECT count(*) FROM memories WHERE expires_at IS NOT NULL"
-            ).fetchone()
-            total_with_ttl = row[0] if row else 0
-        return {
-            "total_with_ttl": total_with_ttl,
-            "expired": expired,
-            "expiring_24h": expiring_24h,
-            "expiring_7d": expiring_7d,
-        }
-
-    @app.get("/api/memories/category-stats")
-    async def category_stats():
-        store = _get_memory_store()
-        return store.category_stats()
-
-    @app.get("/api/memories/{key:path}/related")
-    async def get_related_memories(key: str):
-        from src.storage.relations import RelationStore
-        rs = RelationStore(_db)
-        relations = rs.get_relations(key)
-        store = _get_memory_store()
-        items = []
-        for r in relations:
-            other_key = r.target_key if r.source_key == key else r.source_key
-            try:
-                m = store.get(other_key)
-                items.append({
-                    "key": other_key,
-                    "value": m.value[:200],
-                    "tags": m.tags,
-                    "relation_type": r.relation_type,
-                    "direction": "outgoing" if r.source_key == key else "incoming",
-                })
-            except KeyError:
-                items.append({
-                    "key": other_key,
-                    "value": "(deleted)",
-                    "tags": [],
-                    "relation_type": r.relation_type,
-                    "direction": "outgoing" if r.source_key == key else "incoming",
-                })
-        return {"key": key, "related": items, "count": len(items)}
-
-    @app.get("/api/memories/{key:path}/versions")
-    async def memory_versions(key: str, limit: int = Query(20, ge=1, le=100)):
-        from src.storage.versions import VersionStore
-        vs = VersionStore(_db)
-        versions = vs.history(key, limit)
-        return [{"id": v.id, "value": v.value, "tags": v.tags,
-                 "changed_by": v.changed_by, "created_at": v.created_at} for v in versions]
-
-    @app.get("/api/memories/{key:path}")
-    async def get_memory(key: str):
-        store = _get_memory_store()
-        try:
-            return store.get(key).to_dict()
-        except KeyError as e:
-            raise HTTPException(404, str(e))
-
-    @app.post("/api/memories", status_code=201)
-    async def set_memory(req: MemoryIn):
-        store = _get_memory_store()
-        expires_at = None
-        metadata: Dict[str, Any] = {}
-        if req.ttl_seconds and req.ttl_seconds > 0:
-            expires_at = time.time() + req.ttl_seconds
-            metadata["ttl_seconds"] = req.ttl_seconds
-        m = Memory(key=req.key, value=req.value, tags=req.tags,
-                   metadata=metadata, expires_at=expires_at, category=req.category)
-        store.set(m)
-        _index_single(m)
-        _events.emit("memory", "create", req.key, f"tags={req.tags}")
-        return {"status": "saved", "key": req.key}
-
-    @app.put("/api/memories/{key:path}")
-    async def update_memory(key: str, req: MemoryIn):
-        store = _get_memory_store()
-        try:
-            old = store.get(key)
-        except KeyError:
-            raise HTTPException(404, f"Memory '{key}' not found.")
-        from src.storage.versions import VersionStore
-        VersionStore(_db).record(key, old.value, old.tags, old.metadata, changed_by="web")
-        expires_at = old.expires_at
-        metadata = old.metadata.copy()
-        if req.ttl_seconds is not None:
-            if req.ttl_seconds > 0:
-                expires_at = time.time() + req.ttl_seconds
-                metadata["ttl_seconds"] = req.ttl_seconds
-            else:
-                expires_at = None
-                metadata.pop("ttl_seconds", None)
-        elif old.metadata.get("ttl_seconds"):
-            # Reset TTL on update
-            expires_at = time.time() + old.metadata["ttl_seconds"]
-        m = Memory(key=key, value=req.value, tags=req.tags,
-                   metadata=metadata, expires_at=expires_at)
-        store.set(m, reset_ttl=False)
-        _index_single(m)
-        _events.emit("memory", "update", key)
-        return {"status": "updated", "key": key}
-
-    @app.delete("/api/memories/{key:path}")
-    async def delete_memory(key: str):
-        store = _get_memory_store()
-        try:
-            store.delete(key)
-            _remove_from_index(key)
-            _events.emit("memory", "delete", key)
-            return {"status": "deleted", "key": key}
-        except KeyError as e:
-            raise HTTPException(404, str(e))
-
-    @app.post("/api/memories/bulk-delete")
-    async def bulk_delete_memories(keys: List[str]):
-        store = _get_memory_store()
-        deleted = 0
-        for key in keys:
-            try:
-                store.delete(key)
-                deleted += 1
-            except KeyError:
-                pass
-        _events.emit("memory", "bulk-delete", f"{deleted} memories")
-        return {"status": "deleted", "count": deleted}
-
-    # --- Memory TTL ---
-
-    @app.post("/api/memories/{key:path}/ttl")
-    async def set_memory_ttl(key: str, request: Request):
-        store = _get_memory_store()
-        try:
-            body = await request.json()
-        except json.JSONDecodeError:
-            raise HTTPException(400, "Invalid JSON")
-        ttl_seconds = body.get("ttl_seconds")
-        try:
-            store.get(key)
-        except KeyError:
-            raise HTTPException(404, f"Memory '{key}' not found.")
-        store.set_ttl(key, ttl_seconds)
-        _events.emit("memory", "ttl", key, f"ttl={ttl_seconds}")
-        return {"status": "updated", "key": key, "ttl_seconds": ttl_seconds}
-
-    @app.post("/api/memories/cleanup-expired")
-    async def cleanup_expired():
-        store = _get_memory_store()
-        count = store.cleanup_expired()
-        if count > 0:
-            _events.emit("memory", "ttl-cleanup", f"{count} expired memories removed")
-        return {"status": "cleaned", "removed": count}
-
-    @app.post("/api/memories/suggest-tags")
-    async def suggest_tags(request: Request):
-        try:
-            body = await request.json()
-        except json.JSONDecodeError:
-            raise HTTPException(400, "Invalid JSON")
-        text = f"{body.get('key', '')} {body.get('value', '')}"
-        from src.core.embeddings import _tokenize
-        words = _tokenize(text)
-        if not words:
-            return {"tags": []}
-        store = _get_memory_store()
-        all_tags = set()
-        tag_scores: Dict[str, int] = {}
-        for m in store.list(limit=200, sort="updated", order="desc"):
-            for tag in m.tags:
-                all_tags.add(tag)
-                tag_words = set(_tokenize(f"{m.key} {m.value}"))
-                overlap = len(set(words) & tag_words)
-                if overlap > 0:
-                    tag_scores[tag] = tag_scores.get(tag, 0) + overlap
-        ranked = sorted(tag_scores.items(), key=lambda x: -x[1])
-        return {"tags": [t for t, _ in ranked[:5]]}
-
-    # --- Pinning ---
-
-    @app.post("/api/memories/{key:path}/pin")
-    async def pin_memory(key: str, pinned: bool = Query(True)):
-        store = _get_memory_store()
-        try:
-            store.get(key)
-        except KeyError:
-            raise HTTPException(404, f"Memory '{key}' not found")
-        store.pin(key, pinned)
-        _events.emit("memory", "pin" if pinned else "unpin", key)
-        return {"status": "ok", "pinned": pinned}
-
-    # --- Trash ---
-
-    @app.get("/api/trash")
-    async def list_trash():
-        store = _get_memory_store()
-        return store.trash_list()
-
-    @app.post("/api/trash/{key:path}/restore")
-    async def restore_from_trash(key: str):
-        store = _get_memory_store()
-        try:
-            store.trash_restore(key)
-            _events.emit("memory", "restore", key)
-            return {"status": "restored", "key": key}
-        except KeyError as e:
-            raise HTTPException(404, str(e))
-
-    @app.delete("/api/trash/{key:path}")
-    async def purge_from_trash(key: str):
-        store = _get_memory_store()
-        store.trash_purge(key)
-        return {"status": "purged", "key": key}
-
-    @app.delete("/api/trash")
-    async def empty_trash():
-        store = _get_memory_store()
-        count = store.trash_purge()
-        return {"status": "emptied", "count": count}
-
-    # --- Bulk Tag Operations ---
-
-    @app.post("/api/memories/bulk-tags")
-    async def bulk_tag_memories(request: Request):
-        try:
-            body = await request.json()
-        except json.JSONDecodeError:
-            raise HTTPException(400, "Invalid JSON")
-        keys = body.get("keys", [])
-        add_tags = body.get("add", [])
-        remove_tags = body.get("remove", [])
-        store = _get_memory_store()
-        updated = 0
-        for key in keys:
-            try:
-                m = store.get(key)
-                changed = False
-                for t in add_tags:
-                    if t not in m.tags:
-                        m.tags.append(t)
-                        changed = True
-                for t in remove_tags:
-                    if t in m.tags:
-                        m.tags.remove(t)
-                        changed = True
-                if changed:
-                    store.set(m)
-                    updated += 1
-            except KeyError:
-                pass
-        _events.emit("memory", "bulk-tags", f"{updated} updated, +{add_tags} -{remove_tags}")
-        return {"status": "ok", "updated": updated}
-
-    # --- Memory Presets (Creation Templates) ---
-
-    @app.get("/api/memory-presets")
-    async def list_memory_presets():
-        try:
-            rows = _db.conn.execute("SELECT name, key_prefix, default_tags, description, created_at FROM memory_presets ORDER BY name").fetchall()
-            return [{"name": r["name"], "key_prefix": r["key_prefix"], "default_tags": json.loads(r["default_tags"]),
-                     "description": r["description"]} for r in rows]
-        except Exception:
-            return []
-
-    @app.post("/api/memory-presets", status_code=201)
-    async def save_memory_preset(request: Request):
-        try:
-            body = await request.json()
-        except json.JSONDecodeError:
-            raise HTTPException(400, "Invalid JSON")
-        name = body.get("name", "").strip()
-        if not name:
-            raise HTTPException(400, "Name required")
-        _db.conn.execute(
-            "INSERT OR REPLACE INTO memory_presets (name, key_prefix, default_tags, description, created_at) VALUES (?, ?, ?, ?, ?)",
-            (name, body.get("key_prefix", ""), json.dumps(body.get("default_tags", [])),
-             body.get("description", ""), time.time()),
-        )
-        _db.conn.commit()
-        return {"status": "saved", "name": name}
-
-    @app.delete("/api/memory-presets/{name}")
-    async def delete_memory_preset(name: str):
-        _db.conn.execute("DELETE FROM memory_presets WHERE name = ?", (name,))
-        _db.conn.commit()
-        return {"status": "deleted"}
-
-    # --- JSON Import ---
-
-    @app.post("/api/import/json")
-    async def import_json(file: UploadFile = File(...)):
-        content = await file.read()
-        if len(content) > MAX_UPLOAD_BYTES:
-            raise HTTPException(413, "File too large (max 50 MB)")
-        store = _get_memory_store()
-        try:
-            count = store.import_json(content.decode("utf-8"), merge=True)
-            _events.emit("import", "json", file.filename or "upload", f"{count} memories")
-            return {"status": "imported", "count": count, "filename": file.filename}
-        except Exception as e:
-            raise HTTPException(400, f"Invalid JSON: {e}")
-
-    # --- Global Search ---
-
-    @app.get("/api/global-search")
-    async def global_search(q: str = Query("", min_length=1)):
-        results: Dict[str, list] = {"memories": [], "templates": [], "connectors": [], "folders": []}
-        ql = q.lower()
-        store = _get_memory_store()
-        for m in store.search(q, limit=10):
-            results["memories"].append({"key": m.key, "preview": m.value[:100], "type": "memory"})
-        from src.storage.templates import TemplateStore as _TS
-        for t in _TS(_db).list():
-            if ql in t.name.lower() or ql in t.description.lower():
-                results["templates"].append({"name": t.name, "description": t.description, "type": "template"})
-        for c in _get_connectors().list():
-            status = c.get_status()
-            if ql in status.get("name", "").lower() or ql in status.get("display_name", "").lower():
-                results["connectors"].append({"name": status["name"], "display_name": status.get("display_name", ""), "type": "connector"})
-        fm = FolderManager(_get_profile_dir())
-        for f in fm.list():
-            if ql in f.name.lower() or ql in f.path.lower():
-                results["folders"].append({"name": f.name, "path": f.path, "type": "folder"})
-        return results
-
-    # --- Connector Health Check ---
-
-    @app.get("/api/connectors/health")
-    async def connectors_health():
-        results = []
-        for c in _get_connectors().list():
-            status = c.get_status()
-            sync_history = status.get("sync_history", [])
-            last_error_detail = None
-            for s in sync_history:
-                if s.get("error_details"):
-                    last_error_detail = s["error_details"]
-                    break
-            health = {
-                "name": status["name"],
-                "display_name": status.get("display_name", ""),
-                "configured": status.get("configured", False),
-                "enabled": status.get("enabled", False),
-                "last_sync": status.get("last_sync"),
-                "error_count": status.get("error_count", 0),
-                "total_synced": status.get("synced_count", 0),
-                "last_error_detail": last_error_detail,
-            }
-            if status.get("configured"):
-                try:
-                    test = c.test_connection()
-                    health["reachable"] = test.get("ok", False)
-                    health["detail"] = test.get("message", "")
-                except Exception as e:
-                    health["reachable"] = False
-                    health["detail"] = str(e)
-            else:
-                health["reachable"] = None
-                health["detail"] = "not configured"
-            results.append(health)
-        return results
-
-    # --- Dashboard Statistics ---
-
-    @app.get("/api/dashboard/stats")
-    async def dashboard_stats():
-        store = _get_memory_store()
-        total_count = store.count()
-        total_tokens = _estimate_total_tokens(_get_db())
-
-        db = _get_db()
-        now = time.time()
-        day_ago = now - 86400
-        week_ago = now - 604800
-
-        row = db.conn.execute("SELECT count(*) FROM memories WHERE created_at > ?", (day_ago,)).fetchone()
-        new_today = row[0] if row else 0
-        row = db.conn.execute("SELECT count(*) FROM memories WHERE updated_at > ? AND created_at <= ?", (day_ago, day_ago)).fetchone()
-        updated_today = row[0] if row else 0
-        row = db.conn.execute("SELECT count(*) FROM memories WHERE created_at > ? OR updated_at > ?", (week_ago, week_ago)).fetchone()
-        new_this_week = row[0] if row else 0
-
-        pinned_count = 0
-        try:
-            row = db.conn.execute("SELECT count(*) FROM memories WHERE pinned = 1").fetchone()
-            pinned_count = row[0] if row else 0
-        except Exception:
-            pass
-
-        # Tag counts and size distribution still need iteration but use paginated access
-        tag_counts: Dict[str, int] = {}
-        size_dist = {"small": 0, "medium": 0, "large": 0}
-        for m in store.list():
-            tokens = TokenBudget.estimate(m.value)
-            if tokens < 100:
-                size_dist["small"] += 1
-            elif tokens < 500:
-                size_dist["medium"] += 1
-            else:
-                size_dist["large"] += 1
-            for t in m.tags:
-                tag_counts[t] = tag_counts.get(t, 0) + 1
-
-        top_tags = sorted(tag_counts.items(), key=lambda x: -x[1])[:10]
-        return {
-            "total": total_count,
-            "total_tokens": total_tokens,
-            "new_today": new_today,
-            "updated_today": updated_today,
-            "new_this_week": new_this_week,
-            "pinned": pinned_count,
-            "size_distribution": size_dist,
-            "top_tags": [{"tag": t, "count": c} for t, c in top_tags],
-            "trash_count": len(store.trash_list()),
-        }
-
-    # --- Scheduled Reports ---
-
-    @app.post("/api/reports/summary")
-    async def generate_summary_report():
-        store = _get_memory_store()
-        total_count = store.count()
-        now = time.time()
-        day_ago = now - 86400
-
-        db = _get_db()
-        new_memories = store.list(sort="created", order="desc")
-        new_memories = [m for m in new_memories if m.created_at > day_ago]
-        updated_memories = [m for m in store.list(sort="updated", order="desc") if m.updated_at > day_ago and m.created_at <= day_ago]
-
-        lines = [f"Context Pilot Report ({time.strftime('%Y-%m-%d %H:%M')})", ""]
-        lines.append(f"Total: {total_count} memories")
-        lines.append(f"New today: {len(new_memories)}")
-        lines.append(f"Updated today: {len(updated_memories)}")
-
-        if new_memories:
-            lines.append("\nNew:")
-            for m in new_memories[:10]:
-                lines.append(f"  + {m.key}")
-        if updated_memories:
-            lines.append("\nUpdated:")
-            for m in updated_memories[:10]:
-                lines.append(f"  ~ {m.key}")
-
-        report = "\n".join(lines)
-
-        webhooks_sent = 0
-        try:
-            from src.core.webhooks import WebhookManager
-            wm = WebhookManager(_get_profile_dir())
-            results = wm.notify("report.summary", report)
-            webhooks_sent = sum(1 for r in results if r.get("ok"))
-        except Exception:
-            pass
-
-        return {"report": report, "webhooks_sent": webhooks_sent}
-
-    @app.get("/api/export-memories")
-    async def export_memories(tag: str = Query("")):
-        # Legitimately needs all data for export
-        store = _get_memory_store()
-        if tag:
-            memories = store.search("", tags=[tag])
-        else:
-            memories = store.list()
-        return {"memories": [m.to_dict() for m in memories]}
-
-    # --- Knowledge Graph ---
-
-    def _build_knowledge_graph() -> Dict[str, Any]:
-        store = _get_memory_store()
-        memories = store.list()
-
-        # Category colors (Catppuccin Mocha palette)
-        CATEGORY_COLORS = [
-            "#89b4fa", "#a6e3a1", "#f9e2af", "#f38ba8", "#cba6f7",
-            "#fab387", "#94e2d5", "#74c7ec", "#f5c2e7", "#b4befe",
-        ]
-
-        # Build nodes and detect groups
-        nodes = []
-        groups_seen: Dict[str, int] = {}
-        tag_index: Dict[str, List[str]] = defaultdict(list)  # tag -> [memory_keys]
-
-        for m in memories:
-            parts = m.key.split("/")
-            if len(parts) >= 2:
-                group = "/".join(parts[:2])
-                label = "/".join(parts[2:]) or parts[-1]
-            else:
-                group = parts[0]
-                label = parts[0]
-
-            if group not in groups_seen:
-                groups_seen[group] = len(groups_seen)
-
-            tokens = TokenBudget.estimate(m.value)
-            size = max(8, min(40, 8 + tokens // 50))
-
-            # Skip _preamble duplicates in label
-            if label == "_preamble":
-                label = "(preamble)"
-
-            nodes.append({
-                "id": m.key,
-                "label": label,
-                "group": group,
-                "title": f"<b>{html.escape(m.key)}</b><br>Tags: {html.escape(', '.join(m.tags) or 'none')}<br>{tokens} tokens",
-                "value": size,
-                "tags": m.tags,
-            })
-
-            for tag in m.tags:
-                tag_index[tag].append(m.key)
-
-        # Build edges: shared tags (cross-group connections)
-        edges = []
-        edge_set: set = set()
-        for tag, keys in tag_index.items():
-            if len(keys) > 20:
-                continue  # skip overly common tags
-            for i, k1 in enumerate(keys):
-                g1 = "/".join(k1.split("/")[:2])
-                for k2 in keys[i + 1:]:
-                    g2 = "/".join(k2.split("/")[:2])
-                    if g1 == g2:
-                        continue  # skip within-group (vis.js handles that)
-                    pair = tuple(sorted([k1, k2]))
-                    if pair not in edge_set:
-                        edge_set.add(pair)
-                        edges.append({
-                            "from": k1,
-                            "to": k2,
-                            "title": f"Tag: {tag}",
-                            "color": {"color": "#585b70", "opacity": 0.4},
-                            "width": 1,
-                        })
-
-        # Add edges from memory_relations
-        from src.storage.relations import RelationStore
-        rel_store = RelationStore(_get_db())
-        memory_keys = {m.key for m in memories}
-        RELATION_COLORS = {
-            "references": "#89b4fa",
-            "shared_entity": "#a6e3a1",
-            "tag_cluster": "#cba6f7",
-            "related": "#f9e2af",
-        }
-        for rel in rel_store.list_all():
-            if rel.source_key not in memory_keys or rel.target_key not in memory_keys:
-                continue
-            pair = tuple(sorted([rel.source_key, rel.target_key]))
-            rel_edge_key = (*pair, rel.relation_type)
-            if rel_edge_key not in edge_set:
-                edge_set.add(rel_edge_key)
-                color = RELATION_COLORS.get(rel.relation_type, "#f9e2af")
-                edges.append({
-                    "from": rel.source_key,
-                    "to": rel.target_key,
-                    "title": rel.relation_type + (" (auto)" if rel.auto else ""),
-                    "color": {"color": color, "opacity": 0.7},
-                    "width": 2,
-                    "dashes": rel.auto,
-                })
-
-        # Build vis.js group config
-        group_config = {}
-        for group_name, idx in groups_seen.items():
-            color = CATEGORY_COLORS[idx % len(CATEGORY_COLORS)]
-            category = group_name.split("/")[0]
-            group_config[group_name] = {
-                "color": {"background": color, "border": color, "highlight": {"background": color, "border": "#fff"}},
-                "font": {"color": "#cdd6f4"},
-            }
-
-        # Stats
-        categories = defaultdict(int)
-        for g in groups_seen:
-            categories[g.split("/")[0]] += 1
-
-        return {
-            "nodes": nodes,
-            "edges": edges,
-            "groups": group_config,
-            "stats": {
-                "total_memories": len(memories),
-                "total_groups": len(groups_seen),
-                "total_edges": len(edges),
-                "categories": dict(categories),
-            },
-        }
-
-    @app.get("/api/knowledge-graph")
-    async def knowledge_graph():
-        return _build_knowledge_graph()
-
-    @app.post("/api/dependencies/detect")
-    async def detect_dependencies_endpoint():
-        from src.core.dependency_detector import detect_dependencies
-        from src.storage.relations import RelationStore
-        store = _get_memory_store()
-        memories = store.list()
-        relations = detect_dependencies(memories)
-        rel_store = RelationStore(_get_db())
-        cleared = rel_store.clear_auto()
-        added = rel_store.bulk_add_auto(relations)
-        _events.emit("graph", "detect", "dependencies", f"{added} detected, {cleared} previous cleared")
-        return {"detected": len(relations), "added": added, "cleared": cleared}
-
-    # --- Memory Activity ---
-
-    @app.get("/api/memory-activity")
-    async def get_memory_activity(limit: int = Query(20, ge=1, le=100)):
-        _activity_log = MemoryActivityLog(_db)
-        entries = _activity_log.recent(limit)
-        return [
-            {
-                "operation": e.operation,
-                "memory_key": e.memory_key,
-                "detail": e.detail,
-                "created_at": e.created_at,
-                "age": e.age_label,
-            }
-            for e in entries
-        ]
-
-    # --- Setup Status ---
-
-    @app.get("/api/setup-status")
-    async def setup_status():
-        pm = ProfileManager()
-        profiles = pm.list()
-        store = _get_memory_store()
-        memory_count = store.count()
-        connectors = ConnectorRegistry.instance(_get_profile_dir())
-        configured_connectors = [c.name for c in connectors.list() if c.configured]
-        folders = FolderManager(_get_profile_dir())
-        folder_sources = folders.list()
-        return {
-            "profiles": [p.name for p in profiles],
-            "profile_count": len(profiles),
-            "memory_count": memory_count,
-            "configured_connectors": configured_connectors,
-            "folder_count": len(folder_sources),
-            "data_dir": str(_DATA_DIR),
-            "is_fresh": memory_count == 0 and len(configured_connectors) == 0 and len(folder_sources) == 0,
-        }
-
-    # --- Dashboard ---
-
-    @app.get("/api/dashboard")
-    async def dashboard():
-        store = _get_memory_store()
-        memory_count = store.count()
-        total_tokens = _estimate_total_tokens(_get_db())
-        all_tags = store.tags()
-
-        registry = SkillRegistry.instance()
-        all_skills = registry.list_all()
-        alive_skills = registry.list_alive()
-
-        activity_entries = MemoryActivityLog(_db).recent(10)
-
-        return {
-            "memory_count": memory_count,
-            "memory_tokens": total_tokens,
-            "tag_count": len(all_tags),
-            "skill_total": len(all_skills),
-            "skill_alive": len(alive_skills),
-            "skills": [s.to_dict() for s in all_skills],
-            "activity": [
-                {
-                    "operation": e.operation,
-                    "memory_key": e.memory_key,
-                    "detail": e.detail,
-                    "age": e.age_label,
-                }
-                for e in activity_entries
-            ],
-        }
-
-    # --- Skills ---
-
-    @app.get("/api/skills")
-    async def list_skills():
-        registry = SkillRegistry.instance()
-        return [s.to_dict() for s in registry.list_all()]
-
-    # --- Memory Preview as Context ---
-
-    @app.post("/api/preview-context")
-    async def preview_context(budget: int = Query(8000, ge=100)):
-        import re as _re
-
-        _CODE = _re.compile(r"(```|def |class |function |import |from |curl |export |const |let |var )")
-        _STEP = _re.compile(r"^(\d+[.)]\s|[-*]\s|#{1,3}\s)", _re.MULTILINE)
-        _KV = _re.compile(r"^[A-Za-z][^:=\n]{0,40}(?::[ \t]|[ \t]*=[ \t])", _re.MULTILINE)
-
-        def _detect_hint(text: str):
-            if len(_CODE.findall(text)) >= 3: return "code_compact"
-            if len(_STEP.findall(text)) >= 3: return "mermaid"
-            if len(_KV.findall(text)) >= 3: return "yaml_struct"
-            if len(text) > 200: return "bullet_extract"
-            return None
-
-        store = _get_memory_store()
-        memories = store.list()
-        if not memories:
-            return {"blocks": [], "dropped": [], "used_tokens": 0, "budget": budget,
-                    "input_count": 0, "block_count": 0, "dropped_count": 0}
-
-        blocks = []
-        for m in memories:
-            content = f"[{m.key}] {m.value}"
-            hint = _detect_hint(m.value)
-            blocks.append(Block(content=content, priority=Priority.MEDIUM, compress_hint=hint))
-
-        # Select blocks that fit within budget (by token count, greedy)
-        selected = []
-        dropped = []
-        remaining = budget
-        for b in blocks:
-            if b.token_count <= remaining:
-                selected.append(b)
-                remaining -= b.token_count
-            else:
-                dropped.append(b)
-
-        # Assemble selected (may compress further)
-        assembler = _make_assembler()
-        if selected:
-            assembled = assembler.assemble(selected, budget)
-        else:
-            assembled = []
-
-        return {
-            "budget": budget,
-            "used_tokens": sum(b.token_count for b in assembled),
-            "input_count": len(blocks),
-            "block_count": len(assembled),
-            "dropped_count": len(dropped),
-            "blocks": [_block_to_dict(b) for b in assembled],
-            "dropped": [
-                {"content_preview": b.content[:80], "token_count": b.token_count}
-                for b in dropped[:20]
-            ],
-        }
-
-    # --- Test Compression ---
-
-    @app.post("/api/test-compress")
-    async def test_compress(req: CompressRequest):
-        block = Block(content=req.content, priority=Priority.MEDIUM, compress_hint=req.compress_hint)
-        assembler = _make_assembler()
-        compressor = assembler._registry.get(req.compress_hint)
-        if not compressor:
-            return {"error": f"Compressor '{req.compress_hint}' not found."}
-        original_tokens = block.token_count
-        compressed = compressor.compress(block)
-        return {
-            "original_tokens": original_tokens,
-            "compressed_tokens": compressed.token_count,
-            "savings_pct": round((1 - compressed.token_count / max(1, original_tokens)) * 100, 1),
-            "compressed_content": compressed.content,
-        }
-
-    # --- Memory Tags ---
-
-    @app.get("/api/memory-tags")
-    async def memory_tags():
-        store = _get_memory_store()
-        return store.tags()
-
-    # --- Feedback ---
-
-    @app.post("/api/feedback")
-    async def submit_feedback(req: FeedbackIn):
-        store = _get_usage_store()
-        bh = block_hash(req.block_content)
-        store.record_feedback(FeedbackRecord(
-            assembly_id=req.assembly_id,
-            block_hash=bh,
-            helpful=req.helpful,
-        ))
-        return {"status": "recorded", "block_hash": bh}
-
-    # --- MCP Server Status ---
-
-    @app.get("/api/mcp-status")
-    async def mcp_status():
-        from src.core.claude_config import is_registered, get_current_config
-        config = get_current_config()
-        return {
-            "registered": is_registered(),
-            "config": config,
-        }
-
-    @app.post("/api/mcp/register")
-    async def mcp_register(request: Request):
-        from src.core.claude_config import register_mcp
-        try:
-            body = await request.json()
-        except json.JSONDecodeError:
-            raise HTTPException(400, "Invalid JSON")
-        port = int(body.get("port", 8400))
-        transport = body.get("transport", "sse")
-        register_mcp(port=port, transport=transport)
-        _events.emit("system", "mcp-register", f"port={port} transport={transport}")
-        return {"status": "registered", "port": port, "transport": transport}
-
-    @app.post("/api/mcp/deregister")
-    async def mcp_deregister():
-        from src.core.claude_config import deregister_mcp
-        deregister_mcp()
-        _events.emit("system", "mcp-deregister", "removed from ~/.claude.json")
-        return {"status": "deregistered"}
-
-    @app.post("/api/maintenance/vacuum")
-    async def db_vacuum():
-        _get_db().conn.execute("VACUUM")
-        _events.emit("system", "vacuum", "database compacted")
-        return {"status": "vacuumed"}
-
-    @app.post("/api/maintenance/rebuild-fts")
-    async def rebuild_fts():
-        _get_db().conn.execute("INSERT INTO memories_fts(memories_fts) VALUES ('rebuild')")
-        _get_db().conn.commit()
-        _events.emit("system", "rebuild-fts", "search index rebuilt")
-        return {"status": "rebuilt"}
-
-    @app.get("/api/maintenance/db-stats")
-    async def db_stats():
-        import shutil
-        db = _get_db()
-        store = _get_memory_store()
-        data_dir = Path(os.environ.get("CONTEXTPILOT_DATA_DIR", str(Path.home() / ".contextpilot")))
-        db_size = 0
-        embeddings_size = 0
-        for f in data_dir.rglob("*.db"):
-            sz = f.stat().st_size
-            if "embedding" in f.name.lower():
-                embeddings_size += sz
-            else:
-                db_size += sz
-        disk = shutil.disk_usage(str(data_dir)) if data_dir.exists() else None
-        page_count = db.conn.execute("PRAGMA page_count").fetchone()[0]
-        page_size = db.conn.execute("PRAGMA page_size").fetchone()[0]
-        freelist = db.conn.execute("PRAGMA freelist_count").fetchone()[0]
-        return {
-            "data_dir": str(data_dir),
-            "db_size_bytes": db_size,
-            "db_size_mb": round(db_size / 1048576, 2),
-            "embeddings_size_mb": round(embeddings_size / 1048576, 2),
-            "page_count": page_count,
-            "page_size": page_size,
-            "freelist_pages": freelist,
-            "fragmentation_pct": round(freelist / max(page_count, 1) * 100, 1),
-            "disk_total_gb": round(disk.total / 1073741824, 1) if disk else None,
-            "disk_free_gb": round(disk.free / 1073741824, 1) if disk else None,
-            "disk_used_pct": round((disk.total - disk.free) / disk.total * 100, 1) if disk else None,
-            "memory_count": store.count(),
-            "schema_version": db.conn.execute("PRAGMA user_version").fetchone()[0],
-        }
-
-    @app.post("/api/maintenance/trash-cleanup")
-    async def trash_cleanup(days: int = Query(30, ge=1)):
-        store = _get_memory_store()
-        removed = store.trash_cleanup(days=days)
-        _events.emit("system", "trash-cleanup", f"{removed} old trash entries removed (>{days}d)")
-        return {"status": "cleaned", "removed": removed}
-
-    # --- Import ---
-
-    @app.post("/api/import/claude-md")
-    async def import_claude_md(file: UploadFile = File(...)):
-        from src.importers.claude import import_claude_file
-        import tempfile
-        store = _get_memory_store()
-        content = await file.read()
-        if len(content) > MAX_UPLOAD_BYTES:
-            raise HTTPException(413, "File too large (max 50 MB)")
-        with tempfile.NamedTemporaryFile(suffix=".md", delete=False) as f:
-            f.write(content)
-            tmp_path = Path(f.name)
-        try:
-            memories = import_claude_file(tmp_path)
-            count = 0
-            for m in memories:
-                store.set(m)
-                count += 1
-            _events.emit("import", "claude-md", file.filename, f"{count} memories")
-            return {"status": "imported", "count": count, "filename": file.filename}
-        finally:
-            tmp_path.unlink(missing_ok=True)
-
-    @app.post("/api/import/copilot-md")
-    async def import_copilot_md(file: UploadFile = File(...)):
-        from src.importers.copilot import import_copilot_file
-        import tempfile
-        store = _get_memory_store()
-        content = await file.read()
-        if len(content) > MAX_UPLOAD_BYTES:
-            raise HTTPException(413, "File too large (max 50 MB)")
-        with tempfile.NamedTemporaryFile(suffix=".md", delete=False) as f:
-            f.write(content)
-            tmp_path = Path(f.name)
-        try:
-            memories = import_copilot_file(tmp_path)
-            count = 0
-            for m in memories:
-                store.set(m)
-                count += 1
-            _events.emit("import", "copilot-md", file.filename, f"{count} memories")
-            return {"status": "imported", "count": count, "filename": file.filename}
-        finally:
-            tmp_path.unlink(missing_ok=True)
-
-    @app.post("/api/import/sqlite")
-    async def import_sqlite_db(file: UploadFile = File(...)):
-        from src.importers.sqlite import detect_sqlite_type, import_memory_mcp
-        import tempfile
-        store = _get_memory_store()
-        content = await file.read()
-        if len(content) > MAX_UPLOAD_BYTES:
-            raise HTTPException(413, "File too large (max 50 MB)")
-        with tempfile.NamedTemporaryFile(suffix=".db", delete=False) as f:
-            f.write(content)
-            tmp_path = Path(f.name)
-        try:
-            db_type = detect_sqlite_type(tmp_path)
-            if db_type != "memory-mcp":
-                return {"status": "error", "message": "Unknown SQLite format"}
-            memories = import_memory_mcp(tmp_path)
-            count = 0
-            for m in memories:
-                store.set(m)
-                count += 1
-            return {"status": "imported", "count": count, "filename": file.filename}
-        finally:
-            tmp_path.unlink(missing_ok=True)
-
-    # --- Profiles ---
-
-    @app.get("/api/profiles")
-    async def list_profiles():
-        pm = ProfileManager()
-        profiles = pm.list()
-        return {
-            "active": pm.active_id,
-            "active_name": pm.active_name,
-            "profiles": [
-                {
-                    "id": p.id,
-                    "name": p.name,
-                    "description": p.description,
-                    "memory_count": p.memory_count,
-                    "created_at": p.created_at,
-                    "is_default": p.is_default,
-                    "is_active": p.id == pm.active_id,
-                }
-                for p in profiles
-            ],
-        }
-
-    @app.post("/api/profiles", status_code=201)
-    async def create_profile(req: ProfileCreate):
-        if not req.name or not req.name.strip():
-            raise HTTPException(400, "name must be a non-empty string")
-        pm = ProfileManager()
-        try:
-            p = pm.create(req.name, req.description)
-            imported = 0
-            if req.copy_from:
-                tags = req.copy_tags if req.copy_tags else None
-                result = pm.import_memories_from(p.id, req.copy_from, tags)
-                imported = result["imported"]
-            _events.emit("profile", "create", p.name, f"imported {imported} memories" if imported else "")
-            return {"status": "created", "id": p.id, "name": p.name, "imported": imported}
-        except ValueError as e:
-            raise HTTPException(409, str(e))
-
-    def _reload_profile_deps():
-        profile_dir = _get_profile_dir()
-        ConnectorRegistry.reload(profile_dir)
-        from src.core.embeddings import set_data_dir
-        set_data_dir(profile_dir)
-        from src.core.scheduler import SyncScheduler
-        s = SyncScheduler.instance()
-        if s.running:
-            s.stop()
-
-    @app.post("/api/profiles/{pid}/switch")
-    async def switch_profile(pid: str):
-        pm = ProfileManager()
-        try:
-            new_path = pm.switch(pid)
-            _init_db(new_path)
-            _reload_profile_deps()
-            _events.emit("profile", "switch", pm.active_name)
-            _trigger_background_index()
-            return {"status": "switched", "active": pid, "name": pm.active_name}
-        except KeyError as e:
-            raise HTTPException(404, str(e))
-
-    @app.put("/api/profiles/{pid}")
-    async def rename_profile(pid: str, new_name: str = Query(...), description: str = Query("")):
-        pm = ProfileManager()
-        try:
-            pm.rename(pid, new_name, description)
-            return {"status": "renamed", "id": pid, "new_name": new_name}
-        except (KeyError, ValueError) as e:
-            raise HTTPException(400, str(e))
-
-    @app.post("/api/profiles/{pid}/duplicate")
-    async def duplicate_profile(pid: str, new_name: str = Query(...), description: str = Query("")):
-        pm = ProfileManager()
-        try:
-            p = pm.duplicate(pid, new_name, description)
-            return {"status": "duplicated", "id": p.id, "name": p.name}
-        except (KeyError, ValueError) as e:
-            raise HTTPException(400, str(e))
-
-    @app.delete("/api/profiles/{pid}")
-    async def delete_profile(pid: str):
-        pm = ProfileManager()
-        try:
-            pm.delete(pid)
-            if pm.active_id == DEFAULT_ID:
-                _init_db(pm.active_db_path)
-            return {"status": "deleted", "id": pid}
-        except (KeyError, ValueError) as e:
-            raise HTTPException(400, str(e))
-
-    @app.get("/api/profiles/{pid}/tags")
-    async def get_profile_tags(pid: str):
-        pm = ProfileManager()
-        try:
-            return pm.get_profile_tags(pid)
-        except KeyError as e:
-            raise HTTPException(404, str(e))
-
-    @app.post("/api/profiles/{pid}/import-memories")
-    async def import_memories_into_profile(pid: str, req: ImportMemoriesRequest):
-        pm = ProfileManager()
-        tags = req.tags if req.tags else None
-        try:
-            result = pm.import_memories_from(pid, req.source_id, tags, req.conflict_resolution)
-            detail = f"{result['imported']} imported"
-            if result['overwritten']:
-                detail += f", {result['overwritten']} overwritten"
-            if result['skipped']:
-                detail += f", {result['skipped']} skipped"
-            _events.emit("profile", "import", pm.get(pid).name,
-                         f"{detail} from {pm.get(req.source_id).name}")
-            if pid == pm.active_id:
-                _init_db(pm.active_db_path)
-            return {"status": "imported", **result}
-        except KeyError as e:
-            raise HTTPException(404, str(e))
-
-    @app.post("/api/profiles/{pid}/preview-import")
-    async def preview_import(pid: str, req: ImportMemoriesRequest):
-        pm = ProfileManager()
-        tags = req.tags if req.tags else None
-        try:
-            return pm.preview_import(pid, req.source_id, tags)
-        except KeyError as e:
-            raise HTTPException(404, str(e))
-
-    @app.get("/api/profiles/{pid}/export")
-    async def export_profile(pid: str):
-        pm = ProfileManager()
-        try:
-            data = pm.export_profile(pid)
-            profile = pm.get(pid)
-            filename = f"contextpilot-{profile.name}.zip"
-            _events.emit("profile", "export", profile.name)
-            return Response(
-                content=data,
-                media_type="application/zip",
-                headers={"Content-Disposition": f'attachment; filename="{filename}"'},
-            )
-        except KeyError as e:
-            raise HTTPException(404, str(e))
-
-    @app.post("/api/profiles/import-zip", status_code=201)
-    async def import_profile_zip(file: UploadFile = File(...), name: str = Query("")):
-        pm = ProfileManager()
-        content = await file.read()
-        if len(content) > MAX_UPLOAD_BYTES:
-            raise HTTPException(413, "File too large (max 50 MB)")
-        try:
-            p = pm.import_profile(content, name or None)
-            _events.emit("profile", "import-zip", p.name, f"from {file.filename}")
-            return {"status": "imported", "id": p.id, "name": p.name}
-        except ValueError as e:
-            raise HTTPException(400, str(e))
-
-    # --- Secrets / Sensitivity ---
-
-    @app.get("/api/sensitivity")
-    async def memory_sensitivity(
-        page: int = Query(1, ge=1),
-        page_size: int = Query(100, ge=1, le=500),
-    ):
-        store = _get_memory_store()
-        offset = (page - 1) * page_size
-        memories = store.list(limit=page_size, offset=offset)
-        results = []
-        for m in memories:
-            report = _secret_detector.scan(f"{m.key}\n{m.value}")
-            results.append({
-                "key": m.key,
-                "severity": report.max_severity,
-                "finding_count": len(report.findings),
-                "findings": [
-                    {"pattern": f.pattern_name, "severity": f.severity, "preview": f.matched_text}
-                    for f in report.findings[:5]
-                ],
-            })
-        # Sort: critical first, then high, medium, low, none
-        order = {"critical": 0, "high": 1, "medium": 2, "low": 3, "none": 4}
-        results.sort(key=lambda r: order.get(r["severity"], 99))
-        return {
-            "total": len(memories),
-            "sensitive": sum(1 for r in results if r["severity"] != "none"),
-            "by_severity": {
-                s: sum(1 for r in results if r["severity"] == s)
-                for s in ["critical", "high", "medium", "low"]
-                if any(r["severity"] == s for r in results)
-            },
-            "memories": results,
-        }
-
-    @app.get("/api/redacted")
-    async def get_memory_redacted(key: str = Query(...)):
-        store = _get_memory_store()
-        try:
-            m = store.get(key)
-            redacted_value = _secret_detector.redact(m.value)
-            report = _secret_detector.scan(f"{m.key}\n{m.value}")
-            return {
-                "key": m.key,
-                "value": redacted_value,
-                "tags": m.tags,
-                "severity": report.max_severity,
-                "findings": [
-                    {"pattern": f.pattern_name, "severity": f.severity}
-                    for f in report.findings
-                ],
-            }
-        except KeyError as e:
-            raise HTTPException(404, str(e))
-
-    # --- Folder Sources ---
-
-    @app.get("/api/folders")
-    async def list_folders():
-        fm = FolderManager(_get_profile_dir())
-        return [
-            {
-                "name": s.name,
-                "path": s.path,
-                "extensions": s.extensions,
-                "recursive": s.recursive,
-                "enabled": s.enabled,
-                "created_at": s.created_at,
-                "last_scan": s.last_scan,
-                "indexed_files": s.indexed_files,
-                "description": s.description,
-            }
-            for s in fm.list()
-        ]
-
-    @app.post("/api/folders", status_code=201)
-    async def add_folder(req: FolderSourceCreate):
-        fm = FolderManager(_get_profile_dir())
-        try:
-            s = fm.add(req.name, req.path, req.extensions, req.recursive, req.description)
-            return {"status": "created", "name": s.name}
-        except ValueError as e:
-            raise HTTPException(400, str(e))
-
-    @app.put("/api/folders/{name}")
-    async def update_folder(name: str, req: FolderSourceUpdate):
-        fm = FolderManager(_get_profile_dir())
-        updates = {k: v for k, v in req.model_dump().items() if v is not None}
-        try:
-            fm.update(name, **updates)
-            return {"status": "updated", "name": name}
-        except KeyError as e:
-            raise HTTPException(404, str(e))
-
-    @app.delete("/api/folders/{name}")
-    async def delete_folder(name: str, purge: bool = Query(False)):
-        fm = FolderManager(_get_profile_dir())
-        try:
-            purged = 0
-            if purge:
-                store = _get_memory_store()
-                purged = fm.purge(name, store)
-            fm.remove(name)
-            return {"status": "deleted", "name": name, "purged_memories": purged}
-        except KeyError as e:
-            raise HTTPException(404, str(e))
-
-    @app.post("/api/folders/{name}/scan")
-    async def scan_folder(name: str):
-        fm = FolderManager(_get_profile_dir())
-        store = _get_memory_store()
-        try:
-            result = fm.scan(name, store)
-            _events.emit("folder", "scan", name, f"+{result.added} ~{result.updated} -{result.removed}")
-            return {
-                "status": "scanned",
-                "name": name,
-                "added": result.added,
-                "updated": result.updated,
-                "removed": result.removed,
-                "skipped": result.skipped,
-                "errors": result.errors,
-            }
-        except KeyError as e:
-            raise HTTPException(404, str(e))
-
-    @app.post("/api/folders/scan-all")
-    async def scan_all_folders():
-        fm = FolderManager(_get_profile_dir())
-        store = _get_memory_store()
-        results = fm.scan_all(store)
-        return {
-            name: {
-                "added": r.added,
-                "updated": r.updated,
-                "removed": r.removed,
-                "skipped": r.skipped,
-                "errors": r.errors,
-            }
-            for name, r in results.items()
-        }
-
-    # --- Memory Versions ---
-
-    from src.storage.versions import VersionStore
-    from src.storage.relations import RelationStore
-    from src.storage.templates import TemplateStore, ContextTemplate
-
-    # --- Memory Relations ---
-
-    @app.get("/api/relations/{key:path}")
-    async def get_relations(key: str):
-        rs = RelationStore(_db)
-        return [{"id": r.id, "source_key": r.source_key, "target_key": r.target_key,
-                 "relation_type": r.relation_type, "created_at": r.created_at} for r in rs.get_relations(key)]
-
-    @app.post("/api/relations", status_code=201)
-    async def add_relation(request: Request):
-        try:
-            body = await request.json()
-        except json.JSONDecodeError:
-            raise HTTPException(400, "Invalid JSON")
-        if not body.get("source_key") or not body.get("target_key"):
-            raise HTTPException(400, "source_key and target_key are required")
-        rs = RelationStore(_db)
-        try:
-            r = rs.add(body["source_key"], body["target_key"], body.get("relation_type", "related"))
-            _events.emit("memory", "link", f"{r.source_key} -> {r.target_key}", r.relation_type)
-            return {"id": r.id, "source_key": r.source_key, "target_key": r.target_key}
-        except ValueError as e:
-            raise HTTPException(409, str(e))
-
-    @app.delete("/api/relations/{relation_id}")
-    async def remove_relation(relation_id: int):
-        rs = RelationStore(_db)
-        try:
-            rs.remove(relation_id)
-            return {"status": "deleted"}
-        except KeyError as e:
-            raise HTTPException(404, str(e))
-
-    # --- Context Templates ---
-
-    @app.get("/api/templates")
-    async def list_templates():
-        ts = TemplateStore(_db)
-        return [{"name": t.name, "description": t.description, "tag_filter": t.tag_filter,
-                 "key_filter": t.key_filter, "budget": t.budget} for t in ts.list()]
-
-    @app.post("/api/templates", status_code=201)
-    async def save_template(request: Request):
-        try:
-            body = await request.json()
-        except json.JSONDecodeError:
-            raise HTTPException(400, "Invalid JSON")
-        if not body.get("name"):
-            raise HTTPException(400, "name is required")
-        budget = body.get("budget", 4000)
-        if not isinstance(budget, (int, float)) or budget <= 0 or budget > 128000:
-            raise HTTPException(400, "budget must be > 0 and <= 128000")
-        ts = TemplateStore(_db)
-        t = ContextTemplate(
-            name=body["name"], description=body.get("description", ""),
-            tag_filter=body.get("tag_filter", []), key_filter=body.get("key_filter", ""),
-            budget=int(budget),
-        )
-        ts.save(t)
-        _events.emit("template", "save", t.name)
-        return {"status": "saved", "name": t.name}
-
-    @app.get("/api/templates/suggest")
-    async def suggest_templates():
-        store = _get_memory_store()
-        memories = store.list()
-        if not memories:
-            return {"suggestions": []}
-
-        from collections import Counter
-        from src.core.token_budget import TokenBudget as _TB
-
-        tag_counts: Counter = Counter()
-        prefix_counts: Counter = Counter()
-        tag_tokens: Dict[str, int] = {}
-        prefix_tokens: Dict[str, int] = {}
-
-        for m in memories:
-            tokens = _TB.estimate(m.value)
-            prefix = m.key.split("/")[0] if "/" in m.key else m.key
-            prefix_counts[prefix] += 1
-            prefix_tokens[prefix] = prefix_tokens.get(prefix, 0) + tokens
-            for tag in m.tags:
-                tag_counts[tag] += 1
-                tag_tokens[tag] = tag_tokens.get(tag, 0) + tokens
-
-        existing = {t.name for t in TemplateStore(_db).list()}
-        suggestions = []
-
-        # Suggest by key prefix clusters (>=3 memories)
-        for prefix, count in prefix_counts.most_common(20):
-            if count < 3:
-                continue
-            name = f"{prefix}-context"
-            if name in existing:
-                continue
-            total_tok = prefix_tokens[prefix]
-            budget = min(max(total_tok, 2000), 16000)
-            suggestions.append({
-                "name": name,
-                "description": f"{count} memories under {prefix}/",
-                "tag_filter": [],
-                "key_filter": f"{prefix}/",
-                "budget": budget,
-                "memory_count": count,
-                "total_tokens": total_tok,
-                "reason": "key_prefix",
-            })
-
-        # Suggest by dominant tag clusters (>=5 memories, not already covered by prefix)
-        covered_names = {s["name"] for s in suggestions}
-        for tag, count in tag_counts.most_common(15):
-            if count < 5:
-                continue
-            name = f"{tag}-context"
-            if name in existing or name in covered_names:
-                continue
-            total_tok = tag_tokens[tag]
-            budget = min(max(total_tok, 2000), 16000)
-            suggestions.append({
-                "name": name,
-                "description": f"{count} memories tagged '{tag}'",
-                "tag_filter": [tag],
-                "key_filter": "",
-                "budget": budget,
-                "memory_count": count,
-                "total_tokens": total_tok,
-                "reason": "tag_cluster",
-            })
-
-        # Suggest an "everything" template if none exists and >10 memories
-        if len(memories) >= 10 and "all-context" not in existing:
-            total = sum(_TB.estimate(m.value) for m in memories)
-            suggestions.append({
-                "name": "all-context",
-                "description": f"All {len(memories)} memories",
-                "tag_filter": [],
-                "key_filter": "",
-                "budget": min(total, 16000),
-                "memory_count": len(memories),
-                "total_tokens": total,
-                "reason": "all",
-            })
-
-        suggestions.sort(key=lambda s: s["memory_count"], reverse=True)
-        return {"suggestions": suggestions[:12]}
-
-    @app.delete("/api/templates/{name}")
-    async def delete_template(name: str):
-        ts = TemplateStore(_db)
-        try:
-            ts.delete(name)
-            return {"status": "deleted"}
-        except KeyError as e:
-            raise HTTPException(404, str(e))
-
-    @app.post("/api/templates/{name}/assemble")
-    async def assemble_template(name: str):
-        ts = TemplateStore(_db)
-        try:
-            t = ts.get(name)
-        except KeyError:
-            raise HTTPException(404, f"Template '{name}' not found")
-
-        store = _get_memory_store()
-        memories = store.list()
-
-        if t.tag_filter:
-            memories = [m for m in memories if any(tag in m.tags for tag in t.tag_filter)]
-        if t.key_filter:
-            memories = [m for m in memories if t.key_filter.lower() in m.key.lower()]
-
-        from src.core.weight_adjuster import WeightAdjuster
-        adjuster = WeightAdjuster(_get_usage_store())
-
-        blocks = []
-        for m in memories:
-            hint = _detect_compress_hint(m.value)
-            b = Block(
-                content=m.value,
-                priority=Priority.HIGH if getattr(m, "pinned", False) else Priority.MEDIUM,
-                compress_hint=hint,
-            )
-            b = adjuster.adjust_priority(b, adjuster.compute_weight(m.value))
-            b.source_key = m.key
-            blocks.append(b)
-
-        assembler = _make_assembler()
-        result = assembler.assemble_tracked(blocks, t.budget)
-
-        from src.storage.usage import UsageRecord
-        try:
-            included_hashes = {block_hash(b.content) for b in result.blocks}
-            records = [
-                UsageRecord(block_hash=block_hash(b.content), included=block_hash(b.content) in included_hashes, token_count=b.token_count)
-                for b in result.input_blocks
-            ]
-            _get_usage_store().record_usage(records)
-        except Exception:
-            pass
-
-        def _block_result(b: Block) -> Dict[str, Any]:
-            d = _block_to_dict(b)
-            d["key"] = b.source_key or ""
-            return d
-
-        return {
-            "template": t.name,
-            "description": t.description,
-            "budget": t.budget,
-            "assembly_id": result.assembly_id,
-            "used_tokens": result.used_tokens,
-            "total_matching": len(memories),
-            "block_count": len(result.blocks),
-            "blocks": [_block_result(b) for b in result.blocks],
-            "dropped_count": len(result.dropped_blocks),
-            "dropped": [_block_result(b) for b in result.dropped_blocks],
-        }
-
-    # --- Export as CLAUDE.md ---
-
-    @app.get("/api/export-claude-md")
-    async def export_claude_md(tags: str = Query(""), key_prefix: str = Query("")):
-        store = _get_memory_store()
-        memories = store.list()
-
-        if tags:
-            tag_list = [t.strip() for t in tags.split(",") if t.strip()]
-            memories = [m for m in memories if any(t in m.tags for t in tag_list)]
-        if key_prefix:
-            memories = [m for m in memories if m.key.startswith(key_prefix)]
-
-        sections = []
-        for m in sorted(memories, key=lambda x: x.key):
-            heading = m.key.replace("/", " > ").title()
-            sections.append(f"## {heading}\n\n{m.value}")
-
-        content = "# Context Pilot Export\n\n" + "\n\n---\n\n".join(sections)
-        return {"content": content, "memory_count": len(memories),
-                "token_count": TokenBudget.estimate(content)}
-
-    @app.get("/api/export-markdown")
-    async def export_markdown(tags: str = Query(""), key_prefix: str = Query("")):
-        store = _get_memory_store()
-        memories = store.list()
-
-        if tags:
-            tag_list = [t.strip() for t in tags.split(",") if t.strip()]
-            memories = [m for m in memories if any(t in m.tags for t in tag_list)]
-        if key_prefix:
-            memories = [m for m in memories if m.key.startswith(key_prefix)]
-
-        grouped: Dict[str, list] = {}
-        for m in sorted(memories, key=lambda x: x.key):
-            group = m.tags[0] if m.tags else "Untagged"
-            grouped.setdefault(group, []).append(m)
-
-        lines = ["# Context Pilot — Knowledge Export", ""]
-        lines.append(f"*{len(memories)} memories exported*\n")
-        for group, mems in sorted(grouped.items()):
-            lines.append(f"## {group}\n")
-            for m in mems:
-                lines.append(f"### {m.key}\n")
-                tag_str = " ".join(f"`{t}`" for t in m.tags)
-                if tag_str:
-                    lines.append(f"Tags: {tag_str}\n")
-                lines.append(m.value)
-                lines.append("")
-            lines.append("---\n")
-
-        content = "\n".join(lines)
-        return {"content": content, "memory_count": len(memories),
-                "token_count": TokenBudget.estimate(content)}
-
-    # --- Backup & Restore ---
-
-    from src.core.backup import BackupManager
-
-    @app.post("/api/backups", status_code=201)
-    async def create_backup():
-        pm = ProfileManager()
-        bm = BackupManager(pm.active_data_dir)
-        try:
-            path = bm.create_backup()
-            stat = path.stat()
-            return {"filename": path.name, "size_bytes": stat.st_size}
-        except FileNotFoundError as e:
-            raise HTTPException(404, str(e))
-
-    @app.get("/api/backups")
-    async def list_backups():
-        pm = ProfileManager()
-        bm = BackupManager(pm.active_data_dir)
-        return bm.list_backups()
-
-    @app.post("/api/backups/{filename}/restore")
-    async def restore_backup(filename: str):
-        pm = ProfileManager()
-        bm = BackupManager(pm.active_data_dir)
-        try:
-            bm.restore_backup(filename)
-            return {"status": "restored", "filename": filename}
-        except ValueError as e:
-            raise HTTPException(400, str(e))
-
-    @app.delete("/api/backups/{filename}")
-    async def delete_backup(filename: str):
-        pm = ProfileManager()
-        bm = BackupManager(pm.active_data_dir)
-        try:
-            bm.delete_backup(filename)
-            return {"status": "deleted", "filename": filename}
-        except ValueError as e:
-            raise HTTPException(400, str(e))
-
-    # --- Analytics ---
-
-    from src.core.analytics import AnalyticsEngine
-
-    @app.get("/api/analytics/summary")
-    async def analytics_summary():
-        engine = AnalyticsEngine(_get_db(), _get_memory_store(), _get_usage_store())
-        return engine.summary()
-
-    @app.get("/api/analytics/top-memories")
-    async def analytics_top_memories(limit: int = Query(20, ge=1, le=100)):
-        engine = AnalyticsEngine(_get_db(), _get_memory_store(), _get_usage_store())
-        return engine.top_memories(limit)
-
-    @app.get("/api/analytics/top-tags")
-    async def analytics_top_tags(limit: int = Query(20, ge=1, le=100)):
-        engine = AnalyticsEngine(_get_db(), _get_memory_store(), _get_usage_store())
-        return engine.top_tags(limit)
-
-    @app.get("/api/analytics/connector-stats")
-    async def analytics_connector_stats():
-        engine = AnalyticsEngine(_get_db(), _get_memory_store(), _get_usage_store())
-        return engine.connector_stats()
-
-    @app.get("/api/analytics/memory-growth")
-    async def analytics_memory_growth(days: int = Query(30, ge=1, le=365)):
-        engine = AnalyticsEngine(_get_db(), _get_memory_store(), _get_usage_store())
-        return engine.memory_growth(days)
-
-    # --- Duplicate Detection ---
-
-    @app.get("/api/duplicates")
-    async def find_duplicates_api(
-        threshold: float = Query(0.6, ge=0.3, le=1.0),
-        limit: int = Query(500, ge=10, le=2000),
-    ):
-        from src.core.duplicates import find_duplicates
-        store = _get_memory_store()
-        groups = find_duplicates(store.list(limit=limit), threshold)
-        return [{"keys": g.keys, "similarity": g.similarity, "sample": g.sample} for g in groups]
-
-    @app.get("/api/similar/{key:path}")
-    async def find_similar_api(key: str, threshold: float = Query(0.5, ge=0.3, le=1.0)):
-        from src.core.duplicates import find_similar
-        store = _get_memory_store()
-        try:
-            target = store.get(key)
-        except KeyError:
-            raise HTTPException(404, f"Memory '{key}' not found")
-        results = find_similar(target, store.list(), threshold)
-        return [{"key": k, "similarity": s} for k, s in results]
-
-    # --- Webhooks ---
-
-    from src.core.webhooks import WebhookManager
-
-    @app.get("/api/webhooks")
-    async def list_webhooks():
-        wm = WebhookManager(_get_profile_dir())
-        return [{"name": h.name, "type": h.type, "url": h.url, "enabled": h.enabled,
-                 "events": h.events, "chat_id": h.chat_id} for h in wm.list()]
-
-    @app.post("/api/webhooks", status_code=201)
-    async def add_webhook(request: Request):
-        try:
-            body = await request.json()
-        except json.JSONDecodeError:
-            raise HTTPException(400, "Invalid JSON")
-        wm = WebhookManager(_get_profile_dir())
-        wm.add(body["name"], body["type"], body["url"],
-               chat_id=body.get("chat_id", ""), session=body.get("session", "default"),
-               events=body.get("events", []))
-        return {"status": "created", "name": body["name"]}
-
-    @app.delete("/api/webhooks/{name}")
-    async def remove_webhook(name: str):
-        wm = WebhookManager(_get_profile_dir())
-        try:
-            wm.remove(name)
-            return {"status": "deleted"}
-        except KeyError as e:
-            raise HTTPException(404, str(e))
-
-    @app.post("/api/webhooks/test")
-    async def test_webhook(request: Request):
-        try:
-            body = await request.json()
-        except json.JSONDecodeError:
-            raise HTTPException(400, "Invalid JSON")
-        wm = WebhookManager(_get_profile_dir())
-        results = wm.notify(body.get("event", "test"), body.get("message", "Context Pilot test notification"))
-        return {"results": results}
-
-    # --- Scheduler ---
-
-    from src.core.scheduler import SyncScheduler
-
-    @app.get("/api/scheduler")
-    async def scheduler_status():
-        s = SyncScheduler.instance()
-        return s.get_status()
-
-    @app.post("/api/scheduler/start")
-    async def scheduler_start(interval: int = Query(30, ge=1, le=1440)):
-        s = SyncScheduler.instance(interval)
-        s.set_interval(interval)
-        s.start(_get_memory_store, lambda: _db, _get_profile_dir)
-        _events.emit("scheduler", "start", f"{interval}m interval")
-        return {"status": "started", "interval_minutes": interval}
-
-    @app.post("/api/scheduler/stop")
-    async def scheduler_stop():
-        s = SyncScheduler.instance()
-        s.stop()
-        _events.emit("scheduler", "stop", "manual")
-        return {"status": "stopped"}
-
-    @app.post("/api/scheduler/run-now")
-    async def scheduler_run_now():
-        s = SyncScheduler.instance()
-        s._get_store = _get_memory_store
-        s._get_db = lambda: _db
-        s._get_profile_dir = _get_profile_dir
-        results = await s.run_once()
-        _events.emit("scheduler", "manual-run", "complete")
-        return results
-
-    # --- Semantic Search ---
-
-    from src.core.embeddings import index_memories as _index_memories, semantic_search as _semantic_search, get_backend as _embed_backend, index_single_memory as _index_single, remove_from_index as _remove_from_index, get_active_dir as _embed_active_dir
-
-    import threading
-    _index_lock = threading.Lock()
-    _index_state = {"status": "idle", "indexed": 0, "skipped": 0, "total": 0, "backend": _embed_backend()}
-
-    def _run_index_background(profile_dir=None):
-        if not _index_lock.acquire(blocking=False):
-            return
-        try:
-            target_dir = profile_dir or _embed_active_dir()
-            _index_state.update(status="running", indexed=0, skipped=0, total=0)
-            _events.emit("system", "index-start", "embeddings", f"Background indexing started ({target_dir.name})")
-            store = _get_memory_store()
-            memories = store.list()
-            _index_state["total"] = len(memories)
-            stats = _index_memories(memories, profile_dir=target_dir)
-            if stats.get("aborted"):
-                _index_state.update(status="aborted")
-                _events.emit("system", "index-abort", "embeddings", "Profile changed during indexing")
-            else:
-                _index_state.update(status="done", indexed=stats["indexed"], skipped=stats["skipped"], backend=stats["backend"])
-                _events.emit("system", "index", "embeddings", f"{stats['indexed']} indexed, {stats['skipped']} skipped ({stats['backend']})")
-        except Exception as e:
-            _index_state["status"] = "error"
-            _events.emit("system", "index-error", "embeddings", str(e))
-        finally:
-            _index_lock.release()
-
-    def _trigger_background_index():
-        """Start background index for current profile (non-blocking)."""
-        t = threading.Thread(target=_run_index_background, daemon=True)
-        t.start()
-
-    @app.post("/api/embeddings/index")
-    async def index_embeddings():
-        if _index_state["status"] == "running":
-            return {"status": "already_running", **_index_state}
-        _trigger_background_index()
-        return {"status": "started"}
-
-    @app.get("/api/embeddings/index/status")
-    async def index_status():
-        return _index_state
-
-    @app.get("/api/embeddings/stats")
-    async def embedding_stats():
-        from src.core.embeddings import _get_store as _get_embed_store
-        return _get_embed_store().stats()
-
-    @app.get("/api/semantic-search")
-    async def semantic_search_api(
-        q: str = Query("", min_length=1),
-        limit: int = Query(10, ge=1, le=50),
-        mode: str = Query("hybrid", pattern="^(keyword|semantic|hybrid)$"),
-    ):
-        store = _get_memory_store()
-
-        if mode == "keyword":
-            memories = store.search(q, limit=limit)
-            return [
-                {**m.to_dict(), "similarity": 0, "method": "keyword"}
-                for m in memories
-            ]
-
-        if mode == "semantic":
-            results = _semantic_search(q, limit)
-            output = []
-            for key, score in results:
-                try:
-                    m = store.get(key)
-                    output.append({**m.to_dict(), "similarity": score, "method": "semantic"})
-                except KeyError:
-                    pass
-            return output
-
-        # mode == "hybrid"
-        from src.core.embeddings import hybrid_search as _hybrid_search
-        hybrid_results = _hybrid_search(q, store, top_k=limit)
-        output = []
-        for r in hybrid_results:
-            try:
-                m = store.get(r["key"])
-                output.append({**m.to_dict(), "similarity": r["score"], "method": r["method"]})
-            except KeyError:
-                pass
-        return output
-
-    # --- Connectors (Plugin Architecture) ---
-
-    def _get_connectors():
-        return ConnectorRegistry.instance(_get_profile_dir())
-
-    def _get_connector(name: str):
-        c = _get_connectors().get(name)
-        if not c:
-            raise HTTPException(404, f"Connector '{name}' not found")
-        return c
-
-    @app.get("/api/connectors")
-    async def list_connectors():
-        return [c.get_status() for c in _get_connectors().list()]
-
-    @app.get("/api/connectors/{name}")
-    async def connector_status(name: str):
-        return _get_connector(name).get_status()
-
-    @app.post("/api/connectors/{name}/setup")
-    async def connector_setup(name: str, request: Request):
-        c = _get_connector(name)
-        try:
-            body = await request.json()
-        except json.JSONDecodeError:
-            raise HTTPException(400, "Invalid JSON")
-        c.configure(body)
-        result = c.test_connection()
-        _events.emit("connector", "setup", name, f"ok={result.get('ok')}")
-        return {"status": "configured", "test": result}
-
-    @app.put("/api/connectors/{name}")
-    async def connector_update(name: str, request: Request):
-        c = _get_connector(name)
-        if not c.configured:
-            raise HTTPException(400, f"Connector '{name}' not configured yet.")
-        try:
-            body = await request.json()
-        except json.JSONDecodeError:
-            raise HTTPException(400, "Invalid JSON")
-        c.update(body)
-        return {"status": "updated"}
-
-    @app.post("/api/connectors/{name}/test")
-    async def connector_test(name: str):
-        c = _get_connector(name)
-        return c.test_connection()
-
-    @app.post("/api/connectors/{name}/sync")
-    async def connector_sync(name: str):
-        c = _get_connector(name)
-        store = _get_memory_store()
-        result = c.sync(store)
-        c._record_sync(result)
-        _events.emit("connector", "sync", name, f"+{result.added} ~{result.updated} -{result.removed}")
-        return {"status": "synced", **result.to_dict()}
-
-    @app.get("/api/connectors/{name}/history")
-    async def connector_history(name: str):
-        c = _get_connector(name)
-        return c._config.get("_sync_history", [])
-
-    @app.post("/api/connectors/{name}/enable")
-    async def connector_enable(name: str, enabled: bool = Query(True)):
-        c = _get_connector(name)
-        c.set_enabled(enabled)
-        return {"status": "updated", "enabled": enabled}
-
-    @app.delete("/api/connectors/{name}")
-    async def connector_remove(name: str, purge: bool = Query(False)):
-        c = _get_connector(name)
-        purged = 0
-        if purge:
-            store = _get_memory_store()
-            purged = c.purge(store)
-        c.remove()
-        _events.emit("connector", "remove", name, f"purged={purged}")
-        return {"status": "removed", "purged_memories": purged}
-
-    # --- Email Connector Account Management ---
-
-    @app.get("/api/connectors/email/accounts")
-    async def email_accounts():
-        c = _get_connector("email")
-        accounts = c._get_accounts()
-        # Mask passwords
-        safe = []
-        for acc in accounts:
-            a = dict(acc)
-            if a.get("password"):
-                a["password"] = "********"
-            safe.append(a)
-        return safe
-
-    @app.post("/api/connectors/email/accounts")
-    async def add_email_account(request: Request):
-        c = _get_connector("email")
-        try:
-            body = await request.json()
-        except json.JSONDecodeError:
-            raise HTTPException(400, "Invalid JSON")
-        required = ["name", "host", "user", "password"]
-        for f in required:
-            if not body.get(f):
-                raise HTTPException(400, f"'{f}' is required")
-        acc = {
-            "name": body["name"],
-            "host": body["host"],
-            "port": int(body.get("port", 993)),
-            "user": body["user"],
-            "password": body["password"],
-            "ssl": body.get("ssl", True),
-            "folders": body.get("folders", ["INBOX"]),
-            "tags": body.get("tags", ["email"]),
-        }
-        accounts = c._get_accounts()
-        # Replace if name exists
-        accounts = [a for a in accounts if a.get("name") != acc["name"]]
-        accounts.append(acc)
-        c._config["accounts"] = accounts
-        c._config["_configured"] = True
-        c._config["_enabled"] = True
-        c._save()
-        _events.emit("connector", "add-account", "email", acc["name"])
-        return {"status": "added", "name": acc["name"], "total": len(accounts)}
-
-    @app.delete("/api/connectors/email/accounts/{account_name}")
-    async def remove_email_account(account_name: str):
-        c = _get_connector("email")
-        accounts = c._get_accounts()
-        before = len(accounts)
-        accounts = [a for a in accounts if a.get("name") != account_name]
-        if len(accounts) == before:
-            raise HTTPException(404, f"Account '{account_name}' not found")
-        c._config["accounts"] = accounts
-        if not accounts:
-            c._config["_configured"] = False
-        c._save()
-        _events.emit("connector", "remove-account", "email", account_name)
-        return {"status": "removed", "name": account_name, "remaining": len(accounts)}
-
-    # --- Inbound Webhook ---
-
-    @app.post("/api/inbound/{token}")
-    async def inbound_webhook(token: str, payload: InboundPayload):
-        expected = os.environ.get("CONTEXTPILOT_INBOUND_TOKEN")
-        if expected is None:
-            raise HTTPException(status_code=403, detail="Inbound webhooks not configured")
-        if token != expected:
-            raise HTTPException(status_code=403, detail="Invalid token")
-        if not payload.key or not payload.key.strip():
-            raise HTTPException(status_code=400, detail="Missing key")
-        if not payload.value or not payload.value.strip():
-            raise HTTPException(status_code=400, detail="Missing value")
-        store = _get_memory_store()
-        store.set(Memory(key=payload.key.strip(), value=payload.value.strip(), tags=payload.tags))
-        return {"status": "ok", "key": payload.key.strip()}
+    # --- Include all routers ---
+
+    app.include_router(memories.router)
+    app.include_router(connectors.router)
+    app.include_router(profiles.router)
+    app.include_router(assembly.router)
+    app.include_router(analytics.router)
+    app.include_router(system.router)
+    app.include_router(events.router)
+    app.include_router(graph.router)
+    app.include_router(folders.router)
+    app.include_router(projects.router)
+    app.include_router(import_routes.router)
 
     # Cleanup expired memories on startup
     try:
@@ -2476,6 +302,16 @@ def create_app(db_path: Optional[Path] = None) -> FastAPI:
         expired = store.cleanup_expired()
         if expired > 0:
             _events.emit("system", "ttl-cleanup", f"{expired} expired memories removed at startup")
+    except Exception:
+        pass
+
+    # Auto-backup if needed (max once per 24h)
+    try:
+        from src.core.backup import BackupManager as _StartupBM
+        _bm = _StartupBM(ProfileManager().active_data_dir)
+        if _bm.needs_backup(max_age_hours=24):
+            _bm.auto_backup(max_backups=7)
+            _events.emit("system", "auto-backup", "automatic backup created at startup")
     except Exception:
         pass
 

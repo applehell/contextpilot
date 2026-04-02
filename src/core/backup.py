@@ -5,6 +5,7 @@ import json
 import os
 import re
 import shutil
+import sqlite3
 import time
 from datetime import datetime, timezone
 from pathlib import Path
@@ -118,3 +119,50 @@ class BackupManager:
             store.set(m)
             count += 1
         return count
+
+    def auto_backup(self, max_backups: int = 7) -> Path:
+        path = self.create_backup()
+        backups = self.list_backups()
+        if len(backups) > max_backups:
+            for b in backups[max_backups:]:
+                p = self._backup_dir / b["filename"]
+                if p.exists():
+                    p.unlink()
+        return path
+
+    def backup_age_hours(self) -> Optional[float]:
+        backups = self.list_backups()
+        if not backups:
+            return None
+        newest = backups[0]
+        created = datetime.fromisoformat(newest["created_at"])
+        delta = datetime.now(timezone.utc) - created
+        return delta.total_seconds() / 3600
+
+    def needs_backup(self, max_age_hours: float = 24) -> bool:
+        age = self.backup_age_hours()
+        if age is None:
+            return True
+        return age > max_age_hours
+
+    def verify_backup(self, filename: str) -> Dict[str, Any]:
+        path = self._validate_filename(filename)
+        if not path.exists():
+            raise ValueError(f"Backup not found: {filename}")
+        try:
+            conn = sqlite3.connect(str(path))
+            conn.execute("SELECT 1")
+            row = conn.execute("PRAGMA user_version").fetchone()
+            schema_version = row[0] if row else 0
+            tables = {r[0] for r in conn.execute(
+                "SELECT name FROM sqlite_master WHERE type='table'"
+            ).fetchall()}
+            if "memories" in tables:
+                row = conn.execute("SELECT COUNT(*) FROM memories").fetchone()
+                memory_count = row[0] if row else 0
+            else:
+                memory_count = 0
+            conn.close()
+            return {"valid": True, "memory_count": memory_count, "schema_version": schema_version}
+        except Exception as exc:
+            return {"valid": False, "error": str(exc)}

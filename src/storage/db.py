@@ -5,6 +5,10 @@ import sqlite3
 from pathlib import Path
 from typing import Optional
 
+from src.core.log import get_logger
+
+logger = get_logger("storage.db")
+
 SCHEMA_VERSION = 13
 
 MIGRATIONS = {
@@ -281,8 +285,10 @@ class Database:
                     for stmt in MIGRATIONS[ver]:
                         self._conn.execute(stmt)
                     self._conn.execute("RELEASE migration")
+                    logger.info("Migration v%d applied (from v%d)", ver, current)
                 except Exception:
                     self._conn.execute("ROLLBACK TO migration")
+                    logger.error("Migration v%d failed, rolled back", ver, exc_info=True)
                     raise
                 self._set_version(ver)
         self._conn.commit()
