@@ -56,6 +56,16 @@ function init() {
     initMobileNav();
     initCollapsibleHeader();
     updateFabVisibility('dashboard');
+    updateBreadcrumb('dashboard');
+
+    // Shortcuts overlay close on background click
+    const scOverlay = document.getElementById('shortcuts-overlay');
+    if (scOverlay) {
+        scOverlay.addEventListener('click', e => {
+            if (e.target === scOverlay) closeShortcuts();
+        });
+    }
+
     startup();
 }
 
@@ -155,8 +165,14 @@ function initKeyboardShortcuts() {
         const isModalOpen = modal && modal.classList.contains('active');
         const isInput = ['INPUT', 'TEXTAREA', 'SELECT'].includes(document.activeElement?.tagName);
 
-        // Escape — close global search or modal
+        // Escape — close shortcuts, global search, or modal
         if (e.key === 'Escape') {
+            const sc = document.getElementById('shortcuts-overlay');
+            if (sc && sc.classList.contains('active')) {
+                closeShortcuts();
+                e.preventDefault();
+                return;
+            }
             const gs = document.getElementById('global-search-overlay');
             if (gs && gs.classList.contains('active')) {
                 closeGlobalSearch();
@@ -179,6 +195,13 @@ function initKeyboardShortcuts() {
 
         // Shortcuts only when not in an input
         if (isInput || isModalOpen) return;
+
+        // ? — show keyboard shortcuts
+        if (e.key === '?') {
+            e.preventDefault();
+            openShortcuts();
+            return;
+        }
 
         // N — new memory
         if (e.key === 'n') {
@@ -454,8 +477,10 @@ function showTab(name, clickedBtn) {
         main.style.padding = '';
     }
 
+    updateBreadcrumb(name);
+
     if (name === 'dashboard') { resetEventBadge(); loadDashboard(); }
-    if (name === 'memories') loadMemories();
+    if (name === 'memories') { loadMemories(); setTimeout(applyCompactView, 50); }
     if (name === 'skills') loadSkills();
     if (name === 'graph') loadGraph();
     if (name === 'secrets') loadSecrets();
@@ -690,6 +715,12 @@ async function loadDashboardStats() {
         }
         const weekEl = document.getElementById('dash-new-today-detail');
         if (weekEl) { weekEl.textContent = `${d.new_today} new, ${d.updated_today || 0} updated`; }
+
+        // Sparklines for daily activity (if backend provides it)
+        if (d.daily_counts) {
+            const sparkEl = document.getElementById('dash-new-today-detail');
+            if (sparkEl) sparkEl.innerHTML += renderSparkline(d.daily_counts);
+        }
         const trashEl = document.getElementById('dash-trash');
         if (trashEl) { trashEl.textContent = d.trash_count; }
 
@@ -745,10 +776,12 @@ async function loadDashboardStats() {
             } else {
                 hEl.innerHTML = health.map(c => {
                     const dotClass = c.reachable === true ? 'ok' : c.reachable === false ? 'fail' : 'unknown';
+                    const lastSync = c.last_sync ? '<span class="conn-last-sync">sync ' + relativeTime(c.last_sync) + '</span>' : '<span class="conn-last-sync">nie synchronisiert</span>';
                     return `<div style="font-size:12px;margin-bottom:3px;">
                         <span class="health-dot ${dotClass}"></span>
                         ${escapeHtml(c.display_name || c.name)}
                         <span style="color:var(--text-muted);font-size:10px;">${escapeHtml(c.detail || '')}</span>
+                        ${lastSync}
                     </div>`;
                 }).join('');
             }
@@ -839,7 +872,11 @@ async function loadSkills() {
         const skills = await res.json();
         const list = document.getElementById('skill-list');
         if (skills.length === 0) {
-            list.innerHTML = '<p class="muted">No skills connected</p>';
+            list.innerHTML = '<div class="empty-state">'
+                + '<div class="empty-state-orb"></div>'
+                + '<div class="empty-state-title">Keine Skills verbunden</div>'
+                + '<div class="empty-state-desc">Skills werden automatisch erkannt, sobald ein MCP-Client verbunden ist.</div>'
+                + '</div>';
         } else {
             list.innerHTML = skills.map(s => renderSkillCard(s)).join('');
         }
@@ -964,7 +1001,12 @@ function renderMemories(data) {
     const list = document.getElementById('memory-list');
 
     if (!data || data.length === 0) {
-        list.innerHTML = '<div class="empty-state">No memories found.</div>';
+        list.innerHTML = '<div class="empty-state">'
+            + '<div class="empty-state-orb"></div>'
+            + '<div class="empty-state-title">Noch keine Memories</div>'
+            + '<div class="empty-state-desc">Erstelle dein erstes Memory oder importiere bestehende Daten.</div>'
+            + '<button class="btn btn-primary" onclick="openNewMemoryModal()">Neues Memory erstellen</button>'
+            + '</div>';
         return;
     }
 
@@ -985,7 +1027,11 @@ function renderMemories(data) {
     }
 
     if (filtered.length === 0) {
-        list.innerHTML = '<div class="empty-state">No memories match the lifetime filter.</div>';
+        list.innerHTML = '<div class="empty-state">'
+            + '<div class="empty-state-orb"></div>'
+            + '<div class="empty-state-title">Keine Treffer</div>'
+            + '<div class="empty-state-desc">Kein Memory passt zum aktuellen Filter.</div>'
+            + '</div>';
         return;
     }
 
@@ -1046,6 +1092,7 @@ function renderMemories(data) {
             + chevron
             + '<div class="main">'
             + '<div class="key">' + pinIcon + badge + escapeHtml(m.key) + '</div>'
+            + '<div class="compact-meta">' + tagsHtml + (age ? ' <span class="age">' + age + '</span>' : '') + ' ' + lifetimeHtml + '</div>'
             + '<div class="preview">' + escapeHtml((m.value || '').substring(0, 120)) + '</div>'
             + '<div class="meta">'
             + tagsHtml
@@ -1083,6 +1130,10 @@ async function toggleAccordion(headerEl) {
     }
 
     item.classList.add('expanded');
+    // Scroll expanded item into view on mobile
+    if (window.innerWidth <= 768) {
+        setTimeout(() => item.scrollIntoView({ behavior: 'smooth', block: 'start' }), 150);
+    }
     const body = item.querySelector('.mem-body');
 
     // Load content if not already loaded
@@ -1250,19 +1301,30 @@ function initEditor(textareaId) {
     const el = document.getElementById(textareaId);
     if (!el || typeof EasyMDE === 'undefined') return;
 
+    const isMobile = window.innerWidth <= 768;
+    const mobileToolbar = [
+        'bold', 'italic', 'heading', '|',
+        'code', 'unordered-list', '|',
+        'link', '|',
+        'preview',
+    ];
+    const desktopToolbar = [
+        'bold', 'italic', 'heading', '|',
+        'code', 'quote', 'unordered-list', 'ordered-list', '|',
+        'link', 'table', 'horizontal-rule', '|',
+        'preview', 'side-by-side', 'fullscreen', '|',
+        'guide',
+    ];
+
     activeEditor = new EasyMDE({
         element: el,
         spellChecker: false,
-        autofocus: true,
-        status: ['lines', 'words'],
-        minHeight: '250px',
-        toolbar: [
-            'bold', 'italic', 'heading', '|',
-            'code', 'quote', 'unordered-list', 'ordered-list', '|',
-            'link', 'table', 'horizontal-rule', '|',
-            'preview', 'side-by-side', 'fullscreen', '|',
-            'guide',
-        ],
+        autofocus: !isMobile,
+        autoDownloadFontAwesome: false,
+        status: isMobile ? false : ['lines', 'words'],
+        minHeight: isMobile ? '120px' : '250px',
+        maxHeight: isMobile ? '35vh' : undefined,
+        toolbar: isMobile ? mobileToolbar : desktopToolbar,
     });
 }
 
@@ -1870,7 +1932,7 @@ function renderGraph(data) {
             },
             stabilization: { iterations: 200, fit: true },
         },
-        interaction: { hover: true, tooltipDelay: 100, keyboard: { enabled: true }, zoomView: true },
+        interaction: { hover: true, tooltipDelay: 100, keyboard: { enabled: true }, zoomView: true, navigationButtons: true },
         nodes: { scaling: { min: 8, max: 40 }, borderWidth: 2, shadow: { enabled: true, size: 6, color: 'rgba(0,0,0,0.1)' } },
         edges: { smooth: { type: 'continuous' }, color: { color: '#c4c4be', highlight: '#c4703f' } },
     };
@@ -4502,4 +4564,66 @@ function relativeTime(ts) {
     if (delta < 604800) return Math.floor(delta / 86400) + ' Tage';
     if (delta < 2592000) return Math.floor(delta / 604800) + ' Wochen';
     return Math.floor(delta / 2592000) + ' Monate';
+}
+
+// ═══════════════════════════════════════════════════════════════
+// 1. KEYBOARD SHORTCUTS OVERLAY
+// ═══════════════════════════════════════════════════════════════
+
+function openShortcuts() {
+    document.getElementById('shortcuts-overlay').classList.add('active');
+}
+
+function closeShortcuts() {
+    document.getElementById('shortcuts-overlay').classList.remove('active');
+}
+
+// ═══════════════════════════════════════════════════════════════
+// 4. COMPACT MEMORY VIEW TOGGLE
+// ═══════════════════════════════════════════════════════════════
+
+let compactView = localStorage.getItem('cp-compact-view') === 'true';
+
+function toggleCompactView() {
+    compactView = !compactView;
+    localStorage.setItem('cp-compact-view', compactView);
+    applyCompactView();
+}
+
+function applyCompactView() {
+    const list = document.getElementById('memory-list');
+    const btn = document.getElementById('compact-view-btn');
+    if (!list) return;
+    list.classList.toggle('compact', compactView);
+    if (btn) btn.classList.toggle('active', compactView);
+}
+
+// ═══════════════════════════════════════════════════════════════
+// 5. BREADCRUMB IN COLLAPSED HEADER
+// ═══════════════════════════════════════════════════════════════
+
+const TAB_NAMES = {
+    dashboard: 'Dashboard', memories: 'Memories', skills: 'Skills',
+    graph: 'Graph', secrets: 'Secrets', sources: 'Sources',
+    assembler: 'Assembler', settings: 'Settings'
+};
+
+function updateBreadcrumb(tabName) {
+    const el = document.getElementById('header-breadcrumb');
+    if (el) el.textContent = TAB_NAMES[tabName] || tabName;
+}
+
+// ═══════════════════════════════════════════════════════════════
+// 9. DASHBOARD SPARKLINES
+// ═══════════════════════════════════════════════════════════════
+
+function renderSparkline(values) {
+    if (!values || values.length === 0) return '';
+    const max = Math.max(...values, 1);
+    return '<div class="sparkline">' +
+        values.map(v => {
+            const h = Math.max(2, Math.round((v / max) * 20));
+            return '<div class="sparkline-bar" style="height:' + h + 'px;"></div>';
+        }).join('') +
+        '</div>';
 }

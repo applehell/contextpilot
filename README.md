@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="https://img.shields.io/badge/version-4.1.0-blue?style=flat-square" alt="Version">
+  <img src="https://img.shields.io/badge/version-4.1.1-blue?style=flat-square" alt="Version">
   <img src="https://img.shields.io/docker/pulls/applehell/contextpilot?style=flat-square&color=blue" alt="Docker Pulls">
   <img src="https://img.shields.io/docker/image-size/applehell/contextpilot/latest?style=flat-square&color=blue" alt="Image Size">
   <img src="https://img.shields.io/badge/python-3.11+-3776AB?style=flat-square&logo=python&logoColor=white" alt="Python">
@@ -96,25 +96,37 @@ python -m src.web --mcp-port 8500          # Custom MCP port
 
 ## Features
 
+### Web UI — 8 Tabs
+
+| Tab | Description |
+|---|---|
+| **Dashboard** | Stats cards, top tags, size distribution, connector health, import, live activity (SSE), context preview |
+| **Memories** | Full CRUD with Markdown editor, search, filters, tags, TTL, pin, bulk ops, compact view, collapsible sidebar |
+| **Skills** | Connected MCP skill registry with status indicators |
+| **Graph** | Interactive knowledge graph (vis.js) with search, physics toggle, navigation buttons, node detail panel |
+| **Secrets** | Scan memories for API keys, passwords, tokens (OWASP patterns) |
+| **Sources** | Connector Store (17 sources), folder mapping, webhooks, auto-sync scheduler |
+| **Assembler** | Templates, auto-suggest, 6 compressors, manual block assembly, export (CLAUDE.md, Markdown) |
+| **Settings** | Profiles, MCP server control, DB maintenance, import/export hub, scheduler, system info |
+
 ### Memories
 
 | Capability | Details |
 |---|---|
-| **Create & Edit** | Modal editor with Markdown support (EasyMDE) |
-| **Search** | Full-text search via SQLite FTS5 + **hybrid semantic search** |
-| **Tags** | Clickable tag filtering, bulk tag operations |
+| **Create & Edit** | Modal editor with Markdown support (EasyMDE), live preview |
+| **Search** | Full-text search via SQLite FTS5 + hybrid semantic search |
+| **Tags** | Clickable tag filtering, color-coded top tags, bulk tag operations |
 | **Categories** | `persistent`, `session` (24h TTL), `ephemeral` (1h TTL) — auto-expiry |
-| **TTL** | Time-to-live with auto-expiry, lifetime indicators |
+| **TTL** | Time-to-live with auto-expiry, color-coded lifetime indicators (urgent/soon/limited/permanent) |
 | **Pin** | Pin important memories to the top |
-| **Relations** | Cross-references between memories, bidirectional graph |
-| **Bulk Ops** | Multi-select, bulk delete, bulk TTL editing |
+| **Relations** | Cross-references between memories, bidirectional graph edges |
+| **Versioning** | Track changes with diff view, restore previous versions |
+| **Compact View** | Toggle between detail and compact mode (persisted in localStorage) |
+| **Bulk Ops** | Multi-select, bulk delete, bulk TTL, bulk tag editing |
 | **Backup** | Create, list, restore, delete backups via API |
-| **Export** | JSON export (all or filtered by tag) |
-| **Diff View** | Compare memory versions side-by-side |
+| **Export** | JSON, CLAUDE.md, Markdown export (all or filtered by tag) |
 
 ### Connector Store — 17 Sources
-
-Context Pilot pulls knowledge from multiple sources into a unified memory store. The **Connector Store** provides a card-based UI with category filters, brand icons, and setup guides.
 
 | Category | Connector | What it syncs |
 |---|---|---|
@@ -137,17 +149,18 @@ Context Pilot pulls knowledge from multiple sources into a unified memory store.
 | **Smart Home** | Home Assistant | Automations, scenes, entities |
 | **Local** | Folder Mapping | Directories with extension filter, PDF extraction |
 
-Each connector tracks **sync history** (last 20 runs) and exposes a **health dashboard** (`GET /api/connectors/health`).
+Each connector tracks **sync history** (last 20 runs), supports **TTL** for auto-expiring synced memories, and exposes a **health dashboard** (`GET /api/connectors/health`).
 
 ### Import
 
-Upload files directly from the dashboard:
+Upload files directly from the dashboard or settings:
 
 | Format | Source |
 |---|---|
 | `CLAUDE.md` | Claude Code instruction files |
 | `Copilot.md` | GitHub Copilot instruction files |
 | `SQLite .db` | memory-mcp MCP Server databases |
+| `JSON` | Context Pilot JSON export |
 
 ### Profiles — Complete Isolation
 
@@ -155,16 +168,16 @@ Every profile is a fully isolated workspace:
 
 ```
 profiles/{name}/
-  data.db              ← Memories, tags, FTS index, templates, relations
-  connector_*.json     ← Paperless, GitHub, Gitea, Email configs
-  folders.json         ← Folder source configuration
-  webhooks.json        ← Webhook configuration
-  embeddings.db        ← Semantic search index
+  data.db              <- Memories, tags, FTS index, templates, relations, versions, activity
+  connector_*.json     <- Connector configs (Paperless, GitHub, Gitea, Email, ...)
+  folders.json         <- Folder source configuration
+  webhooks.json        <- Webhook configuration
+  embeddings.db        <- Semantic search index (TF-IDF)
 ```
 
 - Switch instantly via header dropdown
 - Create with knowledge import from existing profiles
-- Export/import as ZIP archive
+- Export/import as ZIP archive (full profile backup & restore)
 - Rename, delete, duplicate from Settings
 
 ### Context Assembler
@@ -177,24 +190,30 @@ The Assembler optimizes your memories for AI consumption within a token budget:
 | **Auto-Suggest** | Analyzes memory clusters and proposes templates automatically |
 | **Compression** | 6 compressors: bullet extract, code compact, YAML struct, Mermaid, table, dedup |
 | **Weight-Based Priority** | Blocks ranked by usage history and feedback scores |
-| **MCP Integration** | `assemble_template` and `suggest_templates` tools for programmatic use |
+| **Duplicate Detection** | Find and remove duplicate or near-duplicate memories |
+| **Export** | Generate CLAUDE.md or Markdown from templates |
+| **MCP Integration** | `assemble_template`, `suggest_templates`, `list_templates` tools |
 
 ### More Features
 
 | Feature | Description |
 |---|---|
 | **Setup Wizard** | 7-step animated onboarding for fresh installs |
-| **Knowledge Graph** | Interactive vis.js network — nodes = memories, edges = shared tags + relations |
-| **Analytics** | Top memories, tag stats, connector stats, memory growth, token usage |
-| **Inbound Webhooks** | Push memories from external services (n8n, Home Assistant) |
+| **Knowledge Graph** | Interactive vis.js network with search, physics toggle, navigation buttons |
 | **Secrets Scanner** | Detects API keys, passwords, tokens, private keys (OWASP patterns) |
 | **Live Activity** | Real-time SSE event stream with color-coded category badges |
-| **Dark Mode** | System preference detection + manual toggle |
-| **DOMPurify** | XSS protection for Markdown rendering |
-| **Security Headers** | X-Content-Type-Options, X-Frame-Options, Referrer-Policy |
-| **Settings Page** | MCP control, DB maintenance, import/export hub, scheduler |
+| **Keyboard Shortcuts** | `?` for cheatsheet, `1`-`8` tabs, `Ctrl+K` search, `N` new memory |
+| **Global Search** | `Ctrl+K` fuzzy search across memories, templates, connectors |
+| **Dark Mode** | System preference detection + manual toggle, smooth transitions |
+| **Compact View** | Toggle dense memory list, persisted per browser |
+| **Collapsible Filters** | Sidebar sections fold to save space |
 | **Skeleton Loading** | Shimmer animations across all loading states |
-| **Responsive** | Breakpoints for desktop, tablet, and mobile |
+| **Responsive** | Desktop, tablet, mobile with bottom nav bar and safe area insets |
+| **PWA Ready** | Web app manifest, standalone display mode |
+| **Security** | DOMPurify (XSS), Security Headers, non-root Docker, secrets redaction |
+| **Inbound Webhooks** | Push memories from external services (n8n, Home Assistant) |
+| **Auto-Sync Scheduler** | Automatic connector sync on configurable intervals |
+| **Analytics** | Top memories, tag stats, connector stats, memory growth, token usage |
 
 ---
 
@@ -202,28 +221,37 @@ The Assembler optimizes your memories for AI consumption within a token budget:
 
 Context Pilot includes a built-in MCP Server (Model Context Protocol) that lets Claude Code access your memories directly.
 
-```
-Claude Code ──→ MCP Server (SSE, Port 8400)
-                   ├── memory_set / get / delete / search / list
-                   ├── assemble_template / list_templates / suggest_templates
-                   ├── get_skill_context    → relevance scoring + compression
-                   ├── get_context_for_task → auto-context assembly
-                   ├── capture_learnings    → batch-save session insights
-                   ├── get_related_memories → cross-references
-                   ├── register_skill / heartbeat / list_registered_skills
-                   ├── assemble_context / list_blocks
-                   └── submit_feedback / get_block_weight
-```
+### 20 MCP Tools
 
-**26 MCP Tools** covering: memory CRUD, template assembly, auto-suggest, skill registry, context assembly, feedback, **hybrid search**, **auto-context**, and **learning capture**.
+```
+Claude Code --> MCP Server (SSE, Port 8400)
+                   |
+                   |-- Memory CRUD
+                   |     memory_set / memory_get / memory_delete
+                   |     memory_search / memory_list
+                   |
+                   |-- Skills
+                   |     register_skill / unregister_skill
+                   |     list_registered_skills / heartbeat
+                   |     get_skill_context
+                   |
+                   |-- Context Assembly
+                   |     assemble_context / list_blocks
+                   |     assemble_template / list_templates / suggest_templates
+                   |     get_context_for_task
+                   |
+                   |-- Intelligence
+                   |     capture_learnings / get_related_memories
+                   |     submit_feedback / get_block_weight
+```
 
 **Profile-aware:** The MCP server follows profile switches in real-time — no restart needed.
 
 **How it works:**
-1. Start Context Pilot → MCP Server starts on port 8400
+1. Start Context Pilot -> MCP Server starts on port 8400
 2. Auto-registers in `~/.claude.json`
 3. Claude Code can now read/write your memories
-4. Stop app → auto-deregistration
+4. Stop app -> auto-deregistration
 
 ---
 
@@ -232,14 +260,6 @@ Claude Code ──→ MCP Server (SSE, Port 8400)
 The **context-pilot plugin** adds deep integration with Claude Code — auto-profile detection, slash commands, and a skill file that teaches Claude how to use ContextPilot optimally.
 
 ### Installation
-
-```bash
-# From GitHub
-claude plugins marketplace add https://github.com/applehell/context-pilot-plugin.git
-claude plugins install context-pilot
-```
-
-Or clone directly:
 
 ```bash
 git clone https://github.com/applehell/context-pilot-plugin.git \
@@ -253,7 +273,7 @@ git clone https://github.com/applehell/context-pilot-plugin.git \
 | **SessionStart Hook** | Auto-detects the right profile based on your working directory |
 | **`/context-pilot`** | Dashboard, template assembly, search, profile switch, suggest, status |
 | **`/context-pilot-learn`** | Quick-save a memory from your session |
-| **Skill File** | Teaches Claude all 23 MCP tools, best practices, and when to use what |
+| **Skill File** | Teaches Claude all 20 MCP tools, best practices, and when to use what |
 | **MCP Config** | Auto-registers the ContextPilot MCP server |
 
 ### Commands
@@ -280,8 +300,9 @@ git clone https://github.com/applehell/context-pilot-plugin.git \
 ### Configuration
 
 ```bash
-export CONTEXTPILOT_URL=http://your-server:8080        # Web UI
-export CONTEXTPILOT_MCP_URL=http://your-server:8400/sse  # MCP Server
+# Shell config (~/.claude/context-pilot.conf)
+CONTEXTPILOT_URL=http://your-server:8080
+CONTEXTPILOT_MCP_URL=http://your-server:8400/sse
 ```
 
 ---
@@ -293,7 +314,6 @@ export CONTEXTPILOT_MCP_URL=http://your-server:8400/sse  # MCP Server
 | Tag | Description |
 |---|---|
 | [`applehell/contextpilot:latest`](https://hub.docker.com/r/applehell/contextpilot/tags) | Latest stable release |
-| [`applehell/contextpilot:4.1.0`](https://hub.docker.com/r/applehell/contextpilot/tags) | Specific version |
 
 ### Volumes
 
@@ -316,31 +336,30 @@ docker compose up -d
 ## Architecture
 
 ```
-Browser ──→ Web UI (FastAPI, Port 8080)
-               ├── Dashboard        Stats, Import, Live Activity SSE
-               ├── Memories         CRUD, Search, Editor, Tags, TTL
-               ├── Knowledge Graph  Interactive vis.js network
-               ├── Sources          Connector Store (17), Folder Mapping, Webhooks
-               ├── Secrets          Scanner, Redacted View
-               ├── Settings         MCP, DB, Import/Export, Scheduler, Profiles
-               └── Assembler        Templates, Auto-Suggest, Compression
+Browser --> Web UI (FastAPI, Port 8080)
+               |-- Dashboard        Stats, Import, Live Activity SSE, Context Preview
+               |-- Memories         CRUD, Search, Editor, Tags, TTL, Compact View
+               |-- Skills           Skill Registry, Status Indicators
+               |-- Knowledge Graph  Interactive vis.js network, Search, Navigation
+               |-- Secrets          Scanner, Redacted View
+               |-- Sources          Connector Store (17), Folder Mapping, Webhooks, Scheduler
+               |-- Assembler        Templates, Auto-Suggest, Compression, Export
+               |-- Settings         Profiles, MCP, DB, Import/Export, Scheduler
 
-Claude Code ──→ MCP Server (SSE, Port 8400)
-                   ├── memory_set / get / delete / search / list
-                   ├── assemble_template / list_templates / suggest_templates
-                   ├── get_skill_context / register_skill / heartbeat
-                   └── assemble_context / submit_feedback / get_block_weight
+Claude Code --> MCP Server (SSE, Port 8400)
+                   |-- 20 tools: memory CRUD, search, templates, assembly,
+                   |   skill registry, feedback, context-for-task, learnings
+                   |
+            --> Plugin (context-pilot)
+                   |-- SessionStart hook (auto-profile detection)
+                   |-- /context-pilot + /context-pilot-learn commands
+                   |-- Skill file (best practices + tool guidance)
 
-            ──→ Plugin (context-pilot)
-                   ├── SessionStart hook (auto-profile detection)
-                   ├── /context-pilot command
-                   └── Skill file (best practices + tool guidance)
-
-Connectors ──→ 17 sources (GitHub, Gitea, Paperless, Obsidian, Email,
+Connectors --> 17 sources (GitHub, Gitea, Paperless, Obsidian, Email,
                Notion, Teams, Telegram, RSS, Excel, Google Drive,
                KeePass, Bitwarden, Kubernetes, Dockge, Bookmarks, HA)
 
-Storage ──→ SQLite (WAL mode + FTS5, Schema v13)
+Storage --> SQLite (WAL mode + FTS5, Schema v13)
 ```
 
 ### Data Paths
@@ -348,8 +367,8 @@ Storage ──→ SQLite (WAL mode + FTS5, Schema v13)
 ```
 # Local
 ~/.contextpilot/
-  profiles.json                ← Profile registry
-  profiles/<name>/data.db      ← Per-profile database + configs
+  profiles.json                <- Profile registry
+  profiles/<name>/data.db      <- Per-profile database + configs
 
 # Docker (CONTEXTPILOT_DATA_DIR=/data)
 /data/
@@ -368,7 +387,9 @@ Storage ──→ SQLite (WAL mode + FTS5, Schema v13)
 |---|---|---|
 | `/health` | GET | System metrics and health check |
 | `/api/dashboard` | GET | Aggregated dashboard stats |
-| `/api/mcp-status` | GET | MCP server status |
+| `/api/dashboard/stats` | GET | Detailed stats (tags, sizes, growth) |
+| `/api/mcp-status` | GET | MCP server registration status |
+| `/api/setup-status` | GET | Fresh install detection |
 
 </details>
 
@@ -377,18 +398,24 @@ Storage ──→ SQLite (WAL mode + FTS5, Schema v13)
 
 | Endpoint | Method | Description |
 |---|---|---|
-| `/api/memories` | GET | List memories (pagination, filters) |
+| `/api/memories` | GET | List memories (pagination, sort, source filter) |
 | `/api/memories` | POST | Create memory |
 | `/api/memories/{key}` | GET | Read single memory |
 | `/api/memories/{key}` | PUT | Update memory |
-| `/api/memories/{key}` | DELETE | Delete memory |
-| `/api/memories/search` | GET | Full-text search + tag filter |
+| `/api/memories/{key}` | DELETE | Soft-delete memory (trash) |
+| `/api/memories/search` | GET | Full-text search + tag/source filter |
+| `/api/memories/sources` | GET | List memory sources with counts |
 | `/api/memories/category-stats` | GET | Memory count per category |
 | `/api/memories/{key}/related` | GET | Related memories (cross-references) |
+| `/api/memories/{key}/versions` | GET | Version history |
+| `/api/memories/{key}/pin` | POST | Pin/unpin memory |
 | `/api/memories/bulk-delete` | POST | Bulk delete |
+| `/api/memories/bulk-ttl` | POST | Bulk TTL update |
+| `/api/memories/bulk-tag` | POST | Bulk tag operations |
 | `/api/semantic-search` | GET | Hybrid/semantic/keyword search (mode param) |
 | `/api/export-memories` | GET | Export as JSON |
 | `/api/memory-tags` | GET | All tags |
+| `/api/memory-presets` | GET | Quick filter presets |
 
 </details>
 
@@ -397,17 +424,20 @@ Storage ──→ SQLite (WAL mode + FTS5, Schema v13)
 
 | Endpoint | Method | Description |
 |---|---|---|
-| `/api/connectors` | GET | List all connectors with status |
+| `/api/connectors` | GET | List all connectors with config and schema |
 | `/api/connectors/{name}` | GET | Connector details + schema |
 | `/api/connectors/{name}/setup` | POST | Configure connector |
+| `/api/connectors/{name}` | PUT | Update connector config |
 | `/api/connectors/{name}/test` | POST | Test connection |
 | `/api/connectors/{name}/sync` | POST | Sync data |
 | `/api/connectors/{name}/enable` | POST | Enable/disable |
 | `/api/connectors/{name}/history` | GET | Sync history (last 20) |
+| `/api/connectors/{name}` | DELETE | Remove connector config |
 | `/api/connectors/health` | GET | Health dashboard for all connectors |
 | `/api/folders` | GET/POST | List/add folder sources |
 | `/api/folders/{name}` | PUT/DELETE | Update/remove folder source |
 | `/api/folders/{name}/scan` | POST | Scan single folder |
+| `/api/folders/scan-all` | POST | Scan all folders |
 
 </details>
 
@@ -423,6 +453,10 @@ Storage ──→ SQLite (WAL mode + FTS5, Schema v13)
 | `/api/assemble` | POST | Manual block assembly |
 | `/api/estimate` | POST | Token estimation |
 | `/api/test-compress` | POST | Test compressor |
+| `/api/duplicates` | GET | Find duplicate memories |
+| `/api/preview-context` | POST | Preview context assembly with budget |
+| `/api/export-claude-md` | GET | Export as CLAUDE.md |
+| `/api/export-markdown` | GET | Export as Markdown |
 
 </details>
 
@@ -432,9 +466,11 @@ Storage ──→ SQLite (WAL mode + FTS5, Schema v13)
 | Endpoint | Method | Description |
 |---|---|---|
 | `/api/profiles` | GET/POST | List/create profiles |
+| `/api/profiles/{id}/switch` | POST | Switch active profile (by ID) |
 | `/api/profiles/{name}` | PUT/DELETE | Rename/delete |
-| `/api/profiles/{name}/switch` | POST | Switch active profile |
 | `/api/profiles/{name}/duplicate` | POST | Duplicate profile |
+| `/api/profiles/{name}/export` | GET | Export profile as ZIP |
+| `/api/profiles/import` | POST | Import profile from ZIP |
 
 </details>
 
@@ -448,7 +484,7 @@ Storage ──→ SQLite (WAL mode + FTS5, Schema v13)
 | `/api/events/stats` | GET | Event statistics |
 | `/api/sensitivity` | GET | Secrets scan |
 | `/api/redacted?key=...` | GET | Redacted memory view |
-| `/api/knowledge-graph` | GET | Graph data (vis.js) |
+| `/api/knowledge-graph` | GET | Graph data (vis.js format) |
 
 </details>
 
@@ -460,11 +496,12 @@ Storage ──→ SQLite (WAL mode + FTS5, Schema v13)
 | `/api/import/claude-md` | POST | Upload CLAUDE.md |
 | `/api/import/copilot-md` | POST | Upload Copilot.md |
 | `/api/import/sqlite` | POST | Upload SQLite DB |
+| `/api/import/json` | POST | Upload JSON export |
 
 </details>
 
 <details>
-<summary><strong>Analytics & Backup</strong></summary>
+<summary><strong>Analytics, Backup & Webhooks</strong></summary>
 
 | Endpoint | Method | Description |
 |---|---|---|
@@ -473,11 +510,31 @@ Storage ──→ SQLite (WAL mode + FTS5, Schema v13)
 | `/api/analytics/top-tags` | GET | Most frequent tags |
 | `/api/analytics/connector-stats` | GET | Per-connector statistics |
 | `/api/analytics/memory-growth` | GET | Daily memory count growth |
-| `/api/backups` | GET | List backups |
-| `/api/backups` | POST | Create backup |
+| `/api/backups` | GET/POST | List/create backups |
 | `/api/backups/{filename}/restore` | POST | Restore backup |
 | `/api/backups/{filename}` | DELETE | Delete backup |
+| `/api/webhooks` | GET/POST | List/create webhooks |
+| `/api/webhooks/{id}` | PUT/DELETE | Update/delete webhook |
 | `/api/inbound/{token}` | POST | Inbound webhook (push memories) |
+
+</details>
+
+<details>
+<summary><strong>Maintenance</strong></summary>
+
+| Endpoint | Method | Description |
+|---|---|---|
+| `/api/maintenance/db-stats` | GET | Database statistics |
+| `/api/maintenance/vacuum` | POST | Compact database |
+| `/api/maintenance/rebuild-fts` | POST | Rebuild search index |
+| `/api/maintenance/cleanup-trash` | POST | Remove old trash entries |
+| `/api/maintenance/cleanup-expired` | POST | Remove expired memories |
+| `/api/trash` | GET | List trashed memories |
+| `/api/trash/{key}/restore` | POST | Restore from trash |
+| `/api/trash/purge` | POST | Purge all trash |
+| `/api/mcp/register` | POST | Register MCP in ~/.claude.json |
+| `/api/mcp/deregister` | POST | Deregister MCP |
+| `/api/scheduler/*` | GET/POST | Auto-sync scheduler control |
 
 </details>
 
@@ -492,13 +549,20 @@ src/
     analytics.py               Usage analytics engine
     backup.py                  Backup & restore manager
     block.py                   Block data model
+    claude_config.py           ~/.claude.json reader/writer
     compress_detect.py         Shared compression hint detection
-    compressors/               7 compressors (bullet, mermaid, yaml, code, ...)
+    compressors/               6 compressors (bullet, code, yaml, mermaid, table, dedup)
+    context.py                 Context builder for auto-assembly
+    dependency_detector.py     Cross-memory dependency detection
+    duplicates.py              Duplicate / near-duplicate finder
     embeddings.py              TF-IDF embeddings + hybrid search
     events.py                  Global EventBus with SSE broadcast
     relevance.py               Relevance scoring engine
+    scheduler.py               Auto-sync scheduler (APScheduler)
     secrets.py                 Secrets detector (OWASP patterns)
+    skill_registry.py          MCP skill lifecycle tracker
     token_budget.py            tiktoken wrapper
+    webhooks.py                Inbound webhook processor
     weight_adjuster.py         Usage-based weight adjustment
   connectors/                  17 external service connectors
     github.py, gitea.py        Development sources
@@ -511,24 +575,31 @@ src/
     teams.py                   Microsoft Teams (Graph API)
     kubernetes.py, dockge.py   Infrastructure sources
     homeassistant.py           Smart Home source
-  storage/                     SQLite persistence
+  storage/                     SQLite persistence (Schema v13)
     db.py                      DB engine + migrations (v1-v13)
     memory.py                  MemoryStore (CRUD + FTS5)
+    memory_activity.py         Access tracking & usage stats
     profiles.py                Profile manager
     folders.py                 Folder source manager + file indexer
+    relations.py               Cross-reference / relation store
+    templates.py               Assembly template store
+    versions.py                Memory version history
+    usage.py                   Usage-based weighting store
+    settings.py                Key-value settings store
+    project.py                 Project context store
   web/                         Web app (FastAPI + vanilla JS)
-    app.py                     API endpoints
+    app.py                     API endpoints (~27k lines)
     templates/index.html       Single-page frontend
-    static/app.js              Frontend logic
-    static/style.css           Themes (light + dark)
+    static/app.js              Frontend logic (~4.6k lines)
+    static/style.css           Themes (light + dark, ~2.7k lines)
   interfaces/                  External interfaces
-    mcp_server.py              MCP Server (stdio + SSE)
+    mcp_server.py              MCP Server (20 tools, SSE transport)
     cli.py                     Click CLI
   importers/                   Memory import
     claude.py                  CLAUDE.md parser
     copilot.py                 copilot-instructions.md parser
     sqlite.py                  memory-mcp SQLite importer
-tests/                         Test suite
+tests/                         2100+ tests
 ```
 
 ## Development
@@ -547,13 +618,13 @@ python -m src.web --reload    # Hot-reload
 | Layer | Technology |
 |---|---|
 | **Backend** | Python 3.11+, FastAPI, Uvicorn |
-| **Frontend** | Vanilla JS, vis.js, EasyMDE |
-| **Database** | SQLite (WAL mode, FTS5) |
+| **Frontend** | Vanilla JS, vis.js (graph), EasyMDE (editor), DOMPurify (XSS) |
+| **Database** | SQLite (WAL mode, FTS5, Schema v13) |
 | **Realtime** | Server-Sent Events (SSE) |
-| **AI Integration** | MCP Server (FastMCP), tiktoken |
+| **AI Integration** | MCP Server (FastMCP, 20 tools), tiktoken |
 | **Connectors** | requests, openpyxl, PyJWT, pykeepass, PyYAML |
-| **Security** | DOMPurify, Security Headers, non-root Docker |
-| **Deployment** | Docker (arm64 + amd64), 1052+ tests |
+| **Security** | DOMPurify, Security Headers, secrets scanner, non-root Docker |
+| **Deployment** | Docker (arm64 + amd64), 2100+ tests |
 
 ---
 

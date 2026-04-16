@@ -914,15 +914,24 @@ label {
 
 /* EasyMDE overrides for modal */
 .modal-body .EasyMDEContainer { margin-bottom: 16px; }
-.modal-body .EasyMDEContainer .CodeMirror { border-color: var(--border); border-radius: 6px; font-family: var(--mono); font-size: 13px; min-height: 250px; }
+.modal-body .EasyMDEContainer .CodeMirror { border-color: var(--border); border-radius: 6px; font-family: var(--mono); font-size: 13px; min-height: 200px; }
 .modal-body .EasyMDEContainer .CodeMirror-focused { border-color: var(--border-focus); box-shadow: 0 0 0 3px rgba(196,168,130,0.15); }
-.modal-body .editor-toolbar { border-color: var(--border); border-radius: 6px 6px 0 0; background: var(--surface-alt); }
+.modal-body .editor-toolbar { border-color: var(--border); border-radius: 6px 6px 0 0; background: var(--surface-alt); flex-wrap: wrap; }
 .modal-body .editor-toolbar button { color: var(--text-secondary) !important; }
 .modal-body .editor-toolbar button:hover { background: var(--border) !important; }
 .modal-body .editor-toolbar button.active { background: var(--border) !important; color: var(--accent) !important; }
 .modal-body .editor-statusbar { border-color: var(--border); color: var(--text-muted); font-size: 11px; }
 .modal-body .editor-preview { background: var(--surface); padding: 16px; }
 .modal-body .editor-preview-side { border-color: var(--border); background: var(--surface); }
+
+/* EasyMDE toolbar icon sizing */
+.modal-body .editor-toolbar button i.fa {
+    font-size: 14px;
+    line-height: 1;
+}
+/* Ensure FA icons are visible */
+.editor-toolbar button::before { display: none; }
+.editor-toolbar button i.fa { display: inline-block !important; }
 
 .modal-body pre {
     background: var(--surface-alt);
@@ -2182,34 +2191,60 @@ details.panel > summary:hover { color: var(--accent); }
     .mem-sidebar.collapsed { display: none; }
 
     /* Touch-optimierte Memory-Liste */
+    .mem-list {
+        overflow: hidden;
+        max-width: 100%;
+    }
+    .memory-item {
+        max-width: 100%;
+        overflow: hidden;
+    }
     .memory-item .mem-header {
         padding: 10px 12px;
         min-height: 48px;
-        gap: 8px;
-        flex-wrap: wrap;
+        gap: 6px;
+        flex-wrap: nowrap;
+    }
+    .memory-item .mem-chevron {
+        display: none;
     }
     .memory-item .main {
         flex: 1 1 0;
         min-width: 0;
         overflow: hidden;
+        width: 0;
     }
     .memory-item .key {
-        white-space: normal;
-        word-break: break-word;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
         font-size: 13px;
         line-height: 1.3;
+        display: block;
     }
     .memory-item .preview {
-        white-space: normal;
-        word-break: break-word;
-        display: -webkit-box;
-        -webkit-line-clamp: 2;
-        -webkit-box-orient: vertical;
+        white-space: nowrap;
         overflow: hidden;
+        text-overflow: ellipsis;
+        font-size: 11px;
+        display: block;
     }
     .memory-item .meta {
-        flex-wrap: wrap;
+        display: flex;
+        flex-wrap: nowrap;
         gap: 4px;
+        overflow: hidden;
+    }
+    .memory-item .meta .tag {
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        max-width: 80px;
+    }
+    .memory-item .meta .age,
+    .memory-item .meta .token-count,
+    .memory-item .meta .lifetime-indicator {
+        flex-shrink: 0;
     }
     .memory-item .actions {
         flex-direction: row;
@@ -2220,6 +2255,11 @@ details.panel > summary:hover { color: var(--accent); }
         min-width: 36px;
         min-height: 36px;
         padding: 6px;
+    }
+    /* Expanded memory shows full key */
+    .memory-item.expanded .key {
+        white-space: normal;
+        word-break: break-word;
     }
     .mem-toolbar {
         flex-wrap: wrap;
@@ -2269,10 +2309,91 @@ details.panel > summary:hover { color: var(--accent); }
         flex: 1;
         overflow-y: auto;
         -webkit-overflow-scrolling: touch;
+        min-height: 0;
     }
     .modal-footer {
         flex-shrink: 0;
         padding-bottom: calc(16px + env(safe-area-inset-bottom, 0px));
+    }
+
+    /* Mobile EasyMDE editor */
+    .modal-body .EasyMDEContainer { margin-bottom: 12px; }
+    .modal-body .EasyMDEContainer .CodeMirror {
+        min-height: 120px;
+        max-height: 35vh;
+        font-size: 14px;
+    }
+    .modal-body .editor-toolbar {
+        flex-wrap: wrap;
+        padding: 4px;
+        gap: 0;
+    }
+    .modal-body .editor-toolbar button {
+        width: 32px !important;
+        height: 32px !important;
+        padding: 0 !important;
+        display: inline-flex !important;
+        align-items: center;
+        justify-content: center;
+    }
+    .modal-body .editor-toolbar i.separator {
+        margin: 0 2px !important;
+    }
+    /* Hide less-used toolbar items on small screens */
+    .modal-body .editor-toolbar button.side-by-side,
+    .modal-body .editor-toolbar button.fullscreen,
+    .modal-body .editor-toolbar button.guide {
+        display: none !important;
+    }
+
+    /* Mobile edit form layout */
+    .modal-body .edit-key-display {
+        font-size: 12px;
+        padding: 6px 10px;
+        margin-bottom: 12px;
+    }
+    .modal-body textarea {
+        min-height: 100px;
+        font-size: 14px;
+    }
+    .modal-body input[type="text"],
+    .modal-body input[type="number"],
+    .modal-body select {
+        font-size: 16px;
+        padding: 10px 12px;
+    }
+    .modal-body label {
+        font-size: 13px;
+        margin-bottom: 6px;
+    }
+
+    /* Markdown preview in expanded memory */
+    .mem-body-content {
+        max-height: 40vh;
+        overflow-y: auto;
+        -webkit-overflow-scrolling: touch;
+        word-break: break-word;
+    }
+    .mem-body-content img {
+        max-width: 100%;
+        height: auto;
+    }
+
+    /* View memory modal preview */
+    .md-preview {
+        max-height: 40vh;
+        font-size: 14px;
+        word-break: break-word;
+    }
+    .md-preview pre {
+        overflow-x: auto;
+        -webkit-overflow-scrolling: touch;
+        font-size: 12px;
+    }
+    .md-preview table {
+        display: block;
+        overflow-x: auto;
+        -webkit-overflow-scrolling: touch;
     }
 
     .global-search-box { max-width: 95vw; }
@@ -2291,15 +2412,38 @@ details.panel > summary:hover { color: var(--accent); }
     main { padding: 8px; padding-bottom: calc(70px + env(safe-area-inset-bottom, 0px)); }
     .cards-grid { grid-template-columns: 1fr 1fr; gap: 6px; }
     .panel { padding: 12px; }
-    .memory-item .mem-header { padding: 8px 10px; min-height: 44px; gap: 6px; }
+    .memory-item .mem-header { padding: 8px 10px; min-height: 44px; gap: 4px; }
     .memory-item .key { font-size: 12px; line-height: 1.3; }
-    .memory-item .preview { font-size: 11px; -webkit-line-clamp: 1; }
-    .memory-item .meta { font-size: 10px; }
-    .memory-item .actions .btn-icon { min-width: 32px; min-height: 32px; padding: 5px; }
+    .memory-item .preview { font-size: 10px; }
+    .memory-item .meta { font-size: 10px; gap: 3px; }
+    .memory-item .meta .tag { max-width: 60px; }
+    .memory-item .actions { gap: 1px; }
+    .memory-item .actions .btn-icon { min-width: 30px; min-height: 30px; width: 30px; height: 30px; padding: 4px; }
     .memory-item .actions .btn-icon svg { width: 12px; height: 12px; }
     .mem-body-content { padding: 8px; font-size: 11px; max-height: 40vh; }
     .modal-header { padding: 14px 16px 12px; padding-top: calc(14px + env(safe-area-inset-top, 0px)); }
+    .modal-header h3 { font-size: 14px; }
     .modal-footer { padding: 12px 16px; padding-bottom: calc(12px + env(safe-area-inset-bottom, 0px)); }
+
+    /* Editor on very small screens */
+    .modal-body .EasyMDEContainer .CodeMirror {
+        min-height: 100px;
+        max-height: 30vh;
+        font-size: 13px;
+    }
+    .modal-body .editor-toolbar button {
+        width: 28px !important;
+        height: 28px !important;
+    }
+    .modal-body .editor-toolbar button i.fa,
+    .modal-body .editor-toolbar button i.fas {
+        font-size: 12px !important;
+    }
+    /* Hide more toolbar items on very small screens */
+    .modal-body .editor-toolbar button.horizontal-rule,
+    .modal-body .editor-toolbar button.table {
+        display: none !important;
+    }
 
     /* Kompaktere Bottom-Nav */
     nav#main-nav .tab { min-height: 48px; padding: 4px 2px; }
@@ -2578,4 +2722,229 @@ details.panel > summary:hover { color: var(--accent); }
 @keyframes ringConnected {
     0%, 100% { transform: scale(1); opacity: 0.6; box-shadow: 0 0 8px rgba(39,174,96,0.4); }
     50% { transform: scale(1.12); opacity: 1; box-shadow: 0 0 16px rgba(39,174,96,0.6); }
+}
+
+/* ═══════════════════════════════════════════════════════════════
+   3. DARK MODE SMOOTH TRANSITION
+   ═══════════════════════════════════════════════════════════════ */
+
+body, header, nav, main,
+.panel, .status-card, .memory-item, .modal,
+.mem-sidebar, .skill-card, .connector-card,
+.fab-btn, .fab-menu-item, .toast, .badge,
+.btn, .btn-primary, .btn-danger,
+input, textarea, select {
+    transition: background-color 0.3s ease, color 0.3s ease, border-color 0.3s ease, box-shadow 0.3s ease;
+}
+
+/* ═══════════════════════════════════════════════════════════════
+   4. COMPACT MEMORY VIEW
+   ═══════════════════════════════════════════════════════════════ */
+
+.mem-list.compact .memory-item .mem-header {
+    padding: 4px 12px;
+    min-height: 32px;
+    gap: 8px;
+}
+.mem-list.compact .memory-item .preview { display: none; }
+.mem-list.compact .memory-item .meta { display: none; }
+.mem-list.compact .memory-item .mem-chevron { display: none; }
+.mem-list.compact .memory-item .main { display: flex; align-items: center; gap: 8px; }
+.mem-list.compact .memory-item .key { font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 300px; }
+.mem-list.compact .memory-item .compact-meta {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 11px;
+    color: var(--text-muted);
+    margin-left: auto;
+}
+.memory-item .compact-meta { display: none; }
+.mem-list.compact .memory-item .actions .btn-icon { width: 24px; height: 24px; }
+.mem-list.compact .memory-item .actions .btn-icon svg { width: 12px; height: 12px; }
+
+.view-toggle-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+}
+.view-toggle-btn.active { color: var(--accent); border-color: var(--accent); background: var(--accent-light); }
+
+/* ═══════════════════════════════════════════════════════════════
+   5. BREADCRUMB IN COLLAPSED HEADER
+   ═══════════════════════════════════════════════════════════════ */
+
+.header-breadcrumb {
+    display: none;
+    font-size: 12px;
+    font-weight: 500;
+    color: var(--text-muted);
+    margin-left: 8px;
+}
+.header-breadcrumb::before {
+    content: '/';
+    margin-right: 6px;
+    opacity: 0.5;
+}
+header.header-collapsed .header-breadcrumb {
+    display: inline;
+}
+
+/* ═══════════════════════════════════════════════════════════════
+   2. ENHANCED EMPTY STATES
+   ═══════════════════════════════════════════════════════════════ */
+
+.empty-state {
+    text-align: center;
+    padding: 48px 24px;
+    color: var(--text-muted);
+}
+.empty-state-orb {
+    width: 48px;
+    height: 48px;
+    border-radius: 50%;
+    background: conic-gradient(from 160deg, #e8a87c, #c4703f, #d4915a, #c4703f, #e8a87c);
+    box-shadow: 0 0 16px rgba(196,112,63,0.25);
+    margin: 0 auto 16px;
+    opacity: 0.5;
+}
+.empty-state-title {
+    font-size: 15px;
+    font-weight: 600;
+    color: var(--text-secondary);
+    margin-bottom: 6px;
+}
+.empty-state-desc {
+    font-size: 13px;
+    color: var(--text-muted);
+    margin-bottom: 16px;
+    line-height: 1.5;
+}
+
+/* ═══════════════════════════════════════════════════════════════
+   6. KEYBOARD SHORTCUT OVERLAY
+   ═══════════════════════════════════════════════════════════════ */
+
+.shortcuts-overlay {
+    display: none;
+    position: fixed;
+    inset: 0;
+    background: rgba(0,0,0,0.4);
+    z-index: 10002;
+    justify-content: center;
+    align-items: center;
+}
+.shortcuts-overlay.active { display: flex; }
+
+.shortcuts-box {
+    background: var(--surface);
+    border-radius: 12px;
+    width: 100%;
+    max-width: 480px;
+    box-shadow: var(--shadow-lg);
+    animation: modalIn 0.15s ease;
+    overflow: hidden;
+}
+.shortcuts-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 16px 20px 12px;
+    border-bottom: 1px solid var(--border);
+}
+.shortcuts-header h3 { font-size: 15px; font-weight: 600; }
+.shortcuts-body {
+    padding: 12px 20px 20px;
+    max-height: 60vh;
+    overflow-y: auto;
+}
+.shortcuts-group { margin-bottom: 14px; }
+.shortcuts-group-title {
+    font-size: 10px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    color: var(--text-muted);
+    margin-bottom: 6px;
+}
+.shortcut-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 5px 0;
+    font-size: 13px;
+}
+.shortcut-row .shortcut-label { color: var(--text-secondary); }
+.shortcut-row .shortcut-keys { display: flex; gap: 4px; }
+
+/* ═══════════════════════════════════════════════════════════════
+   7. COLLAPSIBLE SIDEBAR SECTIONS
+   ═══════════════════════════════════════════════════════════════ */
+
+.mem-sidebar-section details summary {
+    list-style: none;
+    cursor: pointer;
+    user-select: none;
+}
+.mem-sidebar-section details summary::-webkit-details-marker { display: none; }
+.mem-sidebar-section details summary .mem-sidebar-title {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+}
+.mem-sidebar-section details summary .mem-sidebar-title::before {
+    content: '\25B6';
+    font-size: 8px;
+    transition: transform 0.15s;
+    display: inline-block;
+    color: var(--text-muted);
+}
+.mem-sidebar-section details[open] summary .mem-sidebar-title::before {
+    transform: rotate(90deg);
+}
+
+/* ═══════════════════════════════════════════════════════════════
+   8. CONNECTOR LAST SYNC
+   ═══════════════════════════════════════════════════════════════ */
+
+.conn-last-sync {
+    font-size: 10px;
+    color: var(--text-muted);
+    font-style: italic;
+}
+
+/* ═══════════════════════════════════════════════════════════════
+   9. DASHBOARD SPARKLINES
+   ═══════════════════════════════════════════════════════════════ */
+
+.sparkline {
+    display: flex;
+    align-items: flex-end;
+    gap: 1px;
+    height: 20px;
+    margin-top: 4px;
+}
+.sparkline-bar {
+    flex: 1;
+    background: var(--accent);
+    border-radius: 1px 1px 0 0;
+    min-width: 3px;
+    opacity: 0.6;
+    transition: height 0.3s, opacity 0.15s;
+}
+.sparkline-bar:last-child { opacity: 1; }
+
+/* ═══════════════════════════════════════════════════════════════
+   10. GRAPH NAVIGATION BUTTONS (vis-network)
+   ═══════════════════════════════════════════════════════════════ */
+
+.vis-navigation .vis-button {
+    background-color: var(--surface) !important;
+    border: 1px solid var(--border) !important;
+    border-radius: 6px !important;
+    box-shadow: var(--shadow) !important;
+}
+.vis-navigation .vis-button:hover {
+    border-color: var(--accent) !important;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.1) !important;
 }
