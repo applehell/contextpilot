@@ -45,7 +45,7 @@ docker run -d --name context-pilot \
 ```
 
 **Web UI:** [http://localhost:8080](http://localhost:8080)
-**MCP Server:** `http://localhost:8400/sse`
+**MCP Server:** `http://localhost:8400/mcp/`
 **Health Check:** [http://localhost:8080/health](http://localhost:8080/health)
 
 ### Docker Compose
@@ -58,7 +58,7 @@ services:
     restart: unless-stopped
     ports:
       - "8080:8080"   # Web UI
-      - "8400:8400"   # MCP SSE Server
+      - "8400:8400"   # MCP streamable-http server
     volumes:
       - context-pilot-data:/data
       - /path/to/docs:/mnt/docs:ro    # optional: folder for indexing
@@ -83,8 +83,8 @@ Add to `~/.claude.json`:
 {
   "mcpServers": {
     "context-pilot": {
-      "type": "sse",
-      "url": "http://localhost:8400/sse"
+      "type": "http",
+      "url": "http://localhost:8400/mcp/"
     }
   }
 }
@@ -101,7 +101,7 @@ Claude Code now has full access to your knowledge base.
 | **Memories** | Create, search (FTS5), tag, pin, TTL, bulk operations |
 | **50+ Connectors** | GitHub, Gitea, Paperless-ngx, Email (IMAP), local folders |
 | **Plugin Architecture** | Every connector is a Python module — write your own in minutes |
-| **MCP Server** | Built-in Model Context Protocol server (SSE, port 8400) |
+| **MCP Server** | Built-in Model Context Protocol server (streamable-http, port 8400) |
 | **Knowledge Graph** | Interactive network visualization of memory relationships |
 | **Smart Assembler** | Token-budget assembly with 7 compressors |
 | **Secrets Scanner** | Detects API keys, passwords, tokens (OWASP patterns) |
@@ -116,7 +116,7 @@ Claude Code now has full access to your knowledge base.
 | Tag | Description |
 |---|---|
 | `latest` | Latest stable release |
-| `3.5.1` | Current version |
+| `4.3.0` | Current version |
 
 ## Volumes
 
@@ -130,7 +130,7 @@ Claude Code now has full access to your knowledge base.
 | Port | Service |
 |---|---|
 | `8080` | Web UI + REST API |
-| `8400` | MCP SSE Server |
+| `8400` | MCP streamable-http server |
 
 ## Environment Variables
 
