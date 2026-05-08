@@ -462,7 +462,7 @@ def usage_weights(ctx: click.Context, project: Optional[str], fmt: str) -> None:
     store: UsageStore = ctx.obj["usage_store"]
     from src.core.weight_adjuster import WeightAdjuster
     adjuster = WeightAdjuster(store)
-    count = adjuster.recompute_all_weights(project)
+    adjuster.recompute_all_weights(project)
     counts = store.get_usage_counts(project)
 
     if fmt == "json":

@@ -4,7 +4,7 @@ from __future__ import annotations
 import importlib
 import pkgutil
 from pathlib import Path
-from typing import Dict, List, Optional, Type
+from typing import Dict, List, Optional
 
 from .base import ConnectorPlugin
 

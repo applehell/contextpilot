@@ -6,7 +6,6 @@ TF-IDF (pure Python, no dependencies) for lightweight deployments.
 from __future__ import annotations
 
 import hashlib
-import json
 import math
 import os
 import re
@@ -24,7 +23,7 @@ _model = None
 _backend = "tfidf"
 
 try:
-    from sentence_transformers import SentenceTransformer
+    import sentence_transformers  # noqa: F401
     _backend = "transformer"
 except ImportError:
     pass

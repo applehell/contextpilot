@@ -15,18 +15,15 @@ from src.core.webhooks import (
 
 class TestValidateUrl:
 
-    def test_blocks_private_ipv4(self) -> None:
-        for ip in ["192.168.1.1", "10.0.0.1", "172.16.0.1"]:
-            with pytest.raises(ValueError, match="Blocked private address"):
-                _validate_url(f"http://{ip}/hook")
+    def test_allows_lan_addresses(self) -> None:
+        # LAN deployment: webhooks legitimately target services on private IPs
+        # (e.g. WAHA on 192.168.1.78). Only cloud-metadata endpoints are blocked.
+        for ip in ["192.168.1.78", "10.0.0.1", "172.16.0.1", "127.0.0.1"]:
+            _validate_url(f"http://{ip}/hook")
 
-    def test_blocks_loopback(self) -> None:
-        with pytest.raises(ValueError, match="Blocked private address"):
-            _validate_url("http://127.0.0.1/hook")
-
-    def test_blocks_link_local(self) -> None:
-        with pytest.raises(ValueError, match="Blocked private address"):
-            _validate_url("http://169.254.1.1/hook")
+    def test_blocks_cloud_metadata_ip(self) -> None:
+        with pytest.raises(ValueError, match="Blocked"):
+            _validate_url("http://169.254.169.254/latest/meta-data")
 
     def test_blocks_metadata_hosts(self) -> None:
         for host in _BLOCKED_HOSTS:

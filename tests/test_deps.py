@@ -1,7 +1,6 @@
-"""Tests for web deps — shared state init, helpers, rate limiter."""
+"""Tests for web deps — shared state init, helpers."""
 from __future__ import annotations
 
-import time
 import pytest
 
 from src.storage.db import Database
@@ -11,10 +10,9 @@ from src.web.deps import (
     _init_db,
     _make_assembler,
     _block_to_dict,
-    _detect_compress_hint,
-    block_hash,
 )
-from src.web.rate_limit import RateLimiter
+from src.core.compress_detect import detect_compress_hint as _detect_compress_hint
+from src.storage.usage import block_hash
 from src.core.block import Block, Priority
 
 
@@ -92,48 +90,3 @@ class TestGetConnector:
             _get_connector("nonexistent_connector_xyz")
 
 
-class TestRateLimiter:
-    def test_allowed_within_limit(self):
-        rl = RateLimiter(requests_per_minute=10, burst=5)
-        for _ in range(14):
-            assert rl.is_allowed("127.0.0.1") is True
-
-    def test_blocked_over_limit(self):
-        rl = RateLimiter(requests_per_minute=5, burst=2)
-        for _ in range(7):
-            rl.is_allowed("127.0.0.1")
-        assert rl.is_allowed("127.0.0.1") is False
-
-    def test_remaining(self):
-        rl = RateLimiter(requests_per_minute=10, burst=5)
-        rl.is_allowed("127.0.0.1")
-        remaining = rl.remaining("127.0.0.1")
-        assert remaining == 14  # 10+5 - 1
-
-    def test_retry_after(self):
-        rl = RateLimiter(requests_per_minute=2, burst=0)
-        rl.is_allowed("127.0.0.1")
-        rl.is_allowed("127.0.0.1")
-        assert rl.is_allowed("127.0.0.1") is False
-        retry = rl.get_retry_after("127.0.0.1")
-        assert retry > 0
-
-    def test_retry_after_empty(self):
-        rl = RateLimiter(requests_per_minute=10, burst=5)
-        retry = rl.get_retry_after("unknown_ip")
-        assert retry == 0
-
-    def test_separate_ips(self):
-        rl = RateLimiter(requests_per_minute=2, burst=0)
-        rl.is_allowed("10.0.0.1")
-        rl.is_allowed("10.0.0.1")
-        assert rl.is_allowed("10.0.0.1") is False
-        assert rl.is_allowed("10.0.0.2") is True
-
-    def test_cleanup(self):
-        rl = RateLimiter(requests_per_minute=10, burst=5)
-        rl._cleanup_interval = 0
-        rl.is_allowed("stale_ip")
-        rl._window["stale_ip"] = [time.monotonic() - 120]
-        rl.is_allowed("other_ip")
-        assert "stale_ip" not in rl._window

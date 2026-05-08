@@ -4,7 +4,7 @@ from __future__ import annotations
 import json
 import time
 from dataclasses import dataclass
-from typing import List
+from typing import List, Optional
 
 from .db import Database
 
@@ -25,7 +25,7 @@ class VersionStore:
         self._db = db
 
     def record(self, memory_key: str, value: str, tags: List[str],
-               metadata: dict = None, changed_by: str = "") -> None:
+               metadata: Optional[dict] = None, changed_by: str = "") -> None:
         self._db.conn.execute(
             "INSERT INTO memory_versions (memory_key, value, tags, metadata, changed_by, created_at) VALUES (?, ?, ?, ?, ?, ?)",
             (memory_key, value, json.dumps(tags), json.dumps(metadata or {}), changed_by, time.time()),

@@ -147,19 +147,16 @@ class TestMCPMemorySearchSemantic:
     def test_semantic_true_uses_hybrid(self):
         with patch("src.interfaces.mcp_server._get_memory_store") as mock_store, \
              patch("src.interfaces.mcp_server._get_activity_log") as mock_log, \
-             patch("src.interfaces.mcp_server.hybrid_search", create=True) as mock_hybrid:
+             patch("src.interfaces.mcp_server.hybrid_search") as mock_hybrid:
+            mock_hybrid.return_value = [
+                {"key": "k1", "value": "v1", "score": 0.9, "tags": ["t"], "method": "hybrid"},
+            ]
+            mock_log.return_value.record = MagicMock()
 
-            # Patch at the right import location
-            with patch("src.core.embeddings.hybrid_search") as mock_hs:
-                mock_hs.return_value = [
-                    {"key": "k1", "value": "v1", "score": 0.9, "tags": ["t"], "method": "hybrid"},
-                ]
-                mock_log.return_value.record = MagicMock()
-
-                from src.interfaces.mcp_server import memory_search
-                result = memory_search("test query", semantic=True)
-                assert result["count"] == 1
-                assert result["results"][0]["method"] == "hybrid"
+            from src.interfaces.mcp_server import memory_search
+            result = memory_search("test query", semantic=True)
+            assert result["count"] == 1
+            assert result["results"][0]["method"] == "hybrid"
 
 
 class TestWebSemanticSearchModes:

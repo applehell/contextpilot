@@ -163,7 +163,7 @@ class KubernetesConnector(ConnectorPlugin):
 
         result = SyncResult()
         api = self._api()
-        prefix = f"k8s/"
+        prefix = "k8s/"
 
         configured_ns = self._parse_list(self._config.get("namespaces", ""))
         sync_items_raw = self._config.get("sync_items", "deployments,services,configmaps,pods")

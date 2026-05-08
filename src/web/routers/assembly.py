@@ -7,12 +7,12 @@ from typing import Any, Dict
 from fastapi import APIRouter, HTTPException, Query, Request
 
 from src.core.block import Block, Priority
+from src.core.compress_detect import detect_compress_hint as _detect_compress_hint
 from src.core.token_budget import TokenBudget
 from src.storage.templates import TemplateStore, ContextTemplate
-from src.storage.usage import UsageRecord
+from src.storage.usage import UsageRecord, block_hash
 from src.web.deps import (
     _block_to_dict,
-    _detect_compress_hint,
     _events,
     _get_db,
     _get_memory_store,
@@ -21,7 +21,6 @@ from src.web.deps import (
     AssembleRequest,
     CompressRequest,
     EstimateRequest,
-    block_hash,
 )
 
 router = APIRouter(tags=["assembly"])
@@ -49,7 +48,6 @@ async def assemble(req: AssembleRequest):
     result = assembler.assemble_tracked(blocks, req.budget)
 
     store = _get_usage_store()
-    import time
     records = [
         UsageRecord(
             block_hash=block_hash(b.content),
@@ -151,15 +149,13 @@ async def test_compress(req: CompressRequest):
 
 @router.get("/api/templates")
 async def list_templates():
-    from src.web.deps import _db
-    ts = TemplateStore(_db)
+    ts = TemplateStore(_get_db())
     return [{"name": t.name, "description": t.description, "tag_filter": t.tag_filter,
              "key_filter": t.key_filter, "budget": t.budget} for t in ts.list()]
 
 
 @router.post("/api/templates", status_code=201)
 async def save_template(request: Request):
-    from src.web.deps import _db
     try:
         body = await request.json()
     except Exception:
@@ -169,7 +165,7 @@ async def save_template(request: Request):
     budget = body.get("budget", 4000)
     if not isinstance(budget, (int, float)) or budget <= 0 or budget > 128000:
         raise HTTPException(400, "budget must be > 0 and <= 128000")
-    ts = TemplateStore(_db)
+    ts = TemplateStore(_get_db())
     t = ContextTemplate(
         name=body["name"], description=body.get("description", ""),
         tag_filter=body.get("tag_filter", []), key_filter=body.get("key_filter", ""),
@@ -182,7 +178,6 @@ async def save_template(request: Request):
 
 @router.get("/api/templates/suggest")
 async def suggest_templates():
-    from src.web.deps import _db
     store = _get_memory_store()
     memories = store.list()
     if not memories:
@@ -205,7 +200,7 @@ async def suggest_templates():
             tag_counts[tag] += 1
             tag_tokens[tag] = tag_tokens.get(tag, 0) + tokens
 
-    existing = {t.name for t in TemplateStore(_db).list()}
+    existing = {t.name for t in TemplateStore(_get_db()).list()}
     suggestions = []
 
     for prefix, count in prefix_counts.most_common(20):
@@ -266,8 +261,7 @@ async def suggest_templates():
 
 @router.delete("/api/templates/{name}")
 async def delete_template(name: str):
-    from src.web.deps import _db
-    ts = TemplateStore(_db)
+    ts = TemplateStore(_get_db())
     try:
         ts.delete(name)
         return {"status": "deleted"}
@@ -277,8 +271,7 @@ async def delete_template(name: str):
 
 @router.post("/api/templates/{name}/assemble")
 async def assemble_template(name: str):
-    from src.web.deps import _db
-    ts = TemplateStore(_db)
+    ts = TemplateStore(_get_db())
     try:
         t = ts.get(name)
     except KeyError:

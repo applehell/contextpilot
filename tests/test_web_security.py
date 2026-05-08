@@ -7,7 +7,8 @@ import os
 import pytest
 from fastapi.testclient import TestClient
 
-from src.web.app import create_app, MAX_UPLOAD_BYTES
+from src.web.app import create_app
+from src.web.deps import MAX_UPLOAD_BYTES
 
 
 @pytest.fixture

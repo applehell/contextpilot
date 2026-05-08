@@ -14,8 +14,8 @@ logger = get_logger("routers.memories")
 
 from src.core.token_budget import TokenBudget
 from src.storage.memory import Memory
+from src.storage.usage import FeedbackRecord, block_hash
 from src.web.deps import (
-    _db,
     _events,
     _get_db,
     _get_memory_store,
@@ -23,10 +23,7 @@ from src.web.deps import (
     _index_single,
     _remove_from_index,
     _secret_detector,
-    _estimate_total_tokens,
-    block_hash,
     FeedbackIn,
-    FeedbackRecord,
     MemoryIn,
 )
 
@@ -98,12 +95,10 @@ async def ttl_stats():
     expired = store.expired_count()
     expiring_24h = len(store.expiring_soon(24))
     expiring_7d = len(store.expiring_soon(168))
-    total_with_ttl = 0
-    if store._has_expires_column():
-        row = store._db.conn.execute(
-            "SELECT count(*) FROM memories WHERE expires_at IS NOT NULL"
-        ).fetchone()
-        total_with_ttl = row[0] if row else 0
+    row = _get_db().conn.execute(
+        "SELECT count(*) FROM memories WHERE expires_at IS NOT NULL"
+    ).fetchone()
+    total_with_ttl = row[0] if row else 0
     return {
         "total_with_ttl": total_with_ttl,
         "expired": expired,
@@ -121,8 +116,7 @@ async def category_stats():
 @router.get("/api/memories/{key:path}/related")
 async def get_related_memories(key: str):
     from src.storage.relations import RelationStore
-    from src.web.deps import _db
-    rs = RelationStore(_db)
+    rs = RelationStore(_get_db())
     store = _get_memory_store()
     relations = rs.get_relations(key)
     items = []
@@ -151,8 +145,7 @@ async def get_related_memories(key: str):
 @router.get("/api/memories/{key:path}/versions")
 async def memory_versions(key: str, limit: int = Query(20, ge=1, le=100)):
     from src.storage.versions import VersionStore
-    from src.web.deps import _db
-    vs = VersionStore(_db)
+    vs = VersionStore(_get_db())
     versions = vs.history(key, limit)
     return [{"id": v.id, "value": v.value, "tags": v.tags,
              "changed_by": v.changed_by, "created_at": v.created_at} for v in versions]
@@ -191,8 +184,7 @@ async def update_memory(key: str, req: MemoryIn):
     except KeyError:
         raise HTTPException(404, f"Memory '{key}' not found.")
     from src.storage.versions import VersionStore
-    from src.web.deps import _db
-    VersionStore(_db).record(key, old.value, old.tags, old.metadata, changed_by="web")
+    VersionStore(_get_db()).record(key, old.value, old.tags, old.metadata, changed_by="web")
     expires_at = old.expires_at
     metadata = old.metadata.copy()
     if req.ttl_seconds is not None:
@@ -388,9 +380,8 @@ async def bulk_tag_memories(request: Request):
 
 @router.get("/api/memory-presets")
 async def list_memory_presets():
-    from src.web.deps import _db
     try:
-        rows = _db.conn.execute("SELECT name, key_prefix, default_tags, description, created_at FROM memory_presets ORDER BY name").fetchall()
+        rows = _get_db().conn.execute("SELECT name, key_prefix, default_tags, description, created_at FROM memory_presets ORDER BY name").fetchall()
         return [{"name": r["name"], "key_prefix": r["key_prefix"], "default_tags": json.loads(r["default_tags"]),
                  "description": r["description"]} for r in rows]
     except Exception:
@@ -399,7 +390,6 @@ async def list_memory_presets():
 
 @router.post("/api/memory-presets", status_code=201)
 async def save_memory_preset(request: Request):
-    from src.web.deps import _db
     try:
         body = await request.json()
     except json.JSONDecodeError:
@@ -407,20 +397,19 @@ async def save_memory_preset(request: Request):
     name = body.get("name", "").strip()
     if not name:
         raise HTTPException(400, "Name required")
-    _db.conn.execute(
+    _get_db().conn.execute(
         "INSERT OR REPLACE INTO memory_presets (name, key_prefix, default_tags, description, created_at) VALUES (?, ?, ?, ?, ?)",
         (name, body.get("key_prefix", ""), json.dumps(body.get("default_tags", [])),
          body.get("description", ""), time.time()),
     )
-    _db.conn.commit()
+    _get_db().conn.commit()
     return {"status": "saved", "name": name}
 
 
 @router.delete("/api/memory-presets/{name}")
 async def delete_memory_preset(name: str):
-    from src.web.deps import _db
-    _db.conn.execute("DELETE FROM memory_presets WHERE name = ?", (name,))
-    _db.conn.commit()
+    _get_db().conn.execute("DELETE FROM memory_presets WHERE name = ?", (name,))
+    _get_db().conn.commit()
     return {"status": "deleted"}
 
 
@@ -506,8 +495,7 @@ async def export_memories(tag: str = Query("")):
 @router.get("/api/memory-activity")
 async def get_memory_activity(limit: int = Query(20, ge=1, le=100)):
     from src.storage.memory_activity import MemoryActivityLog
-    from src.web.deps import _db
-    _activity_log = MemoryActivityLog(_db)
+    _activity_log = MemoryActivityLog(_get_db())
     entries = _activity_log.recent(limit)
     return [
         {

@@ -2,24 +2,23 @@
 from __future__ import annotations
 
 import asyncio
+import hmac
 import json
 import os
 
 from fastapi import APIRouter, HTTPException, Query, Request
 
 from src.core.log import get_logger
-
-logger = get_logger("routers.connectors")
-
+from src.storage.memory import Memory
 from src.web.deps import (
     _events,
-    _get_connectors,
     _get_connector,
+    _get_connectors,
     _get_memory_store,
-    _get_profile_dir,
     InboundPayload,
 )
-from src.storage.memory import Memory
+
+logger = get_logger("routers.connectors")
 
 router = APIRouter(tags=["connectors"])
 
@@ -213,7 +212,7 @@ async def inbound_webhook(token: str, payload: InboundPayload):
     expected = os.environ.get("CONTEXTPILOT_INBOUND_TOKEN")
     if expected is None:
         raise HTTPException(status_code=403, detail="Inbound webhooks not configured")
-    if token != expected:
+    if not hmac.compare_digest(token, expected):
         raise HTTPException(status_code=403, detail="Invalid token")
     if not payload.key or not payload.key.strip():
         raise HTTPException(status_code=400, detail="Missing key")

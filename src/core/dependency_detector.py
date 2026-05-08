@@ -17,7 +17,6 @@ def detect_dependencies(memories: List[Memory]) -> List[Dict]:
     source_key, target_key, relation_type, confidence."""
     results = []
     keys = {m.key for m in memories}
-    key_index = {m.key: m for m in memories}
 
     # 1. Key references — memory value mentions another memory's key
     for m in memories:

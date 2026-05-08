@@ -1,7 +1,6 @@
 """Duplicate detection — find similar memories using content fingerprinting."""
 from __future__ import annotations
 
-import hashlib
 import re
 from dataclasses import dataclass
 from typing import List, Tuple

@@ -1,5 +1,67 @@
 # Changelog
 
+## v4.3.0 — 2026-05-08
+
+Multi-expert review pass: security, code quality, architecture, and dead-code cleanup.
+All 1542 tests green. ~250 LOC removed via consolidation and dead-code purge.
+
+### Correctness Fixes
+- **ProfileManager consistency** — `web/deps.py` now uses `ProfileManager().active_db_path`
+  like the MCP server. Previously the web app stuck to a hard-coded `DEFAULT_DB_PATH`,
+  meaning a profile switch from CLI did not take effect in the web UI.
+- **Cross-process DB safety** — removed the `BEGIN IMMEDIATE / ROLLBACK` "WAL snapshot
+  refresh" hotfix that conflicted with `VACUUM` and held write locks on every read.
+  SQLite WAL already provides snapshot freshness on each new read in autocommit mode.
+- **`_init_db` race-safe** — waits for any in-flight background indexing to finish
+  before closing the connection (prevents segfault when profile is re-init'd while
+  the indexer thread is iterating).
+- **Stale `_db` references in routers** — 19 inline `from src.web.deps import _db`
+  lookups across `memories.py`, `system.py`, `assembly.py`, `graph.py` replaced with
+  `_get_db()` calls so router code always sees the live connection.
+- **DB Re-init bug** — `_init_db()` now nulls out cached store singletons so they
+  rebind to the new connection after a profile switch.
+- **Thread-safe deps singletons** — `_get_*_store()` helpers now hold `_db_lock` when
+  reading/writing module-level globals.
+
+### Security
+- **Webhook token timing-safe compare** — `hmac.compare_digest` instead of `!=`.
+- **Webhook DNS-rebinding guard** — outbound webhook URLs are resolved and any IP
+  matching the cloud-metadata range (169.254.169.254, AWS IMDSv6) is blocked.
+  *LAN-private addresses (192.168/16, 10/8, 172.16/12) remain reachable so webhooks
+  to home-server services keep working.*
+- **CSP `unsafe-eval` removed** — HTMX does not need it.
+
+### Code Quality
+- **Schema migration guards removed** — `_has_pinned_column()`, `_has_expires_column()`,
+  `_has_category_column()` and the `_extra_cols()` runtime SQL probes are gone now
+  that schema v13 is the minimum (~50 LOC).
+- **`MemoryStore.sources()` SQL-side aggregation** — N rows scan replaced with a
+  `GROUP BY SUBSTR(...)` query.
+- **Connector `_upsert` consolidation** — 5 nearly-identical `_upsert` methods in
+  `gitea`, `github`, `notion`, `bitwarden`, `gdrive` removed; logic moved to
+  `BaseConnector._upsert` taking a `meta_extra: dict` (~110 LOC).
+- **Inline imports cleaned up** — 10+ `import` statements inside MCP tool functions
+  hoisted to module top.
+- **Dead-code sweep** — ~40 unused imports across 30 files (autoflake), dead
+  defensive `hasattr(b.priority, 'value')`, unused `_time`, `Counter`, owner
+  variable in `gitea.py`.
+- **Type hints** — `category: str = None` → `Optional[str] = None` in
+  `MemoryStore.list` and `VersionStore.record`.
+- **Removed dead Rate-Limiter** — `web/rate_limit.py` was never wired up
+  (`app.state.rate_limiter` was never set). Deleted, including its test file.
+
+### Library Updates
+- `mcp` 1.26 → 1.27, `fastapi` 0.135 → 0.136, `pydantic` 2.12 → 2.13,
+  `uvicorn` 0.42 → 0.46, `starlette` 0.52 → 1.0, `click` 8.1 → 8.3,
+  `python-multipart` 0.0.9 → 0.0.27, `tiktoken` 0.6 → 0.8.
+
+### Misc
+- `embeddings.py` import probe restored — `_backend = "transformer"` was always set
+  even when `sentence_transformers` was missing because autoflake removed the import
+  inside the try-block. Now uses an explicit `import sentence_transformers` probe.
+- Test fix: `test_semantic_true_uses_hybrid` now patches `mcp_server.hybrid_search`
+  (the actual call site) instead of `core.embeddings.hybrid_search`.
+
 ## v4.1.0 — 2026-04-01
 
 Security hardening, bug fixes, and performance improvements. 22 bugs fixed, 94 new tests.

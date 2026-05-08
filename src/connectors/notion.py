@@ -1,13 +1,11 @@
 """Notion connector — sync pages and databases via the Notion API."""
 from __future__ import annotations
 
-import hashlib
-import time
 from typing import Any, Dict, List, Optional
 
 import requests
 
-from ..storage.memory import Memory, MemoryStore
+from ..storage.memory import MemoryStore
 from .base import ConfigField, ConnectorPlugin, SyncResult
 
 NOTION_API = "https://api.notion.com"
@@ -350,7 +348,7 @@ class NotionConnector(ConnectorPlugin):
 
         content = "\n".join(lines)
         tags = [self.name, title]
-        self._upsert(store, key, content, tags, title, result)
+        self._upsert(store, key, content, tags, {"title": title}, result)
 
     def _sync_database(self, api: _NotionAPI, db_id: str, store: MemoryStore,
                        prefix: str, synced_keys: set, result: SyncResult,
@@ -389,32 +387,4 @@ class NotionConnector(ConnectorPlugin):
 
         content = "\n".join(lines)
         tags = [self.name, db_title]
-        self._upsert(store, key, content, tags, db_title, result)
-
-    def _upsert(self, store: MemoryStore, key: str, content: str,
-                tags: List[str], title: str, result: SyncResult) -> None:
-        content_hash = hashlib.sha256(content.encode()).hexdigest()[:16]
-        expires_at = self._compute_expires_at()
-        ttl_sec = self._ttl_seconds()
-        try:
-            existing = store.get(key)
-            if existing.metadata.get("content_hash") == content_hash:
-                result.skipped += 1
-                return
-            existing.value = content
-            existing.tags = tags
-            existing.metadata["content_hash"] = content_hash
-            if ttl_sec:
-                existing.metadata["ttl_seconds"] = ttl_sec
-            existing.expires_at = expires_at
-            existing.updated_at = time.time()
-            store.set(existing, reset_ttl=False)
-            result.updated += 1
-        except KeyError:
-            meta = {"source": self.name, "content_hash": content_hash, "title": title}
-            if ttl_sec:
-                meta["ttl_seconds"] = ttl_sec
-            mem = Memory(key=key, value=content, tags=tags, metadata=meta,
-                         expires_at=expires_at)
-            store.set(mem)
-            result.added += 1
+        self._upsert(store, key, content, tags, {"title": db_title}, result)

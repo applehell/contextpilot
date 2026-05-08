@@ -6,13 +6,11 @@ No passwords, usernames, TOTP secrets, or login credentials are ever stored.
 """
 from __future__ import annotations
 
-import hashlib
-import time
 from typing import Any, Dict, List, Optional
 
 import requests
 
-from ..storage.memory import Memory, MemoryStore
+from ..storage.memory import MemoryStore
 from .base import ConfigField, ConnectorPlugin, SyncResult
 
 SECURE_NOTE_TYPE = 2
@@ -191,7 +189,7 @@ class BitwardenConnector(ConnectorPlugin):
             content = "\n".join(lines)
 
             tags = [self.name, folder_name]
-            self._upsert(store, key, content, tags, folder_name, result)
+            self._upsert(store, key, content, tags, {"folder": folder_name}, result)
 
         for m in store.list():
             if m.key.startswith(prefix) and m.key not in synced_keys:
@@ -200,30 +198,3 @@ class BitwardenConnector(ConnectorPlugin):
 
         self._update_sync_stats(len(synced_keys), result)
         return result
-
-    def _upsert(self, store, key, content, tags, folder_name, result):
-        content_hash = hashlib.sha256(content.encode()).hexdigest()[:16]
-        expires_at = self._compute_expires_at()
-        ttl_sec = self._ttl_seconds()
-        try:
-            existing = store.get(key)
-            if existing.metadata.get("content_hash") == content_hash:
-                result.skipped += 1
-                return
-            existing.value = content
-            existing.tags = tags
-            existing.metadata["content_hash"] = content_hash
-            if ttl_sec:
-                existing.metadata["ttl_seconds"] = ttl_sec
-            existing.expires_at = expires_at
-            existing.updated_at = time.time()
-            store.set(existing, reset_ttl=False)
-            result.updated += 1
-        except KeyError:
-            meta = {"source": self.name, "content_hash": content_hash, "folder": folder_name}
-            if ttl_sec:
-                meta["ttl_seconds"] = ttl_sec
-            mem = Memory(key=key, value=content, tags=tags, metadata=meta,
-                         expires_at=expires_at)
-            store.set(mem)
-            result.added += 1

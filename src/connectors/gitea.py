@@ -1,15 +1,13 @@
 """Gitea connector — sync repos, issues, packages, releases, and wiki pages."""
 from __future__ import annotations
 
-import hashlib
 import json
-import time
 import urllib.request
 import urllib.error
 import base64
 from typing import Any, Dict, List, Optional
 
-from ..storage.memory import Memory, MemoryStore
+from ..storage.memory import MemoryStore
 from .base import ConfigField, ConnectorPlugin, SyncResult
 
 
@@ -127,7 +125,6 @@ class GiteaConnector(ConnectorPlugin):
         try:
             api = self._api()
             repos = api.repos()
-            owner = self._config.get("url", "").rstrip("/").split("/")[-1] or "unknown"
             pkgs = []
             if repos:
                 owner_login = repos[0]["owner"]["login"]
@@ -330,29 +327,3 @@ class GiteaConnector(ConnectorPlugin):
         self._update_sync_stats(len(synced_keys))
         return result
 
-    def _upsert(self, store, key, content, tags, meta_extra, result):
-        content_hash = hashlib.sha256(content.encode()).hexdigest()[:16]
-        expires_at = self._compute_expires_at()
-        ttl_sec = self._ttl_seconds()
-        try:
-            existing = store.get(key)
-            if existing.metadata.get("content_hash") == content_hash:
-                result.skipped += 1
-                return
-            existing.value = content
-            existing.tags = tags
-            existing.metadata["content_hash"] = content_hash
-            if ttl_sec:
-                existing.metadata["ttl_seconds"] = ttl_sec
-            existing.expires_at = expires_at
-            existing.updated_at = time.time()
-            store.set(existing, reset_ttl=False)
-            result.updated += 1
-        except KeyError:
-            meta = {"source": self.name, "content_hash": content_hash, **meta_extra}
-            if ttl_sec:
-                meta["ttl_seconds"] = ttl_sec
-            mem = Memory(key=key, value=content, tags=tags, metadata=meta,
-                         expires_at=expires_at)
-            store.set(mem)
-            result.added += 1

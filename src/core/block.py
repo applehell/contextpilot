@@ -4,7 +4,7 @@ from enum import Enum
 from typing import Optional, TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from .token_budget import TokenBudget
+    pass
 
 
 class Priority(str, Enum):

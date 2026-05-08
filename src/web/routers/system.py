@@ -18,8 +18,6 @@ from src.storage.folders import FolderManager
 from src.storage.memory_activity import MemoryActivityLog
 from src.storage.profiles import ProfileManager
 from src.web.deps import (
-    _DATA_DIR,
-    _db,
     _events,
     _get_connectors,
     _get_db,
@@ -53,7 +51,7 @@ async def setup_status():
         "memory_count": memory_count,
         "configured_connectors": configured_connectors,
         "folder_count": len(folder_sources),
-        "data_dir": str(_DATA_DIR),
+        "data_dir": str(Path(os.environ.get("CONTEXTPILOT_DATA_DIR", str(Path.home() / ".contextpilot")))),
         "is_fresh": memory_count == 0 and len(configured_connectors) == 0 and len(folder_sources) == 0,
     }
 
@@ -62,7 +60,6 @@ async def setup_status():
 
 @router.get("/api/dashboard")
 async def dashboard():
-    from src.web.deps import _db
     store = _get_memory_store()
     memory_count = store.count()
     total_tokens = _estimate_total_tokens(_get_db())
@@ -72,7 +69,7 @@ async def dashboard():
     all_skills = registry.list_all()
     alive_skills = registry.list_alive()
 
-    activity_entries = MemoryActivityLog(_db).recent(10)
+    activity_entries = MemoryActivityLog(_get_db()).recent(10)
 
     return {
         "memory_count": memory_count,
@@ -112,8 +109,7 @@ async def global_search(q: str = Query("", min_length=1)):
     for m in store.search(q, limit=10):
         results["memories"].append({"key": m.key, "preview": m.value[:100], "type": "memory"})
     from src.storage.templates import TemplateStore as _TS
-    from src.web.deps import _db
-    for t in _TS(_db).list():
+    for t in _TS(_get_db()).list():
         if ql in t.name.lower() or ql in t.description.lower():
             results["templates"].append({"name": t.name, "description": t.description, "type": "template"})
     for c in _get_connectors().list():
@@ -332,10 +328,9 @@ async def scheduler_status():
 @router.post("/api/scheduler/start")
 async def scheduler_start(interval: int = Query(30, ge=1, le=1440)):
     from src.core.scheduler import SyncScheduler
-    from src.web.deps import _db
     s = SyncScheduler.instance(interval)
     s.set_interval(interval)
-    s.start(_get_memory_store, lambda: _db, _get_profile_dir)
+    s.start(_get_memory_store, lambda: _get_db(), _get_profile_dir)
     logger.info("Scheduler started with %dm interval", interval)
     _events.emit("scheduler", "start", f"{interval}m interval")
     return {"status": "started", "interval_minutes": interval}
@@ -354,10 +349,9 @@ async def scheduler_stop():
 @router.post("/api/scheduler/run-now")
 async def scheduler_run_now():
     from src.core.scheduler import SyncScheduler
-    from src.web.deps import _db
     s = SyncScheduler.instance()
     s._get_store = _get_memory_store
-    s._get_db = lambda: _db
+    s._get_db = lambda: _get_db()
     s._get_profile_dir = _get_profile_dir
     results = await s.run_once()
     _events.emit("scheduler", "manual-run", "complete")

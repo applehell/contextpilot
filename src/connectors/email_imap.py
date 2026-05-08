@@ -9,8 +9,7 @@ import imaplib
 import json
 import re
 import ssl
-import time
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List
 
 from ..storage.memory import Memory, MemoryStore
 from .base import ConfigField, ConnectorPlugin, SyncResult

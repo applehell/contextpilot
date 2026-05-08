@@ -79,21 +79,6 @@ class Memory:
 
 
 def _row_to_memory(row) -> Memory:
-    pinned = False
-    expires_at = None
-    category = "persistent"
-    try:
-        pinned = bool(row["pinned"])
-    except (IndexError, KeyError):
-        pass
-    try:
-        expires_at = row["expires_at"]
-    except (IndexError, KeyError):
-        pass
-    try:
-        category = row["category"] or "persistent"
-    except (IndexError, KeyError):
-        pass
     try:
         tags = json.loads(row["tags"])
     except (json.JSONDecodeError, TypeError):
@@ -109,9 +94,9 @@ def _row_to_memory(row) -> Memory:
         metadata=metadata,
         created_at=row["created_at"],
         updated_at=row["updated_at"],
-        pinned=pinned,
-        expires_at=expires_at,
-        category=category,
+        pinned=bool(row["pinned"]),
+        expires_at=row["expires_at"],
+        category=row["category"] or "persistent",
     )
 
 
@@ -120,61 +105,19 @@ class MemoryStore:
 
     CATEGORY_TTL = {"session": 86400, "ephemeral": 3600}
 
+    _COLS = "key, value, tags, metadata, created_at, updated_at, pinned, expires_at, category"
+
     def __init__(self, db: Database) -> None:
         self._db = db
-        self._has_pin: Optional[bool] = None
-        self._has_expires: Optional[bool] = None
-        self._has_cat: Optional[bool] = None
-
-    def _has_pinned_column(self) -> bool:
-        if self._has_pin is None:
-            try:
-                self._db.conn.execute("SELECT pinned FROM memories LIMIT 0")
-                self._has_pin = True
-            except sqlite3.OperationalError:
-                self._has_pin = False
-        return self._has_pin
-
-    def _has_expires_column(self) -> bool:
-        if self._has_expires is None:
-            try:
-                self._db.conn.execute("SELECT expires_at FROM memories LIMIT 0")
-                self._has_expires = True
-            except sqlite3.OperationalError:
-                self._has_expires = False
-        return self._has_expires
-
-    def _has_category_column(self) -> bool:
-        if self._has_cat is None:
-            try:
-                self._db.conn.execute("SELECT category FROM memories LIMIT 0")
-                self._has_cat = True
-            except sqlite3.OperationalError:
-                self._has_cat = False
-        return self._has_cat
-
-    def _extra_cols(self) -> str:
-        parts = []
-        if self._has_pinned_column():
-            parts.append("pinned")
-        if self._has_expires_column():
-            parts.append("expires_at")
-        if self._has_category_column():
-            parts.append("category")
-        return (", " + ", ".join(parts)) if parts else ""
 
     def list(self, limit: int = 0, offset: int = 0, source: str = "",
-             sort: str = "key", order: str = "asc", category: str = None) -> List[Memory]:
+             sort: str = "key", order: str = "asc", category: Optional[str] = None) -> List[Memory]:
         allowed_sorts = {"key": "key", "updated": "updated_at", "created": "created_at",
                          "size": "length(value)", "expires": "expires_at"}
         sort_col = allowed_sorts.get(sort, "key")
         order_dir = "DESC" if order == "desc" else "ASC"
-        has_pin = self._has_pinned_column()
-        has_cat = self._has_category_column()
 
-        cols = "key, value, tags, metadata, created_at, updated_at" + self._extra_cols()
-
-        sql = f"SELECT {cols} FROM memories"
+        sql = f"SELECT {self._COLS} FROM memories"
         params: list = []
         conditions = []
 
@@ -182,17 +125,14 @@ class MemoryStore:
             conditions.append("key LIKE ?")
             params.append(f"{source}/%")
 
-        if category and has_cat:
+        if category:
             conditions.append("category = ?")
             params.append(category)
 
         if conditions:
             sql += " WHERE " + " AND ".join(conditions)
 
-        if has_pin:
-            sql += f" ORDER BY pinned DESC, {sort_col} {order_dir}"
-        else:
-            sql += f" ORDER BY {sort_col} {order_dir}"
+        sql += f" ORDER BY pinned DESC, {sort_col} {order_dir}"
 
         if limit > 0:
             sql += " LIMIT ? OFFSET ?"
@@ -211,9 +151,6 @@ class MemoryStore:
     def category_stats(self) -> dict:
         """Return count of memories per category."""
         stats = {"persistent": 0, "session": 0, "ephemeral": 0}
-        if not self._has_category_column():
-            stats["persistent"] = self.count()
-            return stats
         rows = self._db.conn.execute(
             "SELECT COALESCE(category, 'persistent') as cat, count(*) as cnt FROM memories GROUP BY cat"
         ).fetchall()
@@ -228,20 +165,21 @@ class MemoryStore:
     def sources(self) -> List[dict]:
         """Return distinct source prefixes with counts."""
         rows = self._db.conn.execute(
-            "SELECT key FROM memories"
+            """SELECT
+                CASE WHEN INSTR(key, '/') > 0
+                     THEN SUBSTR(key, 1, INSTR(key, '/') - 1)
+                     ELSE '(none)'
+                END AS prefix,
+                COUNT(*) AS cnt
+               FROM memories
+               GROUP BY prefix
+               ORDER BY cnt DESC"""
         ).fetchall()
-        counts: dict = {}
-        for r in rows:
-            key = r["key"]
-            prefix = key.split("/")[0] if "/" in key else "(none)"
-            counts[prefix] = counts.get(prefix, 0) + 1
-        return sorted([{"source": k, "count": v} for k, v in counts.items()], key=lambda x: -x["count"])
+        return [{"source": r["prefix"], "count": r["cnt"]} for r in rows]
 
     def get(self, key: str) -> Memory:
-        extra = self._extra_cols()
         row = self._db.conn.execute(
-            f"SELECT key, value, tags, metadata, created_at, updated_at{extra} FROM memories WHERE key = ?",
-            (key,),
+            f"SELECT {self._COLS} FROM memories WHERE key = ?", (key,),
         ).fetchone()
         if not row:
             raise KeyError(f"Memory '{key}' not found.")
@@ -250,9 +188,6 @@ class MemoryStore:
     def set(self, memory: Memory, reset_ttl: bool = True) -> None:
         if not memory.key or not memory.key.strip():
             raise ValueError("Memory key must not be empty.")
-        has_pin = self._has_pinned_column()
-        has_exp = self._has_expires_column()
-        has_cat = self._has_category_column()
         existing = self._db.conn.execute(
             "SELECT created_at FROM memories WHERE key = ?", (memory.key,)
         ).fetchone()
@@ -270,39 +205,22 @@ class MemoryStore:
         if existing:
             memory.created_at = existing["created_at"]
             memory.updated_at = time.time()
-            exp_clause = ", expires_at = ?" if has_exp else ""
-            cat_clause = ", category = ?" if has_cat else ""
-            params = [memory.value, json.dumps(memory.tags), json.dumps(memory.metadata),
-                      memory.created_at, memory.updated_at]
-            if has_exp:
-                params.append(memory.expires_at)
-            if has_cat:
-                params.append(memory.category)
-            params.append(memory.key)
             self._db.conn.execute(
-                f"""UPDATE memories SET value = ?, tags = ?, metadata = ?,
-                   created_at = ?, updated_at = ?{exp_clause}{cat_clause} WHERE key = ?""",
-                params,
+                """UPDATE memories SET value = ?, tags = ?, metadata = ?,
+                   created_at = ?, updated_at = ?, expires_at = ?, category = ?
+                   WHERE key = ?""",
+                (memory.value, json.dumps(memory.tags), json.dumps(memory.metadata),
+                 memory.created_at, memory.updated_at, memory.expires_at, memory.category,
+                 memory.key),
             )
         else:
-            cols = "key, value, tags, metadata, created_at, updated_at"
-            vals = "?, ?, ?, ?, ?, ?"
-            params = [memory.key, memory.value, json.dumps(memory.tags),
-                      json.dumps(memory.metadata), memory.created_at, memory.updated_at]
-            if has_pin:
-                cols += ", pinned"
-                vals += ", ?"
-                params.append(1 if memory.pinned else 0)
-            if has_exp:
-                cols += ", expires_at"
-                vals += ", ?"
-                params.append(memory.expires_at)
-            if has_cat:
-                cols += ", category"
-                vals += ", ?"
-                params.append(memory.category)
             self._db.conn.execute(
-                f"INSERT INTO memories ({cols}) VALUES ({vals})", params,
+                """INSERT INTO memories
+                   (key, value, tags, metadata, created_at, updated_at, pinned, expires_at, category)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                (memory.key, memory.value, json.dumps(memory.tags),
+                 json.dumps(memory.metadata), memory.created_at, memory.updated_at,
+                 1 if memory.pinned else 0, memory.expires_at, memory.category),
             )
         self._db.conn.commit()
 
@@ -324,11 +242,8 @@ class MemoryStore:
         self._db.conn.commit()
 
     def pin(self, key: str, pinned: bool = True) -> None:
-        try:
-            self._db.conn.execute("UPDATE memories SET pinned = ? WHERE key = ?", (1 if pinned else 0, key))
-            self._db.conn.commit()
-        except Exception:
-            pass  # pinned column may not exist yet
+        self._db.conn.execute("UPDATE memories SET pinned = ? WHERE key = ?", (1 if pinned else 0, key))
+        self._db.conn.commit()
 
     def trash_list(self) -> list:
         try:
@@ -365,8 +280,6 @@ class MemoryStore:
         return self._db.conn.execute("SELECT changes()").fetchone()[0]
 
     def set_ttl(self, key: str, ttl_seconds: Optional[float]) -> None:
-        if not self._has_expires_column():
-            return
         if ttl_seconds is None or ttl_seconds <= 0:
             expires_at = None
             self._db.conn.execute(
@@ -392,8 +305,6 @@ class MemoryStore:
         self._db.conn.commit()
 
     def cleanup_expired(self) -> int:
-        if not self._has_expires_column():
-            return 0
         now = time.time()
         # Move to trash first
         try:
@@ -410,13 +321,10 @@ class MemoryStore:
         return self._db.conn.execute("SELECT changes()").fetchone()[0]
 
     def expiring_soon(self, within_hours: float = 24.0) -> List[Memory]:
-        if not self._has_expires_column():
-            return []
         now = time.time()
         cutoff = now + (within_hours * 3600)
-        extra = self._extra_cols()
         rows = self._db.conn.execute(
-            f"""SELECT key, value, tags, metadata, created_at, updated_at{extra}
+            f"""SELECT {self._COLS}
                FROM memories
                WHERE expires_at IS NOT NULL AND expires_at > ? AND expires_at <= ?
                ORDER BY expires_at ASC""",
@@ -425,8 +333,6 @@ class MemoryStore:
         return [_row_to_memory(r) for r in rows]
 
     def expired_count(self) -> int:
-        if not self._has_expires_column():
-            return 0
         now = time.time()
         row = self._db.conn.execute(
             "SELECT count(*) FROM memories WHERE expires_at IS NOT NULL AND expires_at <= ?", (now,)
@@ -438,8 +344,7 @@ class MemoryStore:
         q = query.strip()
         tag_set: Optional[Set[str]] = set(tags) if tags else None
 
-        extra = self._extra_cols()
-        m_extra = extra.replace(", ", ", m.") if extra else ""
+        m_cols = ", ".join(f"m.{c.strip()}" for c in self._COLS.split(","))
 
         if q:
             escaped_q = q.replace('"', '""')
@@ -449,7 +354,7 @@ class MemoryStore:
             fts_query = '"' + escaped_q + '"'
             try:
                 rows = self._db.conn.execute(
-                    f"""SELECT m.key, m.value, m.tags, m.metadata, m.created_at, m.updated_at{m_extra}
+                    f"""SELECT {m_cols}
                        FROM memories m
                        JOIN memories_fts fts ON m.rowid = fts.rowid
                        WHERE memories_fts MATCH ?
@@ -464,12 +369,12 @@ class MemoryStore:
                 fts_keys = set(list(fts_keys)[:MAX_FTS_KEYS])
             like_pattern = f"%{q}%"
             like_rows = self._db.conn.execute(
-                f"""SELECT key, value, tags, metadata, created_at, updated_at{extra}
+                f"""SELECT {self._COLS}
                    FROM memories
                    WHERE (key LIKE ? OR value LIKE ?) AND key NOT IN (
                      SELECT key FROM memories WHERE key IN ({",".join("?" * len(fts_keys))})
                    )""" if fts_keys else
-                f"""SELECT key, value, tags, metadata, created_at, updated_at{extra}
+                f"""SELECT {self._COLS}
                    FROM memories
                    WHERE key LIKE ? OR value LIKE ?""",
                 (like_pattern, like_pattern, *fts_keys) if fts_keys else
@@ -478,7 +383,7 @@ class MemoryStore:
             all_rows = list(rows) + list(like_rows)
         else:
             all_rows = self._db.conn.execute(
-                f"SELECT key, value, tags, metadata, created_at, updated_at{extra} FROM memories"
+                f"SELECT {self._COLS} FROM memories"
             ).fetchall()
 
         results = []

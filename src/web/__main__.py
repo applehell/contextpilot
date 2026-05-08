@@ -28,7 +28,6 @@ def _start_mcp(port: int, host: str = "0.0.0.0") -> subprocess.Popen:
 
 
 def _cleanup():
-    global _mcp_process
     from src.core.claude_config import deregister_mcp
     deregister_mcp()
     if _mcp_process and _mcp_process.poll() is None:

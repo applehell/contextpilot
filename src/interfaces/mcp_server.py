@@ -6,34 +6,40 @@ If the MCP server is exposed on a network, place it behind a reverse proxy
 """
 from __future__ import annotations
 
+import argparse
+import os
+import sqlite3
+import threading
+from datetime import date
+from importlib.metadata import version as _pkg_version, PackageNotFoundError
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 from mcp.server.fastmcp import FastMCP
 
-from src.core.log import get_logger
-
-logger = get_logger("mcp_server")
-
 from src.core.assembler import Assembler
-from src.core.token_budget import TokenBudget
-
 from src.core.block import Block, Priority
+from src.core.compress_detect import detect_compress_hint
 from src.core.compressors.bullet_extract import BulletExtractCompressor
 from src.core.compressors.code_compact import CodeCompactCompressor
 from src.core.compressors.mermaid import MermaidCompressor
 from src.core.compressors.yaml_struct import YamlStructCompressor
+from src.core.embeddings import hybrid_search
+from src.core.log import get_logger
 from src.core.relevance import RelevanceEngine
 from src.core.skill_registry import SkillRegistry
+from src.core.token_budget import TokenBudget
+from src.core.weight_adjuster import WeightAdjuster
 from src.storage.db import Database
 from src.storage.memory import Memory, MemoryStore
 from src.storage.memory_activity import MemoryActivityLog
 from src.storage.profiles import ProfileManager
+from src.storage.relations import RelationStore
+from src.storage.templates import TemplateStore
 from src.storage.usage import UsageStore, UsageRecord, FeedbackRecord, block_hash
 
-import threading
+logger = get_logger("mcp_server")
 
-from importlib.metadata import version as _pkg_version, PackageNotFoundError
 try:
     APP_VERSION = _pkg_version("context-pilot")
 except PackageNotFoundError:
@@ -63,6 +69,12 @@ _registry = SkillRegistry.instance()
 
 
 def _get_db() -> Database:
+    """Return the active-profile DB. Reconnects on profile switch.
+
+    SQLite WAL mode automatically gives each new read a fresh snapshot
+    of the latest committed state when the connection is in autocommit
+    mode (default for Database()).
+    """
     global _db, _db_path, _usage_store, _memory_store, _activity_log
     current_path = ProfileManager().active_db_path
     with _db_lock:
@@ -77,30 +89,35 @@ def _get_db() -> Database:
             _usage_store = None
             _memory_store = None
             _activity_log = None
+            logger.info("MCP DB connected to %s", _db_path)
         return _db
 
 
 def _get_usage_store() -> UsageStore:
     global _usage_store
-    if _usage_store is None:
-        _usage_store = UsageStore(_get_db())
-    return _usage_store
+    db = _get_db()
+    with _db_lock:
+        if _usage_store is None:
+            _usage_store = UsageStore(db)
+        return _usage_store
 
 
 def _get_memory_store() -> MemoryStore:
     global _memory_store
-    _get_db()
-    if _memory_store is None:
-        _memory_store = MemoryStore(_get_db())
-    return _memory_store
+    db = _get_db()
+    with _db_lock:
+        if _memory_store is None:
+            _memory_store = MemoryStore(db)
+        return _memory_store
 
 
 def _get_activity_log() -> MemoryActivityLog:
     global _activity_log
-    _get_db()
-    if _activity_log is None:
-        _activity_log = MemoryActivityLog(_get_db())
-    return _activity_log
+    db = _get_db()
+    with _db_lock:
+        if _activity_log is None:
+            _activity_log = MemoryActivityLog(db)
+        return _activity_log
 
 
 def _dicts_to_blocks(raw: List[Dict[str, Any]]) -> List[Block]:
@@ -117,13 +134,10 @@ def _dicts_to_blocks(raw: List[Dict[str, Any]]) -> List[Block]:
     return blocks
 
 
-from src.core.compress_detect import detect_compress_hint as _detect_compress_hint
-
-
 def _block_to_dict(b: Block) -> Dict[str, Any]:
     return {
         "content": b.content,
-        "priority": b.priority.value if hasattr(b.priority, 'value') else str(b.priority),
+        "priority": b.priority.value,
         "compress_hint": b.compress_hint,
         "token_count": b.token_count,
     }
@@ -240,7 +254,7 @@ def get_skill_context(
             pool = []
             for m in memories:
                 content = f"[{m.key}] {m.value}"
-                hint = _detect_compress_hint(m.value)
+                hint = detect_compress_hint(m.value)
                 pool.append(Block(
                     content=content,
                     priority=Priority.MEDIUM,
@@ -398,7 +412,6 @@ def memory_search(query: str, tags: Optional[List[str]] = None, semantic: bool =
     store = _get_memory_store()
 
     if semantic and query and query.strip():
-        from src.core.embeddings import hybrid_search
         hybrid_results = hybrid_search(query, store)
         # Apply tag filter if specified
         if tags:
@@ -450,7 +463,6 @@ def get_context_for_task(
     store = _get_memory_store()
 
     # Find relevant memories via hybrid search (or FTS fallback)
-    from src.core.embeddings import hybrid_search
     results = hybrid_search(task_description, store, top_k=30)
 
     # Apply tag filter if specified
@@ -485,7 +497,7 @@ def get_context_for_task(
         output_blocks.append({
             "key": b.source_key or "",
             "content": b.content,
-            "priority": b.priority.value if hasattr(b.priority, "value") else str(b.priority),
+            "priority": b.priority.value,
             "tokens": b.token_count,
         })
 
@@ -508,9 +520,6 @@ def capture_learnings(learnings: List[Dict[str, Any]]) -> Dict[str, Any]:
     Args:
         learnings: List of learning dicts with key, value, tags, category.
     """
-    import time as _time
-    from datetime import date
-
     store = _get_memory_store()
     saved = 0
     updated = 0
@@ -567,7 +576,6 @@ def get_related_memories(key: str) -> Dict[str, Any]:
     Args:
         key: The memory key to find relations for.
     """
-    from src.storage.relations import RelationStore
     db = _get_db()
     rs = RelationStore(db)
     relations = rs.get_relations(key)
@@ -671,8 +679,6 @@ def list_templates() -> Dict[str, Any]:
 
     Returns templates with name, description, tag_filter, key_filter, and budget.
     """
-    import sqlite3
-    from src.storage.templates import TemplateStore
     try:
         ts = TemplateStore(_get_db())
         items = [
@@ -692,10 +698,6 @@ def suggest_templates() -> Dict[str, Any]:
     Analyzes the active profile's memories and suggests templates that don't exist yet.
     Each suggestion includes name, description, filters, budget, and the reason (key_prefix, tag_cluster, all).
     """
-    from collections import Counter
-    from src.core.token_budget import TokenBudget as _TB
-    from src.storage.templates import TemplateStore
-
     store = _get_memory_store()
     try:
         memories = store.list()
@@ -711,7 +713,7 @@ def suggest_templates() -> Dict[str, Any]:
     prefix_tokens: Dict[str, int] = {}
 
     for m in memories:
-        tokens = _TB.estimate(m.value)
+        tokens = TokenBudget.estimate(m.value)
         prefix = m.key.split("/")[0] if "/" in m.key else m.key
         prefix_counts[prefix] = prefix_counts.get(prefix, 0) + 1
         prefix_tokens[prefix] = prefix_tokens.get(prefix, 0) + tokens
@@ -752,7 +754,7 @@ def suggest_templates() -> Dict[str, Any]:
         })
 
     if len(memories) >= 10 and "all-context" not in existing:
-        total = sum(_TB.estimate(m.value) for m in memories)
+        total = sum(TokenBudget.estimate(m.value) for m in memories)
         suggestions.append({
             "name": "all-context", "description": f"All {len(memories)} memories",
             "tag_filter": [], "key_filter": "",
@@ -774,9 +776,6 @@ def assemble_template(name: str) -> Dict[str, Any]:
 
     Returns the assembled context blocks with token counts.
     """
-    from src.storage.templates import TemplateStore
-    from src.core.weight_adjuster import WeightAdjuster
-
     ts = TemplateStore(_get_db())
     try:
         t = ts.get(name)
@@ -794,7 +793,7 @@ def assemble_template(name: str) -> Dict[str, Any]:
     adjuster = WeightAdjuster(_get_usage_store())
     blocks = []
     for m in memories:
-        hint = _detect_compress_hint(m.value)
+        hint = detect_compress_hint(m.value)
         b = Block(
             content=m.value,
             priority=Priority.HIGH if m.pinned else Priority.MEDIUM,
@@ -838,7 +837,6 @@ def assemble_template(name: str) -> Dict[str, Any]:
 @mcp.tool()
 def get_block_weight(block_content: str, project_name: str = "") -> Dict[str, Any]:
     """Get the computed weight and usage statistics for a block."""
-    from src.core.weight_adjuster import WeightAdjuster
     store = _get_usage_store()
     adjuster = WeightAdjuster(store)
     w = adjuster.compute_weight(block_content, project_name or None)
@@ -852,7 +850,6 @@ def get_block_weight(block_content: str, project_name: str = "") -> Dict[str, An
 
 
 if __name__ == "__main__":
-    import argparse
     parser = argparse.ArgumentParser()
     parser.add_argument("--transport", choices=["stdio", "sse", "streamable-http"], default="stdio")
     parser.add_argument("--host", default="0.0.0.0", help="Bind host (default: 0.0.0.0)")
@@ -860,7 +857,6 @@ if __name__ == "__main__":
     args = parser.parse_args()
 
     if args.transport in ("sse", "streamable-http"):
-        import os
         os.environ.setdefault("MCP_SSE_PORT", str(args.port))
         mcp.settings.host = args.host
         mcp.settings.port = args.port

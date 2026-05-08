@@ -1,6 +1,7 @@
 """Base class for all connector plugins."""
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import stat
@@ -10,7 +11,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
-from ..storage.memory import MemoryStore
+from ..storage.memory import Memory, MemoryStore
 
 _DATA_DIR = Path(os.environ.get("CONTEXTPILOT_DATA_DIR", str(Path.home() / ".contextpilot")))
 
@@ -193,6 +194,49 @@ class ConnectorPlugin(ABC):
                 store.delete(m.key)
                 count += 1
         return count
+
+    def _upsert(
+        self,
+        store: MemoryStore,
+        key: str,
+        content: str,
+        tags: List[str],
+        meta_extra: Dict[str, Any],
+        result: SyncResult,
+    ) -> None:
+        """Idempotent upsert keyed on a SHA-256 hash of the content.
+
+        - Skips when the stored content_hash matches (no change).
+        - Updates in place when the hash differs.
+        - Inserts a new Memory otherwise.
+        - Honors connector TTL via _compute_expires_at()/_ttl_seconds().
+        """
+        content_hash = hashlib.sha256(content.encode()).hexdigest()[:16]
+        expires_at = self._compute_expires_at()
+        ttl_sec = self._ttl_seconds()
+        try:
+            existing = store.get(key)
+            if existing.metadata.get("content_hash") == content_hash:
+                result.skipped += 1
+                return
+            existing.value = content
+            existing.tags = tags
+            existing.metadata["content_hash"] = content_hash
+            existing.metadata.update(meta_extra)
+            if ttl_sec:
+                existing.metadata["ttl_seconds"] = ttl_sec
+            existing.expires_at = expires_at
+            existing.updated_at = time.time()
+            store.set(existing, reset_ttl=False)
+            result.updated += 1
+        except KeyError:
+            meta = {"source": self.name, "content_hash": content_hash, **meta_extra}
+            if ttl_sec:
+                meta["ttl_seconds"] = ttl_sec
+            mem = Memory(key=key, value=content, tags=tags, metadata=meta,
+                         expires_at=expires_at)
+            store.set(mem)
+            result.added += 1
 
     def _record_sync(self, result: SyncResult) -> None:
         history = self._config.get("_sync_history", [])

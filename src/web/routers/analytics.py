@@ -10,7 +10,6 @@ from fastapi import APIRouter, HTTPException, Query
 from src.core.analytics import AnalyticsEngine
 from src.core.token_budget import TokenBudget
 from src.web.deps import (
-    _events,
     _estimate_total_tokens,
     _get_db,
     _get_memory_store,

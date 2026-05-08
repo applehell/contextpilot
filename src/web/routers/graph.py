@@ -158,8 +158,7 @@ async def detect_dependencies_endpoint():
 @router.get("/api/relations/{key:path}")
 async def get_relations(key: str):
     from src.storage.relations import RelationStore
-    from src.web.deps import _db
-    rs = RelationStore(_db)
+    rs = RelationStore(_get_db())
     return [{"id": r.id, "source_key": r.source_key, "target_key": r.target_key,
              "relation_type": r.relation_type, "created_at": r.created_at} for r in rs.get_relations(key)]
 
@@ -167,14 +166,13 @@ async def get_relations(key: str):
 @router.post("/api/relations", status_code=201)
 async def add_relation(request: Request):
     from src.storage.relations import RelationStore
-    from src.web.deps import _db
     try:
         body = await request.json()
     except json.JSONDecodeError:
         raise HTTPException(400, "Invalid JSON")
     if not body.get("source_key") or not body.get("target_key"):
         raise HTTPException(400, "source_key and target_key are required")
-    rs = RelationStore(_db)
+    rs = RelationStore(_get_db())
     try:
         r = rs.add(body["source_key"], body["target_key"], body.get("relation_type", "related"))
         _events.emit("memory", "link", f"{r.source_key} -> {r.target_key}", r.relation_type)
@@ -186,8 +184,7 @@ async def add_relation(request: Request):
 @router.delete("/api/relations/{relation_id}")
 async def remove_relation(relation_id: int):
     from src.storage.relations import RelationStore
-    from src.web.deps import _db
-    rs = RelationStore(_db)
+    rs = RelationStore(_get_db())
     try:
         rs.remove(relation_id)
         return {"status": "deleted"}

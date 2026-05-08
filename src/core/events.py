@@ -2,11 +2,10 @@
 from __future__ import annotations
 
 import asyncio
-import json
 import threading
 import time
 from collections import deque
-from dataclasses import asdict, dataclass, field
+from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional, Set
 
 

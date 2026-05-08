@@ -4,6 +4,7 @@ from __future__ import annotations
 import ipaddress
 import json
 import os
+import socket
 import stat
 import tempfile
 import urllib.parse
@@ -12,6 +13,10 @@ import urllib.error
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Dict, List, Optional
+
+from src.core.log import get_logger
+
+logger = get_logger("core.webhooks")
 
 
 _DATA_DIR = Path(os.environ.get("CONTEXTPILOT_DATA_DIR", str(Path.home() / ".contextpilot")))
@@ -104,7 +109,23 @@ class WebhookManager:
         return results
 
 
-_BLOCKED_HOSTS = {"169.254.169.254", "metadata.google.internal"}
+# Cloud-metadata endpoints that should never be reachable via webhook.
+# LAN-private ranges (192.168/16, 10/8, 172.16/12) are intentionally NOT blocked —
+# ContextPilot is designed to be used from inside private networks and webhooks
+# legitimately target services running on the same LAN.
+_BLOCKED_HOSTS = {"169.254.169.254", "metadata.google.internal", "metadata"}
+_BLOCKED_NETWORKS = (
+    ipaddress.ip_network("169.254.169.254/32"),  # AWS/GCP/Azure IMDS
+    ipaddress.ip_network("fd00:ec2::254/128"),    # AWS IMDSv6
+)
+
+
+def _is_blocked_address(addr_str: str) -> bool:
+    try:
+        addr = ipaddress.ip_address(addr_str)
+    except ValueError:
+        return False
+    return any(addr in net for net in _BLOCKED_NETWORKS)
 
 
 def _validate_url(url: str) -> None:
@@ -114,14 +135,25 @@ def _validate_url(url: str) -> None:
     host = parsed.hostname or ""
     if host in _BLOCKED_HOSTS:
         raise ValueError(f"Blocked host: {host}")
+    # If host is a literal IP, check directly.
     try:
-        addr = ipaddress.ip_address(host)
-        if addr.is_private or addr.is_loopback or addr.is_link_local:
-            raise ValueError(f"Blocked private address: {addr}")
+        ipaddress.ip_address(host)
+        if _is_blocked_address(host):
+            raise ValueError(f"Blocked metadata address: {host}")
+        return
     except ValueError as e:
         if "Blocked" in str(e):
             raise
-        # hostname, not IP — allow
+    # Hostname — resolve and ensure no resolved address is a cloud-metadata endpoint
+    # (defends against DNS rebinding to IMDS).
+    try:
+        infos = socket.getaddrinfo(host, None)
+    except socket.gaierror as e:
+        raise ValueError(f"Cannot resolve host {host!r}: {e}")
+    for *_, sockaddr in infos:
+        ip = sockaddr[0]
+        if _is_blocked_address(ip):
+            raise ValueError(f"Blocked resolved address {ip} for host {host!r}")
 
 
 def _send_waha(hook: WebhookConfig, message: str) -> None:

@@ -1,14 +1,12 @@
 """GitHub connector — track public repos, releases, READMEs, and activity."""
 from __future__ import annotations
 
-import hashlib
 import json
-import time
 import urllib.request
 import urllib.error
 from typing import Any, Dict, List, Optional
 
-from ..storage.memory import Memory, MemoryStore
+from ..storage.memory import MemoryStore
 from .base import ConfigField, ConnectorPlugin, SyncResult
 
 
@@ -205,7 +203,7 @@ class GitHubConnector(ConnectorPlugin):
 
                 content = "\n".join(lines)
                 tags = [self.name, "repo", name] + topics
-                self._upsert(store, key, content, tags, full_name, result)
+                self._upsert(store, key, content, tags, {"full_name": full_name}, result)
 
             # --- README ---
             if "readmes" in items:
@@ -215,7 +213,7 @@ class GitHubConnector(ConnectorPlugin):
                     synced_keys.add(key)
                     result.total_remote += 1
                     self._upsert(store, key, f"# {full_name}\n\n{readme}",
-                                 [self.name, "readme", name], full_name, result)
+                                 [self.name, "readme", name], {"full_name": full_name}, result)
 
             # --- Releases ---
             if "releases" in items:
@@ -253,7 +251,7 @@ class GitHubConnector(ConnectorPlugin):
 
                     content = "\n".join(lines)
                     self._upsert(store, key, content,
-                                 [self.name, "release", name, tag], full_name, result)
+                                 [self.name, "release", name, tag], {"full_name": full_name}, result)
 
             # --- Issues ---
             if "issues" in items:
@@ -282,7 +280,7 @@ class GitHubConnector(ConnectorPlugin):
                     content = "\n".join(lines)
                     tag_labels = [l.lower().replace(" ", "-") for l in labels]
                     self._upsert(store, key, content,
-                                 [self.name, "issue", name] + tag_labels, full_name, result)
+                                 [self.name, "issue", name] + tag_labels, {"full_name": full_name}, result)
 
         # --- Cleanup removed items ---
         for m in store.list():
@@ -292,30 +290,3 @@ class GitHubConnector(ConnectorPlugin):
 
         self._update_sync_stats(len(synced_keys))
         return result
-
-    def _upsert(self, store, key, content, tags, full_name, result):
-        content_hash = hashlib.sha256(content.encode()).hexdigest()[:16]
-        expires_at = self._compute_expires_at()
-        ttl_sec = self._ttl_seconds()
-        try:
-            existing = store.get(key)
-            if existing.metadata.get("content_hash") == content_hash:
-                result.skipped += 1
-                return
-            existing.value = content
-            existing.tags = tags
-            existing.metadata["content_hash"] = content_hash
-            if ttl_sec:
-                existing.metadata["ttl_seconds"] = ttl_sec
-            existing.expires_at = expires_at
-            existing.updated_at = time.time()
-            store.set(existing, reset_ttl=False)
-            result.updated += 1
-        except KeyError:
-            meta = {"source": self.name, "content_hash": content_hash, "full_name": full_name}
-            if ttl_sec:
-                meta["ttl_seconds"] = ttl_sec
-            mem = Memory(key=key, value=content, tags=tags, metadata=meta,
-                         expires_at=expires_at)
-            store.set(mem)
-            result.added += 1

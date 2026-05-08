@@ -15,22 +15,20 @@ from src.core.log import get_logger, setup_logging
 from src.core.skill_registry import SkillRegistry
 from src.storage.profiles import ProfileManager
 
-import src.web.deps as _deps
 
 logger = get_logger("web.app")
 
 from src.web.deps import (
     API_KEY,
     WEB_DIR,
-    _DATA_DIR,
     _events,
     _estimate_total_tokens,
     _get_db,
     _get_memory_store,
     _init_db,
     _trigger_background_index,
-    MAX_UPLOAD_BYTES,
 )
+# noqa: API_KEY referenced via sys.modules[__name__].API_KEY for runtime monkeypatch
 
 from src.web.routers import (
     memories,
@@ -75,7 +73,7 @@ def create_app(db_path: Optional[Path] = None) -> FastAPI:
         response.headers["Referrer-Policy"] = "same-origin"
         response.headers["Content-Security-Policy"] = (
             "default-src 'self'; "
-            "script-src 'self' 'unsafe-inline' 'unsafe-eval' https://unpkg.com https://cdn.jsdelivr.net; "
+            "script-src 'self' 'unsafe-inline' https://unpkg.com https://cdn.jsdelivr.net; "
             "style-src 'self' 'unsafe-inline' https://unpkg.com https://cdn.jsdelivr.net https://fonts.googleapis.com; "
             "img-src 'self' data:; "
             "connect-src 'self'; "
@@ -103,23 +101,6 @@ def create_app(db_path: Optional[Path] = None) -> FastAPI:
 
     _start_time = time.time()
     _request_count = {"total": 0, "errors": 0}
-
-    @app.middleware("http")
-    async def rate_limit_middleware(request: Request, call_next):
-        rl = getattr(app.state, "rate_limiter", None)
-        if rl is None or not request.url.path.startswith("/api/"):
-            return await call_next(request)
-        client_ip = request.client.host if request.client else "unknown"
-        if not rl.is_allowed(client_ip):
-            retry_after = rl.get_retry_after(client_ip)
-            return JSONResponse(
-                status_code=429,
-                content={"error": "Rate limit exceeded", "retry_after": retry_after},
-                headers={"Retry-After": str(retry_after)},
-            )
-        response = await call_next(request)
-        response.headers["X-RateLimit-Remaining"] = str(rl.remaining(client_ip))
-        return response
 
     @app.middleware("http")
     async def _count_requests(request: Request, call_next):
