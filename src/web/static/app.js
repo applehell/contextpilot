@@ -520,6 +520,10 @@ function connectSSE() {
             if (event.category !== 'api') { botBusy(); setTimeout(botIdle, 600); }
             // Increment event badge when not on dashboard
             if (event.category !== 'api') incrementEventBadge();
+            // Profile switched externally (CLI, agent, another tab) — reload active view
+            if (event.category === 'profile' && event.action === 'switch') {
+                handleExternalProfileSwitch(event.subject);
+            }
         } catch (err) { console.error('SSE parse error:', err); }
     };
 
@@ -528,6 +532,23 @@ function connectSSE() {
         if (el) el.innerHTML = '<span class="sse-dot disconnected"></span>reconnecting...';
         setBotState('error');
     };
+}
+
+let _lastProfileSwitchHandled = '';
+function handleExternalProfileSwitch(profileName) {
+    if (!profileName || profileName === _lastProfileSwitchHandled) return;
+    _lastProfileSwitchHandled = profileName;
+    const activeTab = document.querySelector('.tab.active');
+    const tabName = activeTab?.dataset.tab;
+    // Update profile selector + dashboard chip without full reload
+    if (typeof loadProfiles === 'function') loadProfiles();
+    // Reload the currently visible tab so stale data disappears
+    if (tabName === 'graph') loadGraph();
+    else if (tabName === 'memories') loadMemories();
+    else if (tabName === 'dashboard') loadDashboard();
+    else if (tabName === 'assembler' && typeof loadTemplates === 'function') loadTemplates();
+    const tid = showToast('Profile switched', 'Reloaded view for "' + profileName + '"');
+    setTimeout(() => completeToast(tid, 'Done', false), 800);
 }
 
 function appendActivityItem(event) {
@@ -1979,11 +2000,23 @@ async function fetchMemoryDetail(key) {
     const el = document.getElementById('graph-memory-content');
     try {
         const res = await fetch(memoryUrl(key));
+        if (res.status === 404) {
+            el.innerHTML = `<div style="color:var(--danger);font-size:11px;">
+                Memory not found in active profile. The graph may be out of date
+                (profile likely switched in another tab or by an agent).
+                <button class="btn btn-small" style="margin-top:6px;" onclick="loadGraph()">Reload graph</button>
+            </div>`;
+            return;
+        }
+        if (!res.ok) {
+            el.innerHTML = `<span style="color:var(--danger);font-size:11px;">HTTP ${res.status} — ${escapeHtml(res.statusText || 'request failed')}</span>`;
+            return;
+        }
         const m = await res.json();
         const preview = m.value.length > 500 ? m.value.substring(0, 500) + '...' : m.value;
         el.innerHTML = `<pre style="white-space:pre-wrap;font-size:11px;max-height:200px;overflow-y:auto;background:var(--surface-alt);padding:8px;border-radius:6px;">${escapeHtml(preview)}</pre>`;
     } catch (e) {
-        el.innerHTML = '<span style="color:var(--danger);">Error</span>';
+        el.innerHTML = `<span style="color:var(--danger);font-size:11px;">Network error: ${escapeHtml(e.message || String(e))}</span>`;
     }
 }
 

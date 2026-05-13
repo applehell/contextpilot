@@ -1,5 +1,23 @@
 # Changelog
 
+## v4.3.1 — 2026-05-13
+
+Knowledge-Graph UX fix: stale-profile detection and richer error reporting.
+
+### Fixed
+- **Knowledge graph stale after external profile switch** — when an agent or
+  CLI switches the active profile, open browser tabs kept showing the old
+  graph; clicking a node then 404'd with a generic "Error". The web UI now
+  listens for the existing `profile/switch` SSE event and auto-reloads the
+  visible tab (graph/memories/dashboard/assembler) plus the profile selector.
+- **Generic "Error" in `fetchMemoryDetail`** — replaced with explicit
+  messages: 404 → "Memory not found in active profile" with a
+  Reload-Graph button; other HTTP / network failures surface status text or
+  the exception message instead of silently swallowing.
+
+### Misc
+- Cache-buster bump: `app.js?v=43` → `?v=44`.
+
 ## v4.3.0 — 2026-05-08
 
 Multi-expert review pass: security, code quality, architecture, and dead-code cleanup.
