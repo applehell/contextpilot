@@ -58,7 +58,7 @@ services:
     restart: unless-stopped
     ports:
       - "8080:8080"   # Web UI
-      - "8400:8400"   # MCP SSE Server
+      - "8400:8400"   # MCP streamable-http server
     volumes:
       - context-pilot-data:/data
       - /path/to/docs:/mnt/docs:ro    # optional: folder for indexing
@@ -224,7 +224,7 @@ Context Pilot includes a built-in MCP Server (Model Context Protocol) that lets 
 ### 20 MCP Tools
 
 ```
-Claude Code --> MCP Server (SSE, Port 8400)
+Claude Code --> MCP Server (streamable-http, Port 8400)
                    |
                    |-- Memory CRUD
                    |     memory_set / memory_get / memory_delete
@@ -302,7 +302,7 @@ git clone https://github.com/applehell/context-pilot-plugin.git \
 ```bash
 # Shell config (~/.claude/context-pilot.conf)
 CONTEXTPILOT_URL=http://your-server:8080
-CONTEXTPILOT_MCP_URL=http://your-server:8400/sse
+CONTEXTPILOT_MCP_URL=http://your-server:8400/mcp/
 ```
 
 ---
@@ -346,7 +346,7 @@ Browser --> Web UI (FastAPI, Port 8080)
                |-- Assembler        Templates, Auto-Suggest, Compression, Export
                |-- Settings         Profiles, MCP, DB, Import/Export, Scheduler
 
-Claude Code --> MCP Server (SSE, Port 8400)
+Claude Code --> MCP Server (streamable-http, Port 8400)
                    |-- 20 tools: memory CRUD, search, templates, assembly,
                    |   skill registry, feedback, context-for-task, learnings
                    |
@@ -557,6 +557,7 @@ src/
     duplicates.py              Duplicate / near-duplicate finder
     embeddings.py              TF-IDF embeddings + hybrid search
     events.py                  Global EventBus with SSE broadcast
+    log.py                      Logging setup + logger factory
     relevance.py               Relevance scoring engine
     scheduler.py               Auto-sync scheduler (APScheduler)
     secrets.py                 Secrets detector (OWASP patterns)
@@ -588,12 +589,26 @@ src/
     settings.py                Key-value settings store
     project.py                 Project context store
   web/                         Web app (FastAPI + vanilla JS)
-    app.py                     API endpoints (~27k lines)
+    app.py                     App factory: logging, static mounts, router wiring
+    deps.py                    Shared dependencies (stores, profile dir, index state)
+    __main__.py                Entry point (web + MCP process launcher)
+    routers/                   API endpoints, grouped by domain
+      memories.py              Memory CRUD, search, tags, bulk ops, trash
+      connectors.py            Connector store, test/sync/health
+      profiles.py              Profile lifecycle, switch, export/import
+      assembly.py              Templates, assemble, compress, duplicates, export
+      analytics.py             Analytics, backups, maintenance
+      system.py                Health, dashboard, MCP register, scheduler
+      events.py                Events + SSE stream
+      folders.py               Folder sources + scan
+      graph.py                 Knowledge graph data
+      import_routes.py         CLAUDE.md / Copilot.md / SQLite / JSON import
+      projects.py              Project context
     templates/index.html       Single-page frontend
-    static/app.js              Frontend logic (~4.6k lines)
-    static/style.css           Themes (light + dark, ~2.7k lines)
+    static/app.js              Frontend logic
+    static/style.css           Themes (light + dark)
   interfaces/                  External interfaces
-    mcp_server.py              MCP Server (20 tools, SSE transport)
+    mcp_server.py              MCP Server (20 tools, streamable-http transport)
     cli.py                     Click CLI
   importers/                   Memory import
     claude.py                  CLAUDE.md parser

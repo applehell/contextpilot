@@ -13,7 +13,7 @@ docker run -d --name context-pilot \
 ```
 
 Web UI: `http://localhost:8080`
-MCP SSE: `http://localhost:8400/sse`
+MCP (streamable-http): `http://localhost:8400/mcp/`
 
 ## Docker Compose
 
@@ -25,7 +25,7 @@ services:
     restart: unless-stopped
     ports:
       - "8080:8080"   # Web UI
-      - "8400:8400"   # MCP SSE Server
+      - "8400:8400"   # MCP streamable-http server
     volumes:
       - context-pilot-data:/data
       - /path/to/docs:/mnt/docs:ro    # optional: folder for indexing
@@ -85,7 +85,7 @@ To deploy on a NAS or remote server:
 | Port | Service | Description |
 |------|---------|-------------|
 | 8080 | Web UI | Dashboard, memories, graph, assembler |
-| 8400 | MCP SSE | Model Context Protocol server for Claude |
+| 8400 | MCP (streamable-http) | Model Context Protocol server for Claude |
 
 ## Volumes
 
@@ -129,8 +129,8 @@ After starting the container, register the MCP server in Claude's config:
 {
   "mcpServers": {
     "context-pilot": {
-      "type": "sse",
-      "url": "http://localhost:8400/sse"
+      "type": "http",
+      "url": "http://localhost:8400/mcp/"
     }
   }
 }
