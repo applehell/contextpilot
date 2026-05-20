@@ -99,11 +99,11 @@ Claude Code now has full access to your knowledge base.
 | Feature | Description |
 |---|---|
 | **Memories** | Create, search (FTS5), tag, pin, TTL, bulk operations |
-| **50+ Connectors** | GitHub, Gitea, Paperless-ngx, Email (IMAP), local folders |
+| **17 Connectors** | GitHub, Gitea, Paperless-ngx, Email (IMAP), local folders |
 | **Plugin Architecture** | Every connector is a Python module — write your own in minutes |
 | **MCP Server** | Built-in Model Context Protocol server (streamable-http, port 8400) |
 | **Knowledge Graph** | Interactive network visualization of memory relationships |
-| **Smart Assembler** | Token-budget assembly with 7 compressors |
+| **Smart Assembler** | Token-budget assembly with 6 compressors |
 | **Secrets Scanner** | Detects API keys, passwords, tokens (OWASP patterns) |
 | **Profiles** | Fully isolated workspaces per project/client |
 | **Import** | CLAUDE.md, Copilot instructions, SQLite databases |
@@ -116,7 +116,7 @@ Claude Code now has full access to your knowledge base.
 | Tag | Description |
 |---|---|
 | `latest` | Latest stable release |
-| `4.3.0` | Current version |
+| `4.3.1` | Current version |
 
 ## Volumes
 
