@@ -8,6 +8,7 @@ from fastapi import APIRouter, HTTPException, Query, Request
 
 from src.core.block import Block, Priority
 from src.core.compress_detect import detect_compress_hint as _detect_compress_hint
+from src.core.embeddings import hybrid_search
 from src.core.token_budget import TokenBudget
 from src.storage.templates import TemplateStore, ContextTemplate
 from src.storage.usage import UsageRecord, block_hash
@@ -70,6 +71,58 @@ async def assemble(req: AssembleRequest):
         "blocks": [_block_to_dict(b) for b in result.blocks],
         "dropped_count": len(result.dropped_blocks),
         "dropped": [_block_to_dict(b) for b in result.dropped_blocks],
+    }
+
+
+@router.post("/api/context-for-task")
+async def context_for_task(request: Request):
+    body = await request.json()
+    task = (body.get("task_description") or body.get("task") or "").strip()
+    budget = body.get("budget", 4000)
+    include_tags = body.get("tags") or []
+    empty = {"blocks": [], "used_tokens": 0, "memories_considered": 0, "memories_included": 0}
+    if not task:
+        return empty
+    if not isinstance(budget, (int, float)) or budget <= 0 or budget > 128000:
+        raise HTTPException(400, "budget must be > 0 and <= 128000")
+
+    store = _get_memory_store()
+    results = hybrid_search(task, store, top_k=30)
+    if include_tags:
+        tag_set = set(include_tags)
+        results = [r for r in results if tag_set.issubset(set(r.get("tags", [])))]
+    if not results:
+        return empty
+
+    blocks = []
+    for i, r in enumerate(results):
+        prio = Priority.HIGH if i < 5 else Priority.MEDIUM if i < 15 else Priority.LOW
+        b = Block(content=f"[{r['key']}] {r['value']}", priority=prio)
+        b.source_key = r["key"]
+        blocks.append(b)
+
+    assembler = _make_assembler()
+    result = assembler.assemble_tracked(blocks, int(budget))
+
+    _get_usage_store().record_usage([
+        UsageRecord(
+            block_hash=block_hash(b.content),
+            project_name=None, context_name=None, skill_name=None, model_id=None,
+            included=True, token_count=b.token_count,
+        )
+        for b in result.blocks
+    ])
+
+    return {
+        "assembly_id": result.assembly_id,
+        "budget": result.budget,
+        "used_tokens": result.used_tokens,
+        "memories_considered": len(results),
+        "memories_included": len(result.blocks),
+        "blocks": [
+            {"key": getattr(b, "source_key", "") or "", **_block_to_dict(b)}
+            for b in result.blocks
+        ],
     }
 
 
