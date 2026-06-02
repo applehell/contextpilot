@@ -371,16 +371,7 @@ def memory_set(key: str, value: str, tags: Optional[List[str]] = None, category:
     if not key or not key.strip():
         return {"error": "Memory key must not be empty."}
     store = _get_memory_store()
-    is_update = False
-    try:
-        store.get(key)
-        is_update = True
-    except KeyError:
-        pass
     store.set(Memory(key=key, value=value, tags=tags or [], category=category))
-    op = "updated" if is_update else "created"
-    tag_info = f" tags=[{', '.join(tags)}]" if tags else ""
-    _get_activity_log().record(op, key, f"{len(value)} chars{tag_info}")
     return {"status": "saved", "key": key}
 
 
@@ -394,7 +385,6 @@ def memory_delete(key: str) -> Dict[str, Any]:
     store = _get_memory_store()
     try:
         store.delete(key)
-        _get_activity_log().record("deleted", key)
         return {"status": "deleted", "key": key}
     except KeyError:
         return {"error": f"Memory '{key}' not found."}

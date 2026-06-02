@@ -9,6 +9,7 @@ from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional, Set
 
 from .db import Database
+from .memory_activity import MemoryActivityLog
 
 
 @dataclass
@@ -109,6 +110,7 @@ class MemoryStore:
 
     def __init__(self, db: Database) -> None:
         self._db = db
+        self._activity = MemoryActivityLog(db)
 
     def list(self, limit: int = 0, offset: int = 0, source: str = "",
              sort: str = "key", order: str = "asc", category: Optional[str] = None) -> List[Memory]:
@@ -223,6 +225,11 @@ class MemoryStore:
                  1 if memory.pinned else 0, memory.expires_at, memory.category),
             )
         self._db.conn.commit()
+        self._activity.record(
+            "updated" if existing else "created",
+            memory.key,
+            f"{len(memory.value)} chars",
+        )
 
     def delete(self, key: str, soft: bool = True) -> None:
         row = self._db.conn.execute(
@@ -240,6 +247,7 @@ class MemoryStore:
                 pass  # trash table may not exist yet
         self._db.conn.execute("DELETE FROM memories WHERE key = ?", (key,))
         self._db.conn.commit()
+        self._activity.record("deleted", key)
 
     def pin(self, key: str, pinned: bool = True) -> None:
         self._db.conn.execute("UPDATE memories SET pinned = ? WHERE key = ?", (1 if pinned else 0, key))
