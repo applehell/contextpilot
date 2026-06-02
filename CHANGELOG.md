@@ -1,5 +1,36 @@
 # Changelog
 
+## v4.4.0 — 2026-06-02
+
+Memory telemetry, HTTP context assembly, and sparse embedding storage —
+driven by analysis of the productive Diana/Kalle agent profiles.
+
+### Added
+- **`POST /api/context-for-task`** — exposes the hybrid-search + token-budget
+  assembly (previously MCP-only via `get_context_for_task`) over HTTP, so HTTP
+  clients and agent wrappers can fetch one budgeted, ranked context block
+  instead of issuing many raw recall/search calls. Feeds block-usage telemetry.
+
+### Fixed
+- **Memory activity log empty for agents** — `created`/`updated`/`deleted`
+  logging moved into `MemoryStore.set()`/`delete()` so every write path (MCP,
+  Web API, `capture_learnings`, bulk) records consistently. Previously only the
+  MCP `memory_set`/`memory_delete` tools logged, leaving the activity log (and
+  thus dashboard counts and relevance weighting) blind for agents writing via
+  other paths. Reads stay logged in the MCP layer to avoid Web-UI polling noise.
+
+### Performance
+- **Sparse TF-IDF embedding storage** — `vectorize()` now produces a sparse
+  `{term: weight}` map and only non-zero terms are persisted, replacing a dense
+  float array over the full vocabulary (~408 KB/vector at 51k vocab, 717 MB for
+  the default profile). ~100x smaller and removes the O(n²) blow-up as a profile
+  grows. Pack/unpack/cosine are polymorphic (sparse vs dense) so the transformer
+  backend and legacy blobs keep working; a `tfidf-sparse` storage tag marks old
+  dense rows stale for automatic re-index. Search ranking is unchanged.
+  - **Deploy note:** after upgrading, re-index each profile
+    (`POST /api/embeddings/index`) then `POST /api/maintenance/vacuum` to
+    reclaim disk — `INSERT OR REPLACE` does not shrink the file on its own.
+
 ## v4.3.1 — 2026-05-13
 
 Knowledge-Graph UX fix: stale-profile detection and richer error reporting.
