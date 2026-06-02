@@ -136,12 +136,20 @@ class EmbeddingStore:
 
     def get(self, key: str) -> Optional[List[float]]:
         with self._db_lock:
-            row = self._conn.execute("SELECT vector FROM embeddings WHERE key = ?", (key,)).fetchone()
+            row = self._conn.execute(
+                "SELECT vector FROM embeddings WHERE key = ? AND backend = ?",
+                (key, _storage_tag()),
+            ).fetchone()
         return _unpack_vector(row[0]) if row else None
 
     def all_vectors(self) -> List[Tuple[str, List[float]]]:
+        # Filter by storage tag so legacy dense rows (a different format) are
+        # never unpacked — they are stale and get re-indexed on the next pass.
         with self._db_lock:
-            rows = self._conn.execute("SELECT key, vector FROM embeddings").fetchall()
+            rows = self._conn.execute(
+                "SELECT key, vector FROM embeddings WHERE backend = ?",
+                (_storage_tag(),),
+            ).fetchall()
         return [(r[0], _unpack_vector(r[1])) for r in rows]
 
     def remove(self, key: str) -> None:

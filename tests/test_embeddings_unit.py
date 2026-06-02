@@ -125,6 +125,32 @@ class TestEmbeddingStore:
         emb_store.remove("key1")
         assert emb_store.get("key1") is None
 
+    def test_legacy_dense_rows_skipped_not_unpacked(self, emb_store):
+        # Legacy dense blobs (backend="tfidf", no format prefix) can start with
+        # any byte, including 0x44 ('D') / 0x53 ('S') which the sparse format
+        # uses as prefixes. They must be filtered by storage tag, never unpacked.
+        import struct, time
+
+        def _float_first_byte(target):
+            for i in range(100000):
+                f = i * 0.0001
+                if struct.pack("f", f)[0] == target:
+                    return f
+            raise AssertionError("no float found")
+
+        for key, lead in (("legacy/d", 0x44), ("legacy/s", 0x53)):
+            blob = struct.pack("100f", _float_first_byte(lead), *([0.1] * 99))
+            emb_store._conn.execute(
+                "INSERT INTO embeddings (key, content_hash, vector, backend, updated_at)"
+                " VALUES (?, ?, ?, ?, ?)",
+                (key, "h", blob, "tfidf", time.time()),
+            )
+        emb_store._conn.commit()
+
+        assert emb_store.all_vectors() == []        # no struct.error, legacy skipped
+        assert emb_store.get("legacy/d") is None
+        assert emb_store.get("legacy/s") is None
+
     def test_search_similar(self, emb_store):
         emb_store.store("doc_python", "h1", [0.9, 0.1, 0.0])
         emb_store.store("doc_java", "h2", [0.7, 0.3, 0.0])

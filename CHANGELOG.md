@@ -1,5 +1,18 @@
 # Changelog
 
+## v4.4.1 — 2026-06-02
+
+Hotfix for the sparse-embedding migration introduced in 4.4.0.
+
+### Fixed
+- **`struct.error` / HTTP 500 on semantic & hybrid search over un-migrated
+  profiles** — the sparse format detects dense-vs-sparse blobs by a leading
+  `S`/`D` byte, but legacy dense TF-IDF vectors (written before 4.4.0, no
+  prefix) can start with those same bytes and were mis-parsed, crashing
+  `semantic_search` and `POST /api/context-for-task`. `EmbeddingStore.get()`
+  and `all_vectors()` now filter by the storage tag, so legacy dense rows are
+  skipped (and re-indexed on the next pass) instead of being unpacked.
+
 ## v4.4.0 — 2026-06-02
 
 Memory telemetry, HTTP context assembly, and sparse embedding storage —
