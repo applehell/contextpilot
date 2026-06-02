@@ -368,13 +368,41 @@ Storage --> SQLite (WAL mode + FTS5, Schema v13)
 # Local
 ~/.contextpilot/
   profiles.json                <- Profile registry
-  profiles/<name>/data.db      <- Per-profile database + configs
+  data.db                      <- Default-profile database
+  embeddings.db                <- Embedding vector cache (regenerable)
+  profiles/<id>/data.db        <- Per-profile database + configs
+  profiles/<id>/embeddings.db  <- Per-profile embedding cache
 
 # Docker (CONTEXTPILOT_DATA_DIR=/data)
 /data/
   profiles.json
-  profiles/<name>/data.db
+  data.db
+  embeddings.db
+  profiles/<id>/data.db
+  profiles/<id>/embeddings.db
 ```
+
+> **Note:** `data.db` holds the actual knowledge (memories, FTS5 index, templates,
+> skills) and is the source of truth. `embeddings.db` is a content-hash-addressed
+> vector cache for semantic search — large but fully regenerable.
+
+### Backup & Recovery
+
+Each `data.db` carries an open WAL, so a plain `cp` is **not** consistent. Take a
+hot snapshot via the SQLite online-backup API instead:
+
+```python
+import sqlite3
+src = sqlite3.connect("file:/data/data.db?mode=ro", uri=True)
+dst = sqlite3.connect("/backup/data.db")
+with dst:
+    src.backup(dst)   # WAL-consistent snapshot, safe while the container runs
+```
+
+For a full backup, snapshot **every** `*.db` under the data dir (default +
+`profiles/<id>/`) and copy the JSON configs (`profiles.json`, per-profile
+`connector_*`/`folders`/`webhooks`). Restore by untarring into a fresh data dir —
+the directory layout mirrors the live one 1:1; migrations run on next startup.
 
 ---
 
