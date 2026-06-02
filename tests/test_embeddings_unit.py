@@ -36,9 +36,9 @@ class TestTFIDFEngine:
         vec = engine.vectorize("python programming")
 
         assert len(vec) > 0
-        assert any(v != 0.0 for v in vec)
+        assert any(v != 0.0 for v in vec.values())
         # normalized vector should have unit length (approximately)
-        norm = math.sqrt(sum(v * v for v in vec))
+        norm = math.sqrt(sum(v * v for v in vec.values()))
         assert abs(norm - 1.0) < 0.01 or norm == 0.0
 
     def test_cosine_sim_identical(self):

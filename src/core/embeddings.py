@@ -6,6 +6,7 @@ TF-IDF (pure Python, no dependencies) for lightweight deployments.
 from __future__ import annotations
 
 import hashlib
+import json
 import math
 import os
 import re
@@ -33,6 +34,12 @@ def get_backend() -> str:
     return _backend
 
 
+def _storage_tag() -> str:
+    # Distinguishes the on-disk vector format so old dense TF-IDF rows are
+    # treated as stale and re-indexed into the compact sparse format.
+    return "tfidf-sparse" if _backend == "tfidf" else _backend
+
+
 def _get_model():
     global _model
     if _model is None and _backend == "transformer":
@@ -45,16 +52,40 @@ def _get_model():
 # Vector storage in SQLite
 # ═══════════════════════════════════════════════════════════════
 
-def _pack_vector(vec: List[float]) -> bytes:
-    return struct.pack(f'{len(vec)}f', *vec)
+def _pack_vector(vec) -> bytes:
+    # Sparse TF-IDF vectors are dicts {term: weight}; dense (transformer)
+    # vectors are lists of floats. Sparse storage keeps only non-zero terms,
+    # avoiding O(vocab) blobs that grow quadratically with the corpus.
+    if isinstance(vec, dict):
+        return b"S" + json.dumps(vec, separators=(",", ":")).encode()
+    return b"D" + struct.pack(f'{len(vec)}f', *vec)
 
 
-def _unpack_vector(data: bytes) -> List[float]:
+def _unpack_vector(data: bytes):
+    prefix = data[:1]
+    if prefix == b"S":
+        return json.loads(data[1:].decode())
+    if prefix == b"D":
+        body = data[1:]
+        n = len(body) // 4
+        return list(struct.unpack(f'{n}f', body))
+    # Legacy dense blob (pre-sparse format, no prefix)
     n = len(data) // 4
     return list(struct.unpack(f'{n}f', data))
 
 
-def _cosine_sim(a: List[float], b: List[float]) -> float:
+def _cosine_sim(a, b) -> float:
+    a_sparse, b_sparse = isinstance(a, dict), isinstance(b, dict)
+    if a_sparse or b_sparse:
+        if not (a_sparse and b_sparse):
+            return 0.0  # format mismatch (e.g. legacy dense vs sparse)
+        norm_a = math.sqrt(sum(v * v for v in a.values()))
+        norm_b = math.sqrt(sum(v * v for v in b.values()))
+        if norm_a == 0 or norm_b == 0:
+            return 0.0
+        small, large = (a, b) if len(a) <= len(b) else (b, a)
+        dot = sum(v * large.get(k, 0.0) for k, v in small.items())
+        return dot / (norm_a * norm_b)
     if len(a) != len(b):
         return 0.0
     dot = sum(x * y for x, y in zip(a, b))
@@ -92,14 +123,14 @@ class EmbeddingStore:
             row = self._conn.execute(
                 "SELECT content_hash, backend FROM embeddings WHERE key = ?", (key,)
             ).fetchone()
-        return row is not None and row[0] == content_hash and row[1] == _backend
+        return row is not None and row[0] == content_hash and row[1] == _storage_tag()
 
-    def store(self, key: str, content_hash: str, vector: List[float]) -> None:
+    def store(self, key: str, content_hash: str, vector) -> None:
         import time
         with self._db_lock:
             self._conn.execute(
                 "INSERT OR REPLACE INTO embeddings (key, content_hash, vector, backend, updated_at) VALUES (?, ?, ?, ?, ?)",
-                (key, content_hash, _pack_vector(vector), _backend, time.time()),
+                (key, content_hash, _pack_vector(vector), _storage_tag(), time.time()),
             )
             self._conn.commit()
 
@@ -179,22 +210,23 @@ class TFIDFEngine:
                 df[w] += 1
         self._idf = {w: math.log((self._doc_count + 1) / (count + 1)) + 1 for w, count in df.items()}
 
-    def vectorize(self, text: str) -> List[float]:
+    def vectorize(self, text: str) -> Dict[str, float]:
         words = _tokenize(text)
         if not words:
-            return [0.0] * max(len(self._idf), 1)
+            return {}
 
         tf = Counter(words)
-        vocab = sorted(self._idf.keys())
-        vec = []
-        for w in vocab:
-            tfidf = (tf.get(w, 0) / len(words)) * self._idf.get(w, 0)
-            vec.append(tfidf)
+        n = len(words)
+        vec = {}
+        for w, count in tf.items():
+            idf = self._idf.get(w, 0.0)
+            if idf:
+                vec[w] = (count / n) * idf
 
         # Normalize
-        norm = math.sqrt(sum(v * v for v in vec))
+        norm = math.sqrt(sum(v * v for v in vec.values()))
         if norm > 0:
-            vec = [v / norm for v in vec]
+            vec = {w: v / norm for w, v in vec.items()}
         return vec
 
 
