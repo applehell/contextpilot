@@ -4,7 +4,7 @@ from __future__ import annotations
 import asyncio
 import json
 import time
-from typing import Dict, List
+from typing import Any, Dict, List
 
 from fastapi import APIRouter, HTTPException, Query, Request
 
@@ -20,7 +20,7 @@ from src.web.deps import (
     _get_db,
     _get_memory_store,
     _get_usage_store,
-    _index_single,
+    _index_or_bootstrap,
     _remove_from_index,
     _secret_detector,
     FeedbackIn,
@@ -164,14 +164,14 @@ async def get_memory(key: str):
 async def set_memory(req: MemoryIn):
     store = _get_memory_store()
     expires_at = None
-    metadata: Dict[str, any] = {}
+    metadata: Dict[str, Any] = {}
     if req.ttl_seconds and req.ttl_seconds > 0:
         expires_at = time.time() + req.ttl_seconds
         metadata["ttl_seconds"] = req.ttl_seconds
     m = Memory(key=req.key, value=req.value, tags=req.tags,
                metadata=metadata, expires_at=expires_at, category=req.category)
     store.set(m)
-    _index_single(m)
+    _index_or_bootstrap(m)
     _events.emit("memory", "create", req.key, f"tags={req.tags}")
     return {"status": "saved", "key": req.key}
 
@@ -199,7 +199,7 @@ async def update_memory(key: str, req: MemoryIn):
     m = Memory(key=key, value=req.value, tags=req.tags,
                metadata=metadata, expires_at=expires_at)
     store.set(m, reset_ttl=False)
-    _index_single(m)
+    _index_or_bootstrap(m)
     _events.emit("memory", "update", key)
     return {"status": "updated", "key": key}
 
@@ -271,8 +271,8 @@ async def suggest_tags(request: Request):
     except json.JSONDecodeError:
         raise HTTPException(400, "Invalid JSON")
     text = f"{body.get('key', '')} {body.get('value', '')}"
-    from src.core.embeddings import _tokenize
-    words = _tokenize(text)
+    from src.core.embeddings import tokenize
+    words = tokenize(text)
     if not words:
         return {"tags": []}
     store = _get_memory_store()
@@ -281,7 +281,7 @@ async def suggest_tags(request: Request):
     for m in store.list(limit=200, sort="updated", order="desc"):
         for tag in m.tags:
             all_tags.add(tag)
-            tag_words = set(_tokenize(f"{m.key} {m.value}"))
+            tag_words = set(tokenize(f"{m.key} {m.value}"))
             overlap = len(set(words) & tag_words)
             if overlap > 0:
                 tag_scores[tag] = tag_scores.get(tag, 0) + overlap

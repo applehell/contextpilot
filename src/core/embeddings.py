@@ -196,10 +196,13 @@ _STOP_WORDS = {
 }
 
 
-def _tokenize(text: str) -> List[str]:
+def tokenize(text: str) -> List[str]:
     text = text.lower()
     words = re.findall(r'[a-z0-9äöü]+', text)
     return [w for w in words if w not in _STOP_WORDS and len(w) > 1]
+
+
+_tokenize = tokenize  # backward-compat alias
 
 
 class TFIDFEngine:
@@ -325,7 +328,7 @@ def index_memories(memories: list, profile_dir: Optional[Path] = None) -> Dict[s
     skipped = 0
 
     if _backend == "tfidf":
-        _get_tfidf().build_idf([f"{m.key} {m.value}" for m in memories])
+        _get_tfidf().build_idf([f"{m.key} {' '.join(m.tags)} {m.value}" for m in memories])
 
     for m in memories:
         # Check for profile switch mid-loop
@@ -351,15 +354,23 @@ def index_memories(memories: list, profile_dir: Optional[Path] = None) -> Dict[s
     return {"indexed": indexed, "skipped": skipped, "total": len(memories), "backend": _backend}
 
 
-def index_single_memory(memory) -> None:
-    """Index or re-index a single memory (after create/update)."""
+def index_single_memory(memory) -> bool:
+    """Index or re-index a single memory (after create/update).
+
+    Returns False if the TF-IDF engine has no corpus yet (cold start, e.g. just
+    after process restart). A single document can't bootstrap meaningful IDF, so
+    the caller should trigger a full reindex instead.
+    """
+    if _backend == "tfidf" and _get_tfidf()._doc_count == 0:
+        return False
     store = _get_store()
     text = f"{memory.key} {' '.join(memory.tags)} {memory.value}"
     content_hash = hashlib.sha256(text.encode()).hexdigest()[:16]
     if store.has(memory.key, content_hash):
-        return
+        return True
     vec = embed_text(text)
     store.store(memory.key, content_hash, vec)
+    return True
 
 
 def remove_from_index(key: str) -> None:

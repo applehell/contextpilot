@@ -12,6 +12,9 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 from ..storage.memory import Memory, MemoryStore
+from ..core.log import get_logger
+
+logger = get_logger("connectors.base")
 
 _DATA_DIR = Path(os.environ.get("CONTEXTPILOT_DATA_DIR", str(Path.home() / ".contextpilot")))
 
@@ -76,15 +79,24 @@ class ConnectorPlugin(ABC):
 
     def _load(self) -> Dict[str, Any]:
         if self._config_path.exists():
-            return json.loads(self._config_path.read_text())
+            try:
+                return json.loads(self._config_path.read_text())
+            except (json.JSONDecodeError, OSError):
+                logger.warning("Connector config %s corrupt — ignoring", self._config_path.name)
         return {}
 
     def _save(self) -> None:
-        self._config_path.write_text(json.dumps(self._config, indent=2))
+        tmp = self._config_path.with_suffix(self._config_path.suffix + ".tmp")
+        tmp.write_text(json.dumps(self._config, indent=2))
         try:
-            self._config_path.chmod(stat.S_IRUSR | stat.S_IWUSR)
+            tmp.chmod(stat.S_IRUSR | stat.S_IWUSR)
         except OSError:
             pass  # Docker volumes may not support chmod
+        try:
+            tmp.replace(self._config_path)
+        except OSError:
+            tmp.unlink(missing_ok=True)
+            raise
 
     @property
     def configured(self) -> bool:

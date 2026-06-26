@@ -1,14 +1,13 @@
 """Paperless-ngx connector plugin."""
 from __future__ import annotations
 
-import hashlib
 import json
 import time
 import urllib.request
 import urllib.error
 from typing import Any, Dict, List, Optional
 
-from ..storage.memory import Memory, MemoryStore
+from ..storage.memory import MemoryStore
 from .base import ConfigField, ConnectorPlugin, SyncResult
 
 
@@ -160,7 +159,6 @@ class PaperlessConnector(ConnectorPlugin):
             header.append("")
 
             full_content = "\n".join(header) + content
-            content_hash = hashlib.sha256(full_content.encode()).hexdigest()[:16]
 
             doc_tags = [self.name]
             for tid in doc.get("tags", []):
@@ -169,42 +167,20 @@ class PaperlessConnector(ConnectorPlugin):
             if corr_name: doc_tags.append(corr_name.lower())
             if type_name: doc_tags.append(type_name.lower())
 
-            try:
-                existing = store.get(key)
-                if existing.metadata.get("content_hash") == content_hash:
-                    result.skipped += 1
-                    continue
-                existing.value = full_content
-                existing.tags = doc_tags
-                existing.metadata["content_hash"] = content_hash
-                existing.metadata["title"] = title
-                existing.metadata["paperless_id"] = doc_id
-                existing.metadata["correspondent"] = corr_name
-                existing.metadata["document_type"] = type_name
-                existing.metadata["created_date"] = created
-                existing.metadata["original_file"] = original
-                existing.updated_at = time.time()
-                store.set(existing)
-                result.updated += 1
-            except KeyError:
-                mem = Memory(
-                    key=key,
-                    value=full_content,
-                    tags=doc_tags,
-                    metadata={
-                        "source": self.name,
-                        "content_hash": content_hash,
-                        "paperless_id": doc_id,
-                        "title": title,
-                        "correspondent": corr_name,
-                        "document_type": type_name,
-                        "created_date": created,
-                        "original_file": original,
-                        "paperless_url": f"{self._config['url']}/documents/{doc_id}",
-                    },
-                )
-                store.set(mem)
-                result.added += 1
+            self._upsert(
+                store, key, full_content,
+                tags=doc_tags,
+                meta_extra={
+                    "paperless_id": doc_id,
+                    "title": title,
+                    "correspondent": corr_name,
+                    "document_type": type_name,
+                    "created_date": created,
+                    "original_file": original,
+                    "paperless_url": f"{self._config['url']}/documents/{doc_id}",
+                },
+                result=result,
+            )
 
         for m in store.list():
             if m.key.startswith(prefix) and m.key not in synced_keys:

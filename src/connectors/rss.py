@@ -14,7 +14,7 @@ try:
 except ImportError:
     SafeET = None
 
-from ..storage.memory import Memory, MemoryStore
+from ..storage.memory import MemoryStore
 from .base import ConfigField, ConnectorPlugin, SyncResult
 
 
@@ -204,7 +204,6 @@ class RSSConnector(ConnectorPlugin):
         result = SyncResult()
         prefix = f"{self.name}/"
         synced_keys = set()
-        expires_at = self._compute_expires_at()
 
         for feed_url in urls:
             try:
@@ -243,41 +242,20 @@ class RSSConnector(ConnectorPlugin):
                 content = "\n".join(parts)
                 if len(content) > 100000:
                     content = content[:100000] + "\n\n[truncated]"
-                content_hash = hashlib.sha256(content.encode()).hexdigest()[:16]
 
-                try:
-                    existing = store.get(key)
-                    if existing.metadata.get("content_hash") == content_hash:
-                        result.skipped += 1
-                        continue
-                    existing.value = content
-                    existing.metadata["content_hash"] = content_hash
-                    existing.metadata["title"] = title
-                    existing.metadata["fetched_at"] = time.time()
-                    existing.updated_at = time.time()
-                    if expires_at:
-                        existing.expires_at = expires_at
-                    store.set(existing)
-                    result.updated += 1
-                except KeyError:
-                    mem = Memory(
-                        key=key, value=content,
-                        tags=["rss", feed_title],
-                        metadata={
-                            "source": self.name,
-                            "content_hash": content_hash,
-                            "feed_url": feed_url,
-                            "feed_title": feed_title,
-                            "title": title,
-                            "link": link,
-                            "pub_date": pub_date,
-                            "fetched_at": time.time(),
-                        },
-                    )
-                    if expires_at:
-                        mem.expires_at = expires_at
-                    store.set(mem)
-                    result.added += 1
+                self._upsert(
+                    store, key, content,
+                    tags=["rss", feed_title],
+                    meta_extra={
+                        "feed_url": feed_url,
+                        "feed_title": feed_title,
+                        "title": title,
+                        "link": link,
+                        "pub_date": pub_date,
+                        "fetched_at": time.time(),
+                    },
+                    result=result,
+                )
 
         for m in store.list():
             if m.key.startswith(prefix) and m.key not in synced_keys:

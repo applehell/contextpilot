@@ -1,6 +1,8 @@
 """Profile endpoints: list, create, switch, rename, duplicate, delete, import, export."""
 from __future__ import annotations
 
+import asyncio
+
 from fastapi import APIRouter, File, HTTPException, Query, Response, UploadFile
 
 from src.core.log import get_logger
@@ -79,7 +81,7 @@ async def switch_profile(pid: str):
     pm = ProfileManager()
     try:
         new_path = pm.switch(pid)
-        _init_db(new_path)
+        await asyncio.to_thread(_init_db, new_path)
         _reload_profile_deps()
         logger.info("Switched to profile '%s'", pm.active_name)
         _events.emit("profile", "switch", pm.active_name)
@@ -116,7 +118,7 @@ async def delete_profile(pid: str):
         pm.delete(pid)
         logger.info("Profile '%s' deleted", pid)
         if pm.active_id == DEFAULT_ID:
-            _init_db(pm.active_db_path)
+            await asyncio.to_thread(_init_db, pm.active_db_path)
         return {"status": "deleted", "id": pid}
     except (KeyError, ValueError) as e:
         raise HTTPException(400, str(e))
@@ -145,7 +147,7 @@ async def import_memories_into_profile(pid: str, req: ImportMemoriesRequest):
         _events.emit("profile", "import", pm.get(pid).name,
                      f"{detail} from {pm.get(req.source_id).name}")
         if pid == pm.active_id:
-            _init_db(pm.active_db_path)
+            await asyncio.to_thread(_init_db, pm.active_db_path)
         return {"status": "imported", **result}
     except KeyError as e:
         raise HTTPException(404, str(e))

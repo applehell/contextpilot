@@ -1976,6 +1976,8 @@ function renderGraph(data) {
                     <div style="color:var(--text-secondary);margin-bottom:8px;">Group: ${escapeHtml(node.group)}</div>
                     <div style="margin-bottom:8px;">Tags: ${tagHtml}</div>
                     <button class="btn btn-small" onclick="fetchMemoryDetail('${escapeAttr(node.id)}')">Load content</button>
+                    <button class="btn btn-small btn-primary" onclick="viewMemory('${escapeAttr(node.id)}')">Open</button>
+                    <button class="btn btn-small" onclick="editMemory('${escapeAttr(node.id)}')">Edit</button>
                     <div id="graph-memory-content" style="margin-top:8px;"></div>`;
             }
         } else {

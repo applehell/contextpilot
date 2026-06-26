@@ -11,7 +11,7 @@ import re
 import ssl
 from typing import Any, Dict, List
 
-from ..storage.memory import Memory, MemoryStore
+from ..storage.memory import MemoryStore
 from .base import ConfigField, ConnectorPlugin, SyncResult
 
 
@@ -232,39 +232,23 @@ class EmailConnector(ConnectorPlugin):
 
                         body = em["body"][:max_body] if em["body"] else "(empty)"
                         content = f"# {em['subject']}\n\nFrom: {em['from']}\nTo: {em['to']}\nDate: {em['date']}\n\n{body}"
-                        content_hash = hashlib.sha256(content.encode()).hexdigest()[:16]
 
                         tags = [self.name] + acc_tags
                         if folder != "INBOX":
                             tags.append(folder.lower().strip('"'))
 
-                        try:
-                            existing = store.get(key)
-                            if existing.metadata.get("content_hash") == content_hash:
-                                result.skipped += 1
-                                continue
-                            existing.value = content
-                            existing.tags = tags
-                            existing.metadata["content_hash"] = content_hash
-                            store.set(existing)
-                            result.updated += 1
-                        except KeyError:
-                            mem = Memory(
-                                key=key,
-                                value=content,
-                                tags=tags,
-                                metadata={
-                                    "source": self.name,
-                                    "account": acc_name,
-                                    "content_hash": content_hash,
-                                    "subject": em["subject"],
-                                    "from": em["from"],
-                                    "date": em["date"],
-                                    "folder": folder,
-                                },
-                            )
-                            store.set(mem)
-                            result.added += 1
+                        self._upsert(
+                            store, key, content,
+                            tags=tags,
+                            meta_extra={
+                                "account": acc_name,
+                                "subject": em["subject"],
+                                "from": em["from"],
+                                "date": em["date"],
+                                "folder": folder,
+                            },
+                            result=result,
+                        )
             finally:
                 try:
                     conn.logout()

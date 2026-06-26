@@ -83,28 +83,28 @@ def _get_db() -> Database:
 
 def _get_project_store() -> ProjectStore:
     global _project_store
-    db = _get_db()
+    _get_db()  # ensure _db is current (reconnects on profile switch)
     with _db_lock:
         if _project_store is None:
-            _project_store = ProjectStore(db)
+            _project_store = ProjectStore(_db)
         return _project_store
 
 
 def _get_memory_store() -> MemoryStore:
     global _memory_store
-    db = _get_db()
+    _get_db()  # ensure _db is current (reconnects on profile switch)
     with _db_lock:
         if _memory_store is None:
-            _memory_store = MemoryStore(db)
+            _memory_store = MemoryStore(_db)
         return _memory_store
 
 
 def _get_usage_store() -> UsageStore:
     global _usage_store
-    db = _get_db()
+    _get_db()  # ensure _db is current (reconnects on profile switch)
     with _db_lock:
         if _usage_store is None:
-            _usage_store = UsageStore(db)
+            _usage_store = UsageStore(_db)
         return _usage_store
 
 
@@ -316,3 +316,21 @@ def _run_index_background(profile_dir=None):
 def _trigger_background_index():
     t = threading.Thread(target=_run_index_background, daemon=True)
     t.start()
+
+
+def _index_or_bootstrap(memory):
+    """Index a single memory after create/update.
+
+    When the TF-IDF engine has no corpus yet (cold start), a single document
+    can't be vectorized meaningfully, so synchronously build the full corpus
+    from the current store — unless a full index is already running, which will
+    cover this memory anyway.
+    """
+    if _index_single(memory):
+        return
+    if not _index_lock.acquire(blocking=False):
+        return  # full index already running; it will pick this memory up
+    try:
+        _index_memories(_get_memory_store().list())
+    finally:
+        _index_lock.release()

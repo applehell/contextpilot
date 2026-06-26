@@ -1,14 +1,13 @@
 """Dockge connector — sync Docker Compose stacks from a Dockge stacks directory."""
 from __future__ import annotations
 
-import hashlib
 import time
 from pathlib import Path
 from typing import Any, Dict, List
 
 import yaml
 
-from ..storage.memory import Memory, MemoryStore
+from ..storage.memory import MemoryStore
 from .base import ConfigField, ConnectorPlugin, SyncResult
 
 COMPOSE_FILENAMES = ("compose.yml", "compose.yaml", "docker-compose.yml", "docker-compose.yaml")
@@ -90,37 +89,21 @@ class DockgeConnector(ConnectorPlugin):
                 continue
 
             content = self._format_stack(stack_name, compose, dockge_url, include_env, env_data)
-            content_hash = hashlib.sha256(content.encode()).hexdigest()[:16]
 
             services = compose.get("services", {})
             service_names = list(services.keys()) if isinstance(services, dict) else []
             mem_tags = [self.name, stack_name] + service_names
 
-            try:
-                existing = store.get(key)
-                if existing.metadata.get("content_hash") == content_hash:
-                    result.skipped += 1
-                    continue
-                existing.value = content
-                existing.tags = mem_tags
-                existing.metadata["content_hash"] = content_hash
-                existing.updated_at = time.time()
-                store.set(existing)
-                result.updated += 1
-            except KeyError:
-                mem = Memory(
-                    key=key, value=content, tags=mem_tags,
-                    metadata={
-                        "source": self.name,
-                        "content_hash": content_hash,
-                        "stack_name": stack_name,
-                        "compose_path": str(compose_path),
-                        "service_count": len(service_names),
-                    },
-                    expires_at=self._compute_expires_at(),
-                )
-                store.set(mem)
-                result.added += 1
+            self._upsert(
+                store, key, content,
+                tags=mem_tags,
+                meta_extra={
+                    "stack_name": stack_name,
+                    "compose_path": str(compose_path),
+                    "service_count": len(service_names),
+                },
+                result=result,
+            )
 
         for m in store.list():
             if m.key.startswith(prefix) and m.key not in synced_keys:

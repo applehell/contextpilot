@@ -5,7 +5,7 @@ import asyncio
 import time
 from typing import Dict
 
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, HTTPException, Query, Request
 
 from src.core.analytics import AnalyticsEngine
 from src.core.token_budget import TokenBudget
@@ -177,3 +177,83 @@ async def find_similar_api(key: str, threshold: float = Query(0.5, ge=0.3, le=1.
         raise HTTPException(404, f"Memory '{key}' not found")
     results = find_similar(target, store.list(), threshold)
     return [{"key": k, "similarity": s} for k, s in results]
+
+
+@router.get("/api/consolidation-report")
+async def consolidation_report_api(
+    threshold: float = Query(0.6, ge=0.3, le=1.0),
+    limit: int = Query(500, ge=10, le=2000),
+):
+    from src.core.consolidation import consolidation_report
+    store = _get_memory_store()
+    return await asyncio.to_thread(lambda: consolidation_report(store.list(limit=limit), threshold))
+
+
+@router.get("/api/contradictions")
+async def contradictions_api(
+    min_similarity: float = Query(0.4, ge=0.2, le=0.95),
+    limit: int = Query(500, ge=10, le=2000),
+):
+    from src.core.consolidation import find_contradictions
+    store = _get_memory_store()
+
+    def _do_find():
+        return find_contradictions(store.list(limit=limit), min_similarity)
+
+    found = await asyncio.to_thread(_do_find)
+    return [{"key_a": c.key_a, "key_b": c.key_b,
+             "similarity": c.similarity, "reason": c.reason} for c in found]
+
+
+@router.post("/api/duplicates/merge")
+async def merge_memories_api(request: Request):
+    from src.core.consolidation import merge_group
+    body = await request.json()
+    keys = body.get("keys") or []
+    into = body.get("into") or None
+    if not isinstance(keys, list) or len(keys) < 2:
+        raise HTTPException(400, "keys must be a list of at least 2 memory keys")
+    store = _get_memory_store()
+    try:
+        survivor = merge_group(store, keys, into)
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+    return {"survivor": survivor, "merged": len(keys) - 1}
+
+
+@router.get("/api/retrieval-eval")
+async def retrieval_eval_api(
+    sample: int = Query(50, ge=1, le=200),
+    k: int = Query(10, ge=1, le=50),
+):
+    from src.core.embeddings import hybrid_search
+    from src.core.rerank import rerank_candidates
+    from src.core.retrieval_eval import evaluate, load_cases, self_eval_cases
+    from src.storage.profiles import ProfileManager
+    store = _get_memory_store()
+
+    def _run():
+        cases_file = ProfileManager().active_data_dir / "eval_cases.json"
+        if cases_file.exists():
+            cases = load_cases(cases_file)
+            source = "file"
+        else:
+            cases = self_eval_cases(store.list(), sample=sample)
+            source = "self"
+
+        def baseline_search(q):
+            return [r["key"] for r in hybrid_search(q, store, top_k=k)]
+
+        def reranked_search(q):
+            res = hybrid_search(q, store, top_k=max(k, 30))
+            res = rerank_candidates(q, res, store)
+            return [r["key"] for r in res[:k]]
+
+        return {
+            "source": source,
+            "k": k,
+            "baseline": evaluate(cases, baseline_search, k),
+            "reranked": evaluate(cases, reranked_search, k),
+        }
+
+    return await asyncio.to_thread(_run)

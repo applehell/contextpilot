@@ -12,6 +12,8 @@ from .base import ConfigField, ConnectorPlugin, SyncResult
 
 ALL_SYNC_ITEMS = ["readmes", "releases", "repos", "issues"]
 
+_MAX_RAW_BYTES = 2 * 1024 * 1024  # cap raw file fetches to avoid OOM
+
 
 class _GitHubAPI:
     BASE = "https://api.github.com"
@@ -37,7 +39,7 @@ class _GitHubAPI:
             headers["Authorization"] = f"Bearer {self.token}"
         req = urllib.request.Request(url, headers=headers)
         with urllib.request.urlopen(req, timeout=20) as resp:
-            return resp.read().decode(errors="replace")
+            return resp.read(_MAX_RAW_BYTES).decode(errors="replace")
 
     def repo(self, owner: str, name: str) -> Dict:
         return self._get(f"/repos/{owner}/{name}")

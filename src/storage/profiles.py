@@ -13,9 +13,12 @@ from pathlib import Path
 from typing import Dict, List, Optional
 
 from .db import Database
+from src.core.log import get_logger
 
 
 import os
+
+logger = get_logger("storage.profiles")
 
 _DATA_DIR = Path(os.environ.get("CONTEXTPILOT_DATA_DIR", str(Path.home() / ".contextpilot")))
 PROFILES_DIR = _DATA_DIR / "profiles"
@@ -63,11 +66,20 @@ class ProfileManager:
 
     def _load_config(self) -> Dict:
         if CONFIG_FILE.exists():
-            return json.loads(CONFIG_FILE.read_text())
+            try:
+                return json.loads(CONFIG_FILE.read_text())
+            except (json.JSONDecodeError, OSError) as e:
+                logger.error("Profile config corrupt (%s) — starting empty", e)
         return {"active": DEFAULT_ID, "profiles": {}}
 
     def _save_config(self) -> None:
-        CONFIG_FILE.write_text(json.dumps(self._config, indent=2))
+        tmp = CONFIG_FILE.with_suffix(CONFIG_FILE.suffix + ".tmp")
+        tmp.write_text(json.dumps(self._config, indent=2))
+        try:
+            tmp.replace(CONFIG_FILE)
+        except OSError:
+            tmp.unlink(missing_ok=True)
+            raise
 
     def _migrate_legacy(self) -> None:
         """Migrate old name-keyed profiles to UUID-keyed."""

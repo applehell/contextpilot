@@ -1,14 +1,13 @@
 """Home Assistant connector — sync automations, entities, and scenes."""
 from __future__ import annotations
 
-import hashlib
 import json
 import time
 import urllib.request
 import urllib.error
 from typing import Any, Dict, List
 
-from ..storage.memory import Memory, MemoryStore
+from ..storage.memory import MemoryStore
 from .base import ConfigField, ConnectorPlugin, SyncResult
 
 
@@ -148,37 +147,22 @@ class HomeAssistantConnector(ConnectorPlugin):
                     content_parts.append(f"{k}: {v}")
 
             content = "\n".join(content_parts)
-            content_hash = hashlib.sha256(content.encode()).hexdigest()[:16]
 
             mem_tags = [self.name, item_type]
             area = attrs.get("area", "")
             if area:
                 mem_tags.append(area.lower())
 
-            try:
-                existing = store.get(key)
-                if existing.metadata.get("content_hash") == content_hash:
-                    result.skipped += 1
-                    continue
-                existing.value = content
-                existing.tags = mem_tags
-                existing.metadata["content_hash"] = content_hash
-                existing.updated_at = time.time()
-                store.set(existing)
-                result.updated += 1
-            except KeyError:
-                mem = Memory(
-                    key=key, value=content, tags=mem_tags,
-                    metadata={
-                        "source": self.name,
-                        "content_hash": content_hash,
-                        "entity_id": entity_id,
-                        "entity_type": item_type,
-                        "friendly_name": friendly_name,
-                    },
-                )
-                store.set(mem)
-                result.added += 1
+            self._upsert(
+                store, key, content,
+                tags=mem_tags,
+                meta_extra={
+                    "entity_id": entity_id,
+                    "entity_type": item_type,
+                    "friendly_name": friendly_name,
+                },
+                result=result,
+            )
 
         for m in store.list():
             if m.key.startswith(prefix) and m.key not in synced_keys:

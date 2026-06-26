@@ -26,6 +26,7 @@ from src.core.compressors.mermaid import MermaidCompressor
 from src.core.compressors.yaml_struct import YamlStructCompressor
 from src.core.embeddings import hybrid_search
 from src.core.log import get_logger
+from src.core.rerank import rerank_candidates
 from src.core.relevance import RelevanceEngine
 from src.core.skill_registry import SkillRegistry
 from src.core.token_budget import TokenBudget
@@ -95,28 +96,28 @@ def _get_db() -> Database:
 
 def _get_usage_store() -> UsageStore:
     global _usage_store
-    db = _get_db()
+    _get_db()  # ensure _db is current (reconnects on profile switch)
     with _db_lock:
         if _usage_store is None:
-            _usage_store = UsageStore(db)
+            _usage_store = UsageStore(_db)
         return _usage_store
 
 
 def _get_memory_store() -> MemoryStore:
     global _memory_store
-    db = _get_db()
+    _get_db()  # ensure _db is current (reconnects on profile switch)
     with _db_lock:
         if _memory_store is None:
-            _memory_store = MemoryStore(db)
+            _memory_store = MemoryStore(_db)
         return _memory_store
 
 
 def _get_activity_log() -> MemoryActivityLog:
     global _activity_log
-    db = _get_db()
+    _get_db()  # ensure _db is current (reconnects on profile switch)
     with _db_lock:
         if _activity_log is None:
-            _activity_log = MemoryActivityLog(db)
+            _activity_log = MemoryActivityLog(_db)
         return _activity_log
 
 
@@ -463,6 +464,10 @@ def get_context_for_task(
     if not results:
         return {"blocks": [], "total_tokens": 0, "memories_considered": 0, "memories_included": 0}
 
+    try:
+        results = rerank_candidates(task_description, results, store)
+    except Exception as e:
+        logger.warning("rerank failed, falling back to hybrid order: %s", e)
     memories_considered = len(results)
 
     # Convert to Blocks with priority assignment

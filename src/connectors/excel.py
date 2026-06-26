@@ -1,12 +1,11 @@
 """Microsoft Excel connector — sync spreadsheet data as markdown tables."""
 from __future__ import annotations
 
-import hashlib
 import time
 from pathlib import Path
 from typing import Any, Dict, List
 
-from ..storage.memory import Memory, MemoryStore
+from ..storage.memory import MemoryStore
 from .base import ConfigField, ConnectorPlugin, SyncResult
 
 try:
@@ -147,35 +146,19 @@ class ExcelConnector(ConnectorPlugin):
                     synced_keys.add(key)
 
                     content = f"# {filename} - {sheet_name}\n\n{md_table}"
-                    content_hash = hashlib.sha256(content.encode()).hexdigest()[:16]
                     mem_tags = [self.name, filename.lower(), sheet_name.lower()]
 
-                    try:
-                        existing = store.get(key)
-                        if existing.metadata.get("content_hash") == content_hash:
-                            result.skipped += 1
-                            continue
-                        existing.value = content
-                        existing.tags = mem_tags
-                        existing.metadata["content_hash"] = content_hash
-                        existing.metadata["modified"] = f.stat().st_mtime
-                        existing.updated_at = time.time()
-                        store.set(existing)
-                        result.updated += 1
-                    except KeyError:
-                        mem = Memory(
-                            key=key, value=content, tags=mem_tags,
-                            metadata={
-                                "source": self.name,
-                                "content_hash": content_hash,
-                                "file_path": str(f),
-                                "filename": f.name,
-                                "sheet_name": sheet_name,
-                                "modified": f.stat().st_mtime,
-                            },
-                        )
-                        store.set(mem)
-                        result.added += 1
+                    self._upsert(
+                        store, key, content,
+                        tags=mem_tags,
+                        meta_extra={
+                            "file_path": str(f),
+                            "filename": f.name,
+                            "sheet_name": sheet_name,
+                            "modified": f.stat().st_mtime,
+                        },
+                        result=result,
+                    )
             finally:
                 wb.close()
 

@@ -13,6 +13,8 @@ from .base import ConfigField, ConnectorPlugin, SyncResult
 
 ALL_SYNC_ITEMS = ["readmes", "issues", "packages", "releases", "wikis", "repos"]
 
+_MAX_RAW_BYTES = 2 * 1024 * 1024  # cap raw file fetches to avoid OOM
+
 
 class _GiteaAPI:
     def __init__(self, url: str, token: str) -> None:
@@ -32,7 +34,7 @@ class _GiteaAPI:
             "Authorization": f"token {self.token}",
         })
         with urllib.request.urlopen(req, timeout=15) as resp:
-            return resp.read().decode(errors="replace")
+            return resp.read(_MAX_RAW_BYTES).decode(errors="replace")
 
     def repos(self) -> List[Dict]:
         return self._get("/user/repos?limit=50")

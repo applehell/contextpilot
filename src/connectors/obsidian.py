@@ -1,12 +1,11 @@
 """Obsidian vault connector — sync markdown files with frontmatter parsing."""
 from __future__ import annotations
 
-import hashlib
 import time
 from pathlib import Path
 from typing import Any, Dict, List
 
-from ..storage.memory import Memory, MemoryStore
+from ..storage.memory import MemoryStore
 from .base import ConfigField, ConnectorPlugin, SyncResult
 
 
@@ -95,7 +94,6 @@ class ObsidianConnector(ConnectorPlugin):
             key = prefix + str(rel).replace("\\", "/")
             synced_keys.add(key)
 
-            content_hash = hashlib.sha256(raw.encode()).hexdigest()[:16]
             mem_tags = [self.name] + [t.lower().replace("#", "") for t in note_tags]
             if len(rel.parts) > 1:
                 mem_tags.append(rel.parts[0].lower())
@@ -103,32 +101,17 @@ class ObsidianConnector(ConnectorPlugin):
             title = frontmatter.get("title", f.stem)
             full_content = f"# {title}\n\n{content}"
 
-            try:
-                existing = store.get(key)
-                if existing.metadata.get("content_hash") == content_hash:
-                    result.skipped += 1
-                    continue
-                existing.value = full_content
-                existing.tags = mem_tags
-                existing.metadata["content_hash"] = content_hash
-                existing.metadata["modified"] = f.stat().st_mtime
-                existing.updated_at = time.time()
-                store.set(existing)
-                result.updated += 1
-            except KeyError:
-                mem = Memory(
-                    key=key, value=full_content, tags=mem_tags,
-                    metadata={
-                        "source": self.name,
-                        "content_hash": content_hash,
-                        "file_path": str(f),
-                        "relative_path": str(rel),
-                        "modified": f.stat().st_mtime,
-                        "frontmatter": frontmatter,
-                    },
-                )
-                store.set(mem)
-                result.added += 1
+            self._upsert(
+                store, key, full_content,
+                tags=mem_tags,
+                meta_extra={
+                    "file_path": str(f),
+                    "relative_path": str(rel),
+                    "modified": f.stat().st_mtime,
+                    "frontmatter": frontmatter,
+                },
+                result=result,
+            )
 
         for m in store.list():
             if m.key.startswith(prefix) and m.key not in synced_keys:

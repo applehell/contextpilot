@@ -143,7 +143,7 @@ async def mcp_register(request: Request):
     except json.JSONDecodeError:
         raise HTTPException(400, "Invalid JSON")
     port = int(body.get("port", 8400))
-    transport = body.get("transport", "sse")
+    transport = body.get("transport", "streamable-http")
     register_mcp(port=port, transport=transport)
     logger.info("MCP registered: port=%d, transport=%s", port, transport)
     _events.emit("system", "mcp-register", f"port={port} transport={transport}")

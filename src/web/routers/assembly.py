@@ -9,6 +9,8 @@ from fastapi import APIRouter, HTTPException, Query, Request
 from src.core.block import Block, Priority
 from src.core.compress_detect import detect_compress_hint as _detect_compress_hint
 from src.core.embeddings import hybrid_search
+from src.core.log import get_logger
+from src.core.rerank import rerank_candidates
 from src.core.token_budget import TokenBudget
 from src.storage.templates import TemplateStore, ContextTemplate
 from src.storage.usage import UsageRecord, block_hash
@@ -25,6 +27,7 @@ from src.web.deps import (
 )
 
 router = APIRouter(tags=["assembly"])
+logger = get_logger("web.assembly")
 
 
 @router.post("/api/estimate")
@@ -93,6 +96,10 @@ async def context_for_task(request: Request):
         results = [r for r in results if tag_set.issubset(set(r.get("tags", [])))]
     if not results:
         return empty
+    try:
+        results = rerank_candidates(task, results, store)
+    except Exception as e:
+        logger.warning("rerank failed, falling back to hybrid order: %s", e)
 
     blocks = []
     for i, r in enumerate(results):

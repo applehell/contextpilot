@@ -53,6 +53,7 @@ class SyncScheduler:
     async def run_once(self) -> dict:
         """Run all syncs once and return results."""
         results = {"folders": {}, "connectors": {}}
+        profile_dir = None
 
         try:
             from ..storage.folders import FolderManager

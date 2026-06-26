@@ -1,14 +1,13 @@
 """Microsoft Teams connector plugin — sync channel messages via Microsoft Graph API."""
 from __future__ import annotations
 
-import hashlib
 import re
 import time
 from typing import Any, Dict, List, Optional
 
 import requests
 
-from ..storage.memory import Memory, MemoryStore
+from ..storage.memory import MemoryStore
 from .base import ConfigField, ConnectorPlugin, SyncResult
 
 GRAPH_BASE = "https://graph.microsoft.com/v1.0"
@@ -190,36 +189,20 @@ class TeamsConnector(ConnectorPlugin):
                     synced_keys.add(key)
 
                     content = f"[{timestamp}] {sender}: {body_text[:3000]}"
-                    content_hash = hashlib.sha256(content.encode()).hexdigest()[:16]
                     tags = [self.name, team_name.lower(), channel_name.lower()]
 
-                    try:
-                        existing = store.get(key)
-                        if existing.metadata.get("content_hash") == content_hash:
-                            result.skipped += 1
-                            continue
-                        existing.value = content
-                        existing.tags = tags
-                        existing.metadata["content_hash"] = content_hash
-                        store.set(existing)
-                        result.updated += 1
-                    except KeyError:
-                        mem = Memory(
-                            key=key,
-                            value=content,
-                            tags=tags,
-                            metadata={
-                                "source": self.name,
-                                "content_hash": content_hash,
-                                "team": team_name,
-                                "channel": channel_name,
-                                "sender": sender,
-                                "timestamp": timestamp,
-                                "message_id": msg_id,
-                            },
-                        )
-                        store.set(mem)
-                        result.added += 1
+                    self._upsert(
+                        store, key, content,
+                        tags=tags,
+                        meta_extra={
+                            "team": team_name,
+                            "channel": channel_name,
+                            "sender": sender,
+                            "timestamp": timestamp,
+                            "message_id": msg_id,
+                        },
+                        result=result,
+                    )
 
         self._update_sync_stats(len(synced_keys))
         return result

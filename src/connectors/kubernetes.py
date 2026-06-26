@@ -1,7 +1,6 @@
 """Kubernetes connector — sync deployments, services, configmaps, pods, and ingresses."""
 from __future__ import annotations
 
-import hashlib
 import json
 import ssl
 import time
@@ -9,7 +8,7 @@ import urllib.request
 import urllib.error
 from typing import Any, Dict, List, Optional
 
-from ..storage.memory import Memory, MemoryStore
+from ..storage.memory import MemoryStore
 from .base import ConfigField, ConnectorPlugin, SyncResult
 
 SYNC_ITEM_KINDS = {
@@ -180,7 +179,6 @@ class KubernetesConnector(ConnectorPlugin):
             return result
 
         synced_keys = set()
-        expires_at = self._compute_expires_at()
 
         for ns in namespaces:
             for item_name in sync_items:
@@ -202,36 +200,18 @@ class KubernetesConnector(ConnectorPlugin):
                     synced_keys.add(key)
 
                     content = self._format_resource(kind, resource)
-                    content_hash = hashlib.sha256(content.encode()).hexdigest()[:16]
                     mem_tags = ["kubernetes", ns, kind]
 
-                    try:
-                        existing = store.get(key)
-                        if existing.metadata.get("content_hash") == content_hash:
-                            result.skipped += 1
-                            continue
-                        existing.value = content
-                        existing.tags = mem_tags
-                        existing.metadata["content_hash"] = content_hash
-                        existing.updated_at = time.time()
-                        if expires_at:
-                            existing.expires_at = expires_at
-                        store.set(existing)
-                        result.updated += 1
-                    except KeyError:
-                        mem = Memory(
-                            key=key, value=content, tags=mem_tags,
-                            metadata={
-                                "source": self.name,
-                                "content_hash": content_hash,
-                                "namespace": ns,
-                                "kind": kind,
-                                "resource_name": name,
-                            },
-                            expires_at=expires_at,
-                        )
-                        store.set(mem)
-                        result.added += 1
+                    self._upsert(
+                        store, key, content,
+                        tags=mem_tags,
+                        meta_extra={
+                            "namespace": ns,
+                            "kind": kind,
+                            "resource_name": name,
+                        },
+                        result=result,
+                    )
 
         for m in store.list():
             if m.key.startswith(prefix) and m.key not in synced_keys:

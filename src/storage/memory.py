@@ -477,7 +477,10 @@ class MemoryStore:
         all_tags: Set[str] = set()
         rows = self._db.conn.execute("SELECT tags FROM memories").fetchall()
         for r in rows:
-            all_tags.update(json.loads(r["tags"]))
+            try:
+                all_tags.update(json.loads(r["tags"]))
+            except (json.JSONDecodeError, TypeError):
+                continue
         return sorted(all_tags)
 
     def export_json(self) -> str:

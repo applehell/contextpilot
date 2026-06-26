@@ -15,6 +15,8 @@ except ImportError:
 from ..storage.memory import MemoryStore
 from .base import ConfigField, ConnectorPlugin, SyncResult
 
+_MAX_FETCH_BYTES = 10 * 1024 * 1024  # cap file downloads to avoid OOM
+
 MIME_GOOGLE_DOC = "application/vnd.google-apps.document"
 MIME_GOOGLE_SHEET = "application/vnd.google-apps.spreadsheet"
 MIME_GOOGLE_SLIDES = "application/vnd.google-apps.presentation"
@@ -112,7 +114,7 @@ class _DriveAPI:
             "User-Agent": "ContextPilot/1.0",
         })
         with urllib.request.urlopen(req, timeout=30) as resp:
-            return resp.read()
+            return resp.read(_MAX_FETCH_BYTES)
 
     def list_files(self, folder_id: Optional[str] = None,
                    mime_filters: Optional[List[str]] = None,
