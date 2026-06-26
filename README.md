@@ -221,6 +221,8 @@ The Assembler optimizes your memories for AI consumption within a token budget:
 
 Context Pilot includes a built-in MCP Server (Model Context Protocol) that lets Claude Code access your memories directly.
 
+> **Connecting other clients** (GitHub Copilot agent mode, Cursor) and the full transport / profile / response reference: see **[INTEGRATION.md](INTEGRATION.md)**.
+
 ### 20 MCP Tools
 
 ```
