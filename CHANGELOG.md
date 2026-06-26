@@ -1,5 +1,52 @@
 # Changelog
 
+## v4.5.0 — 2026-06-26
+
+Retrieval depth, memory lifecycle, and quality measurement — plus a round of
+bug fixes hardening the shared store that the Diana/Kalle agents run on.
+
+### Added
+- **Semantic rerank** (`src/core/rerank.py`) — re-orders hybrid-search
+  candidates by fusing lexical/semantic relevance with recency, pinned status
+  and query/tag/key overlap. Model-free (runs on the default TF-IDF stack).
+  Wired into `get_context_for_task` (MCP) and `POST /api/context-for-task`,
+  guarded so a rerank failure falls back to the hybrid order.
+- **Memory consolidation** (`src/core/consolidation.py`) — derived confidence
+  scoring, a conservative contradiction heuristic (numeric/polarity conflicts
+  between topically related memories), and a merge operation. New endpoints
+  `GET /api/consolidation-report`, `GET /api/contradictions`,
+  `POST /api/duplicates/merge` (all limit-bounded).
+- **Retrieval-quality eval harness** (`src/core/retrieval_eval.py`) —
+  precision/recall/MRR/nDCG over self-generated or `eval_cases.json` cases.
+  `GET /api/retrieval-eval` compares baseline vs reranked.
+- **Knowledge graph: jump-to-memory** — node detail gains Open/Edit buttons to
+  read or edit the underlying memory directly.
+- **`INTEGRATION.md`** — client-agnostic MCP/HTTP interface reference (Claude
+  Code, GitHub Copilot agent mode, Cursor), linked from the README.
+
+### Fixed
+- **Embedding IDF corpus now includes tags** — tag terms were dropped from
+  stored vectors because they were absent from the IDF corpus. (Existing
+  profiles need a one-time embeddings reindex to recompute vectors.)
+- **Closed-DB race** in `_get_*_store` (web + MCP) — the store is now built from
+  the current global connection inside the lock, not a pre-lock local reference,
+  so a concurrent profile switch can no longer leave a store on a closed DB.
+- **Profile switch blocked the event loop** — `_init_db` (up to a 10s lock wait)
+  now runs via `asyncio.to_thread`.
+- **`scheduler.run_once`** could raise `NameError` when the folder step failed
+  before `profile_dir` was assigned.
+- **`MemoryStore.tags()`** now guards `json.loads` against NULL/corrupt rows.
+- **RSS connector** key hash reverted (sha256 → md5) to avoid deleting all
+  existing `rss/` memories on the first sync after upgrade.
+- Atomic connector/profile config writes clean up the temp file on failure;
+  `merge_group` rejects duplicate/invalid keys; rerank weights merge over
+  defaults.
+
+### Upgrade note
+After deploying, clear each profile's `embeddings.db` and restart so all
+vectors are rebuilt with the tag-aware IDF; otherwise semantic ranking is
+degraded until the next change to each memory.
+
 ## v4.4.1 — 2026-06-02
 
 Hotfix for the sparse-embedding migration introduced in 4.4.0.
