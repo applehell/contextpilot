@@ -15,10 +15,7 @@ def client(tmp_path, monkeypatch):
     monkeypatch.setattr("src.storage.profiles.DEFAULT_DB", db_path)
     monkeypatch.setattr("src.storage.profiles._DATA_DIR", tmp_path)
     monkeypatch.setattr("src.storage.folders._DATA_DIR", tmp_path)
-    monkeypatch.setattr("src.connectors.base._DATA_DIR", tmp_path)
     monkeypatch.setattr("src.core.webhooks._DATA_DIR", tmp_path)
-    from src.connectors.registry import ConnectorRegistry
-    ConnectorRegistry._instance = None
     app = create_app(db_path=db_path)
     with TestClient(app) as c:
         yield c
@@ -85,15 +82,6 @@ class TestAssemblyIsolation:
         _create_and_switch(client, "no-tpl")
         r = client.get("/api/templates")
         assert len(r.json()) == 0
-
-
-class TestConnectorIsolation:
-    def test_connectors_have_separate_configs(self, client):
-        client.post("/api/connectors/paperless/setup", json={"url": "http://default:8000", "token": "t"})
-
-        _create_and_switch(client, "isolated")
-        r = client.get("/api/connectors/paperless")
-        assert r.json()["configured"] is False
 
 
 class TestFolderIsolation:

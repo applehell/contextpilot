@@ -482,7 +482,7 @@ class ProfileManager:
             if db_path.exists():
                 zf.write(str(db_path), "data.db")
 
-            for pattern in ["connector_*.json", "folders.json", "webhooks.json"]:
+            for pattern in ["folders.json", "webhooks.json"]:
                 for f in profile_dir.glob(pattern):
                     zf.write(str(f), f.name)
 

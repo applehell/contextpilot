@@ -6,7 +6,6 @@ import pytest
 from src.storage.db import Database
 from src.web.deps import (
     _estimate_total_tokens,
-    _get_connector,
     _init_db,
     _make_assembler,
     _block_to_dict,
@@ -81,12 +80,4 @@ class TestBlockHash:
         h1 = block_hash("hello")
         h2 = block_hash("world")
         assert h1 != h2
-
-
-class TestGetConnector:
-    def test_not_found(self):
-        _init_db(None)
-        with pytest.raises(Exception):
-            _get_connector("nonexistent_connector_xyz")
-
 

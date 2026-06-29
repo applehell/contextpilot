@@ -1438,12 +1438,6 @@ details.panel > summary:hover { color: var(--accent); }
 .mini-chart { display: flex; align-items: flex-end; gap: 2px; height: 32px; }
 .mini-bar { background: var(--accent); border-radius: 2px 2px 0 0; min-width: 6px; transition: height 0.3s; }
 
-/* Connector health dot */
-.health-dot { width: 8px; height: 8px; border-radius: 50%; display: inline-block; margin-right: 4px; }
-.health-dot.ok { background: var(--success); }
-.health-dot.fail { background: var(--danger); }
-.health-dot.unknown { background: var(--text-muted); }
-
 /* ═══════════════════════════════════════════════════════════════
    SKELETON LOADING
    ═══════════════════════════════════════════════════════════════ */
@@ -1800,46 +1794,6 @@ details.panel > summary:hover { color: var(--accent); }
     font-size: 11px;
     color: var(--text-muted);
     margin-top: 4px;
-}
-
-/* Connector list in wizard */
-.wizard-connector-list {
-    display: flex;
-    flex-direction: column;
-    gap: 8px;
-}
-
-.wizard-connector {
-    display: flex;
-    align-items: center;
-    gap: 14px;
-    padding: 12px 16px;
-    background: var(--surface-alt);
-    border: 1px solid var(--border);
-    border-radius: 12px;
-    font-size: 13px;
-    animation: cardFadeUp 0.4s ease both;
-}
-
-.wizard-connector:nth-child(1) { animation-delay: 0.1s; }
-.wizard-connector:nth-child(2) { animation-delay: 0.15s; }
-.wizard-connector:nth-child(3) { animation-delay: 0.2s; }
-.wizard-connector:nth-child(4) { animation-delay: 0.25s; }
-.wizard-connector:nth-child(5) { animation-delay: 0.3s; }
-
-.wizard-connector-icon { font-size: 22px; flex-shrink: 0; }
-.wizard-connector-name { font-weight: 600; }
-.wizard-connector-desc { color: var(--text-muted); font-size: 12px; }
-.wizard-connector-badge {
-    margin-left: auto;
-    font-size: 10px;
-    font-weight: 700;
-    text-transform: uppercase;
-    letter-spacing: 0.5px;
-    padding: 3px 8px;
-    border-radius: 6px;
-    background: var(--accent-light);
-    color: var(--accent);
 }
 
 /* Assembler pipeline visualization */
@@ -2450,36 +2404,6 @@ details.panel > summary:hover { color: var(--accent); }
     nav#main-nav .tab .tab-label { font-size: 9px; }
 }
 
-/* Connector Store */
-.connector-filters { display: flex; gap: 6px; margin-bottom: 14px; flex-wrap: wrap; }
-.conn-filter { padding: 4px 12px; border-radius: 20px; font-size: 12px; font-weight: 500; border: 1px solid var(--border); background: var(--surface); color: var(--text-muted); cursor: pointer; transition: all 0.15s; }
-.conn-filter:hover { border-color: var(--border-focus); color: var(--text); }
-.conn-filter.active { background: var(--accent); color: #fff; border-color: var(--accent); }
-
-.connector-store { display: grid; grid-template-columns: repeat(auto-fill, minmax(270px, 1fr)); gap: 12px; }
-
-.connector-card { border: 1px solid var(--border); border-radius: var(--radius); padding: 16px; background: var(--surface); display: flex; flex-direction: column; gap: 10px; transition: border-color 0.15s, box-shadow 0.15s; }
-.connector-card:hover { border-color: var(--border-focus); box-shadow: 0 2px 8px rgba(0,0,0,0.05); }
-.connector-card.connected { border-left: 3px solid var(--success); }
-.connector-card.disabled { border-left: 3px solid var(--warning); opacity: 0.7; }
-
-.conn-card-header { display: flex; align-items: center; gap: 10px; }
-.conn-icon { width: 40px; height: 40px; border-radius: 10px; display: flex; align-items: center; justify-content: center; font-size: 16px; font-weight: 700; color: #fff; flex-shrink: 0; }
-.conn-icon svg { width: 22px; height: 22px; }
-.conn-card-header .conn-name { font-weight: 600; font-size: 14px; }
-.conn-card-header .conn-cat { font-size: 10px; padding: 2px 6px; border-radius: 4px; background: var(--surface-alt); color: var(--text-muted); margin-left: auto; }
-
-.conn-desc { font-size: 12px; color: var(--text-muted); line-height: 1.4; flex: 1; }
-.conn-status { font-size: 11px; color: var(--text-muted); display: flex; align-items: center; gap: 6px; }
-.conn-status .dot { width: 6px; height: 6px; border-radius: 50%; display: inline-block; }
-.conn-status .dot.green { background: var(--success); }
-.conn-status .dot.gray { background: var(--text-muted); }
-.conn-status .dot.orange { background: var(--warning); }
-
-.conn-actions { display: flex; gap: 6px; flex-wrap: wrap; }
-
-.conn-setup-guide { font-size: 12px; color: var(--text-muted); background: var(--surface-alt); padding: 10px 12px; border-radius: 6px; margin-bottom: 8px; border-left: 3px solid var(--accent); line-height: 1.5; }
-
 /* ═══════════════════════════════════════════════════════════════
    FLOATING ACTION BUTTON (FAB)
    ═══════════════════════════════════════════════════════════════ */
@@ -2730,7 +2654,7 @@ details.panel > summary:hover { color: var(--accent); }
 
 body, header, nav, main,
 .panel, .status-card, .memory-item, .modal,
-.mem-sidebar, .skill-card, .connector-card,
+.mem-sidebar, .skill-card,
 .fab-btn, .fab-menu-item, .toast, .badge,
 .btn, .btn-primary, .btn-danger,
 input, textarea, select {
@@ -2903,15 +2827,6 @@ header.header-collapsed .header-breadcrumb {
     transform: rotate(90deg);
 }
 
-/* ═══════════════════════════════════════════════════════════════
-   8. CONNECTOR LAST SYNC
-   ═══════════════════════════════════════════════════════════════ */
-
-.conn-last-sync {
-    font-size: 10px;
-    color: var(--text-muted);
-    font-style: italic;
-}
 
 /* ═══════════════════════════════════════════════════════════════
    9. DASHBOARD SPARKLINES

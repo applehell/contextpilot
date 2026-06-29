@@ -12,14 +12,12 @@ from src.core.log import get_logger
 
 logger = get_logger("routers.system")
 
-from src.connectors.registry import ConnectorRegistry
 from src.core.skill_registry import SkillRegistry
 from src.storage.folders import FolderManager
 from src.storage.memory_activity import MemoryActivityLog
 from src.storage.profiles import ProfileManager
 from src.web.deps import (
     _events,
-    _get_connectors,
     _get_db,
     _get_memory_store,
     _get_profile_dir,
@@ -41,18 +39,15 @@ async def setup_status():
     profiles = pm.list()
     store = _get_memory_store()
     memory_count = store.count()
-    connectors = ConnectorRegistry.instance(_get_profile_dir())
-    configured_connectors = [c.name for c in connectors.list() if c.configured]
     folders = FolderManager(_get_profile_dir())
     folder_sources = folders.list()
     return {
         "profiles": [p.name for p in profiles],
         "profile_count": len(profiles),
         "memory_count": memory_count,
-        "configured_connectors": configured_connectors,
         "folder_count": len(folder_sources),
         "data_dir": str(Path(os.environ.get("CONTEXTPILOT_DATA_DIR", str(Path.home() / ".contextpilot")))),
-        "is_fresh": memory_count == 0 and len(configured_connectors) == 0 and len(folder_sources) == 0,
+        "is_fresh": memory_count == 0 and len(folder_sources) == 0,
     }
 
 
@@ -103,7 +98,7 @@ async def list_skills():
 @router.get("/api/global-search")
 async def global_search(q: str = Query("", min_length=1)):
     from typing import Dict
-    results: Dict[str, list] = {"memories": [], "templates": [], "connectors": [], "folders": []}
+    results: Dict[str, list] = {"memories": [], "templates": [], "folders": []}
     ql = q.lower()
     store = _get_memory_store()
     for m in store.search(q, limit=10):
@@ -112,10 +107,6 @@ async def global_search(q: str = Query("", min_length=1)):
     for t in _TS(_get_db()).list():
         if ql in t.name.lower() or ql in t.description.lower():
             results["templates"].append({"name": t.name, "description": t.description, "type": "template"})
-    for c in _get_connectors().list():
-        status = c.get_status()
-        if ql in status.get("name", "").lower() or ql in status.get("display_name", "").lower():
-            results["connectors"].append({"name": status["name"], "display_name": status.get("display_name", ""), "type": "connector"})
     fm = FolderManager(_get_profile_dir())
     for f in fm.list():
         if ql in f.name.lower() or ql in f.path.lower():

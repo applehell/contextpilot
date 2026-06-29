@@ -193,7 +193,7 @@ Off by default (LAN multi-agent store). If `CONTEXTPILOT_API_KEY` is set, every
 
 ## 6. Profiles
 
-Memories are isolated per profile (`profiles/<name>/data.db` + embeddings + connector configs).
+Memories are isolated per profile (`profiles/<name>/data.db` + embeddings).
 
 - Switch **by ID**: `GET /api/profiles` to resolve name → id, then `POST /api/profiles/{id}/switch`.
 - After a switch the MCP server serves the new profile automatically.

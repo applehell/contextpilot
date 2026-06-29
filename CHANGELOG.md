@@ -1,5 +1,36 @@
 # Changelog
 
+## v4.6.0 — 2026-06-29
+
+Simplification: the entire **connector** subsystem was removed. ContextPilot
+is now focused on its core — memories, full-text/semantic search, the context
+assembler, profiles, the knowledge graph, and the MCP server — plus local
+**folder sources** and **webhooks** for ingestion.
+
+### Removed
+- **All 17 source connectors** and the connector plugin framework
+  (`src/connectors/` — base, registry, and every connector: paperless,
+  obsidian, notion, gdrive, excel, bookmarks, rss, gitea, github, email,
+  telegram, teams, homeassistant, dockge, kubernetes, bitwarden, keepass).
+- **Connector REST API** — the entire `/api/connectors*` surface
+  (`src/web/routers/connectors.py`), plus `/api/analytics/connector-stats`.
+- **Connector UI** — the Connector Store (Sources tab), dashboard connector
+  card + health panel, the email-account setup, and the "Connectors" step of
+  the setup wizard (now 6 steps). Connector entries dropped from global search.
+- **Connector scheduling** — `SyncScheduler.run_once` now syncs only folder
+  sources and runs TTL cleanup; it no longer iterates connectors.
+
+### Kept / unchanged
+- Generic **inbound webhook** (`POST /api/inbound/{token}`) was preserved and
+  moved into the memories router — it is not connector-specific.
+- Folder sources, webhooks, the auto-sync scheduler, and all core features are
+  untouched. No third-party dependencies were connector-only, so the dependency
+  set is unchanged.
+
+### Notes
+- Connector config files (`profiles/*/connector_*.json`) are simply ignored now;
+  no migration is required and existing memories are untouched.
+
 ## v4.5.0 — 2026-06-26
 
 Retrieval depth, memory lifecycle, and quality measurement — plus a round of

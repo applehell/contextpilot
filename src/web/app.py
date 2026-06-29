@@ -32,7 +32,6 @@ from src.web.deps import (
 
 from src.web.routers import (
     memories,
-    connectors,
     profiles,
     assembly,
     analytics,
@@ -151,29 +150,7 @@ def create_app(db_path: Optional[Path] = None) -> FastAPI:
         db = _get_db()
         schema_version = db.conn.execute("PRAGMA user_version").fetchone()[0]
 
-        # Connector health
-        from src.connectors.registry import ConnectorRegistry
-        from src.web.deps import _get_profile_dir, _index_state
-        try:
-            connector_reg = ConnectorRegistry.instance(_get_profile_dir())
-            connector_list = connector_reg.list()
-            last_sync_errors = 0
-            for c in connector_list:
-                try:
-                    info = c.info()
-                    hist = info.get("sync_history", [])
-                    if hist and hist[0].get("errors", 0) > 0:
-                        last_sync_errors += 1
-                except Exception:
-                    pass
-            connectors_info = {
-                "total": len(connector_list),
-                "configured": sum(1 for c in connector_list if c.configured),
-                "enabled": sum(1 for c in connector_list if c.enabled),
-                "last_sync_errors": last_sync_errors,
-            }
-        except Exception:
-            connectors_info = None
+        from src.web.deps import _index_state
 
         # MCP status
         try:
@@ -209,8 +186,6 @@ def create_app(db_path: Optional[Path] = None) -> FastAPI:
 
         # Determine overall status
         status = "healthy"
-        if connectors_info and connectors_info.get("last_sync_errors", 0) > 0:
-            status = "degraded"
         if disk and disk.free / disk.total < 0.1:
             status = "degraded"
 
@@ -247,7 +222,6 @@ def create_app(db_path: Optional[Path] = None) -> FastAPI:
                 "disk_free_gb": round(disk.free / (1024**3), 2) if disk else None,
                 "disk_total_gb": round(disk.total / (1024**3), 2) if disk else None,
             },
-            "connectors": connectors_info,
             "backup": backup_info,
             "mcp": mcp_info,
             "embeddings": embeddings_info,
@@ -266,7 +240,6 @@ def create_app(db_path: Optional[Path] = None) -> FastAPI:
     # --- Include all routers ---
 
     app.include_router(memories.router)
-    app.include_router(connectors.router)
     app.include_router(profiles.router)
     app.include_router(assembly.router)
     app.include_router(analytics.router)

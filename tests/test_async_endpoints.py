@@ -15,25 +15,11 @@ def client(tmp_path, monkeypatch):
     monkeypatch.setattr("src.storage.profiles.DEFAULT_DB", db_path)
     monkeypatch.setattr("src.storage.profiles._DATA_DIR", tmp_path)
     monkeypatch.setattr("src.storage.folders._DATA_DIR", tmp_path)
-    monkeypatch.setattr("src.connectors.base._DATA_DIR", tmp_path)
     monkeypatch.setattr("src.core.webhooks._DATA_DIR", tmp_path)
-    from src.connectors.registry import ConnectorRegistry
-    ConnectorRegistry._instance = None
 
     app = create_app(db_path=db_path)
     with TestClient(app) as c:
         yield c
-
-
-class TestConnectorAsyncEndpoints:
-    def test_connectors_health(self, client):
-        r = client.get("/api/connectors/health")
-        assert r.status_code == 200
-        assert isinstance(r.json(), list)
-
-    def test_connector_sync_not_found(self, client):
-        r = client.post("/api/connectors/nonexistent/sync")
-        assert r.status_code == 404
 
 
 class TestFolderAsyncEndpoints:

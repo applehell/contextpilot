@@ -9,7 +9,6 @@ from src.core.log import get_logger
 
 logger = get_logger("routers.profiles")
 
-from src.connectors.registry import ConnectorRegistry
 from src.storage.profiles import ProfileManager, DEFAULT_ID
 from src.web.deps import (
     MAX_UPLOAD_BYTES,
@@ -26,7 +25,6 @@ router = APIRouter(tags=["profiles"])
 
 def _reload_profile_deps():
     profile_dir = _get_profile_dir()
-    ConnectorRegistry.reload(profile_dir)
     from src.core.embeddings import set_data_dir
     set_data_dir(profile_dir)
     from src.core.scheduler import SyncScheduler

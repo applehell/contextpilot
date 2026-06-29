@@ -1,4 +1,4 @@
-"""Background sync scheduler — periodically syncs connectors and folder sources."""
+"""Background sync scheduler — periodically syncs folder sources."""
 from __future__ import annotations
 
 import asyncio
@@ -52,8 +52,7 @@ class SyncScheduler:
 
     async def run_once(self) -> dict:
         """Run all syncs once and return results."""
-        results = {"folders": {}, "connectors": {}}
-        profile_dir = None
+        results = {"folders": {}}
 
         try:
             from ..storage.folders import FolderManager
@@ -67,22 +66,6 @@ class SyncScheduler:
                     self._events.emit("scheduler", "folder-sync", name, f"+{r.added} ~{r.updated} -{r.removed}")
         except Exception as e:
             results["folders"]["_error"] = str(e)
-
-        try:
-            from ..connectors.registry import ConnectorRegistry
-            registry = ConnectorRegistry.instance(profile_dir)
-            store = self._get_store()
-            for connector in registry.list():
-                if connector.configured and connector.enabled:
-                    try:
-                        r = connector.sync(store)
-                        results["connectors"][connector.name] = {"added": r.added, "updated": r.updated, "removed": r.removed}
-                        if r.added + r.updated + r.removed > 0:
-                            self._events.emit("scheduler", "connector-sync", connector.name, f"+{r.added} ~{r.updated} -{r.removed}")
-                    except Exception as e:
-                        results["connectors"][connector.name] = {"error": str(e)}
-        except Exception as e:
-            results["connectors"]["_error"] = str(e)
 
         # Cleanup expired TTL memories
         try:

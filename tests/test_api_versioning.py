@@ -45,10 +45,6 @@ class TestV1Rewrite:
         assert r1.status_code == r2.status_code
         assert r1.json() == r2.json()
 
-    def test_connectors_v1(self, client):
-        r = client.get("/api/v1/connectors")
-        assert r.status_code == 200
-
     def test_profiles_v1(self, client):
         r = client.get("/api/v1/profiles")
         assert r.status_code == 200

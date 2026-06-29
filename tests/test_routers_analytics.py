@@ -72,10 +72,6 @@ class TestAnalyticsSummary:
         r = client.get("/api/analytics/top-tags", params={"limit": 5})
         assert r.status_code == 200
 
-    def test_analytics_connector_stats(self, client):
-        r = client.get("/api/analytics/connector-stats")
-        assert r.status_code == 200
-
     def test_analytics_memory_growth(self, client):
         r = client.get("/api/analytics/memory-growth", params={"days": 7})
         assert r.status_code == 200

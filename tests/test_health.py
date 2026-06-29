@@ -39,13 +39,6 @@ class TestHealthNewFields:
         assert "db_schema_version" in data
         assert isinstance(data["db_schema_version"], int)
 
-    def test_connectors_present(self, client):
-        data = client.get("/health").json()
-        assert "connectors" in data
-        if data["connectors"] is not None:
-            for key in ("total", "configured", "enabled", "last_sync_errors"):
-                assert key in data["connectors"], f"Missing connector field: {key}"
-
     def test_mcp_present(self, client):
         data = client.get("/health").json()
         assert "mcp" in data
@@ -64,25 +57,8 @@ class TestHealthNewFields:
 class TestHealthDegradedStatus:
     def test_healthy_when_no_errors(self, client):
         data = client.get("/health").json()
-        # With no configured connectors and enough disk, should be healthy
+        # With enough disk, should be healthy
         assert data["status"] == "healthy"
-
-    def test_degraded_on_connector_errors(self, client):
-        """Patch connector registry to simulate sync errors."""
-        mock_connector = MagicMock()
-        mock_connector.configured = True
-        mock_connector.enabled = True
-        mock_connector.info.return_value = {
-            "sync_history": [{"errors": 3, "timestamp": 1}],
-        }
-
-        mock_registry = MagicMock()
-        mock_registry.list.return_value = [mock_connector]
-
-        with patch("src.connectors.registry.ConnectorRegistry.instance", return_value=mock_registry):
-            data = client.get("/health").json()
-            assert data["status"] == "degraded"
-            assert data["connectors"]["last_sync_errors"] == 1
 
     def test_degraded_on_low_disk(self, client):
         """Patch shutil.disk_usage to simulate >90% disk usage."""

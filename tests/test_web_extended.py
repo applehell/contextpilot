@@ -1,4 +1,4 @@
-"""Extended web API tests — covers health, events, connectors, folders, profiles endpoints."""
+"""Extended web API tests — covers health, events, folders, profiles endpoints."""
 from __future__ import annotations
 
 import time
@@ -18,11 +18,7 @@ def client(tmp_path, monkeypatch):
     monkeypatch.setattr("src.storage.profiles.DEFAULT_DB", db_path)
     monkeypatch.setattr("src.storage.profiles._DATA_DIR", tmp_path)
     monkeypatch.setattr("src.storage.folders._DATA_DIR", tmp_path)
-    monkeypatch.setattr("src.connectors.base._DATA_DIR", tmp_path)
     monkeypatch.setattr("src.core.webhooks._DATA_DIR", tmp_path)
-    # Reset singletons
-    from src.connectors.registry import ConnectorRegistry
-    ConnectorRegistry._instance = None
 
     app = create_app(db_path=db_path)
     with TestClient(app) as c:
@@ -95,90 +91,6 @@ class TestEvents:
         assert "api.get" in stats
 
     # SSE stream test skipped — requires async client with timeout handling
-
-
-# ═══════════════════════════════════════════════════════════════
-# CONNECTORS
-# ═══════════════════════════════════════════════════════════════
-
-class TestConnectors:
-    def test_list_connectors(self, client):
-        r = client.get("/api/connectors")
-        assert r.status_code == 200
-        connectors = r.json()
-        assert isinstance(connectors, list)
-        # Paperless should be auto-discovered
-        names = [c["name"] for c in connectors]
-        assert "paperless" in names
-
-    def test_get_connector(self, client):
-        r = client.get("/api/connectors/paperless")
-        assert r.status_code == 200
-        d = r.json()
-        assert d["name"] == "paperless"
-        assert "schema" in d
-        assert "configured" in d
-
-    def test_get_nonexistent_connector(self, client):
-        r = client.get("/api/connectors/nonexistent")
-        assert r.status_code == 404
-
-    def test_setup_connector(self, client):
-        r = client.post("/api/connectors/paperless/setup", json={
-            "url": "http://fake:8000",
-            "token": "faketoken",
-        })
-        assert r.status_code == 200
-        d = r.json()
-        assert d["status"] == "configured"
-        assert "test" in d
-
-    def test_update_connector(self, client):
-        client.post("/api/connectors/paperless/setup", json={
-            "url": "http://fake:8000",
-            "token": "t",
-        })
-        r = client.put("/api/connectors/paperless", json={"sync_tags": "finance"})
-        assert r.status_code == 200
-
-    def test_update_unconfigured_fails(self, client):
-        # Ensure clean state
-        client.delete("/api/connectors/paperless?purge=false")
-        r = client.put("/api/connectors/paperless", json={"sync_tags": "x"})
-        assert r.status_code == 400
-
-    def test_test_connector(self, client):
-        r = client.post("/api/connectors/paperless/test")
-        assert r.status_code == 200
-        d = r.json()
-        assert "ok" in d
-
-    def test_enable_disable(self, client):
-        client.post("/api/connectors/paperless/setup", json={
-            "url": "http://fake:8000",
-            "token": "t",
-        })
-        r = client.post("/api/connectors/paperless/enable?enabled=false")
-        assert r.status_code == 200
-        assert r.json()["enabled"] is False
-
-    def test_remove_connector(self, client):
-        client.post("/api/connectors/paperless/setup", json={
-            "url": "http://fake:8000",
-            "token": "t",
-        })
-        r = client.delete("/api/connectors/paperless?purge=false")
-        assert r.status_code == 200
-        assert r.json()["status"] == "removed"
-
-    def test_remove_with_purge(self, client):
-        client.post("/api/connectors/paperless/setup", json={
-            "url": "http://fake:8000",
-            "token": "t",
-        })
-        r = client.delete("/api/connectors/paperless?purge=true")
-        assert r.status_code == 200
-        assert r.json()["purged_memories"] >= 0
 
 
 # ═══════════════════════════════════════════════════════════════
@@ -543,68 +455,3 @@ class TestInputValidation:
     def test_create_relation_missing_fields(self, client):
         r = client.post("/api/relations", json={})
         assert r.status_code == 400
-
-
-# ═══════════════════════════════════════════════════════════════
-# CONNECTOR ENDPOINTS (extended)
-# ═══════════════════════════════════════════════════════════════
-
-class TestConnectorEndpoints:
-    def test_list_connectors_returns_all(self, client):
-        r = client.get("/api/connectors")
-        assert r.status_code == 200
-        connectors = r.json()
-        assert len(connectors) >= 17
-
-    def test_connectors_have_category(self, client):
-        connectors = client.get("/api/connectors").json()
-        for c in connectors:
-            assert "category" in c, f"Connector {c['name']} missing 'category'"
-
-    def test_connectors_have_setup_guide(self, client):
-        connectors = client.get("/api/connectors").json()
-        for c in connectors:
-            assert "setup_guide" in c, f"Connector {c['name']} missing 'setup_guide'"
-
-    def test_connectors_have_color(self, client):
-        connectors = client.get("/api/connectors").json()
-        for c in connectors:
-            assert "color" in c, f"Connector {c['name']} missing 'color'"
-
-    def test_connector_health(self, client):
-        r = client.get("/api/connectors/health")
-        assert r.status_code == 200
-        assert isinstance(r.json(), list)
-
-    def test_connector_health_fields(self, client):
-        health = client.get("/api/connectors/health").json()
-        for entry in health:
-            assert "name" in entry, f"Health entry missing 'name'"
-            assert "configured" in entry, f"Health entry {entry.get('name')} missing 'configured'"
-            assert "enabled" in entry, f"Health entry {entry.get('name')} missing 'enabled'"
-            assert "error_count" in entry, f"Health entry {entry.get('name')} missing 'error_count'"
-
-    def test_connector_history_not_found(self, client):
-        r = client.get("/api/connectors/nonexistent/history")
-        assert r.status_code == 404
-
-    def test_connector_history_empty(self, client):
-        r = client.get("/api/connectors/rss/history")
-        assert r.status_code == 200
-        assert r.json() == []
-
-
-# ═══════════════════════════════════════════════════════════════
-# CONNECTOR STORE UI
-# ═══════════════════════════════════════════════════════════════
-
-class TestConnectorStoreUI:
-    def test_index_has_connector_store(self, client):
-        r = client.get("/")
-        assert r.status_code == 200
-        assert "Connector Store" in r.text
-
-    def test_index_has_connector_filters(self, client):
-        r = client.get("/")
-        assert r.status_code == 200
-        assert 'conn-filters' in r.text

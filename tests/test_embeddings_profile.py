@@ -18,12 +18,9 @@ def client(tmp_path, monkeypatch):
     monkeypatch.setattr("src.storage.profiles.DEFAULT_DB", db_path)
     monkeypatch.setattr("src.storage.profiles._DATA_DIR", tmp_path)
     monkeypatch.setattr("src.storage.folders._DATA_DIR", tmp_path)
-    monkeypatch.setattr("src.connectors.base._DATA_DIR", tmp_path)
     monkeypatch.setattr("src.core.webhooks._DATA_DIR", tmp_path)
     monkeypatch.setattr("src.core.embeddings._DATA_DIR", tmp_path)
     from src.core.embeddings import close_all_stores
-    from src.connectors.registry import ConnectorRegistry
-    ConnectorRegistry._instance = None
     close_all_stores()
     app = create_app(db_path=db_path)
     with TestClient(app) as c:

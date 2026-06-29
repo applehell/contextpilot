@@ -1,4 +1,4 @@
-"""Analytics endpoints: summary, top memories/tags, connector stats, growth, duplicates, similar."""
+"""Analytics endpoints: summary, top memories/tags, growth, duplicates, similar."""
 from __future__ import annotations
 
 import asyncio
@@ -136,12 +136,6 @@ async def analytics_top_memories(limit: int = Query(20, ge=1, le=100)):
 async def analytics_top_tags(limit: int = Query(20, ge=1, le=100)):
     engine = AnalyticsEngine(_get_db(), _get_memory_store(), _get_usage_store())
     return engine.top_tags(limit)
-
-
-@router.get("/api/analytics/connector-stats")
-async def analytics_connector_stats():
-    engine = AnalyticsEngine(_get_db(), _get_memory_store(), _get_usage_store())
-    return engine.connector_stats()
 
 
 @router.get("/api/analytics/memory-growth")

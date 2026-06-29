@@ -29,7 +29,6 @@ Context Pilot gives your AI assistant **persistent, structured memory**. Store k
 - **No registration required** — install and use immediately
 - **No data leaves your machine** — everything runs on localhost
 - **MIT License** — use, modify, distribute freely
-- **Plugin-based connectors** — extend with simple Python modules
 
 ---
 
@@ -99,8 +98,7 @@ Claude Code now has full access to your knowledge base.
 | Feature | Description |
 |---|---|
 | **Memories** | Create, search (FTS5), tag, pin, TTL, bulk operations |
-| **17 Connectors** | GitHub, Gitea, Paperless-ngx, Email (IMAP), local folders |
-| **Plugin Architecture** | Every connector is a Python module — write your own in minutes |
+| **Folder Sources** | Index local files (PDF, Markdown, code) |
 | **MCP Server** | Built-in Model Context Protocol server (streamable-http, port 8400) |
 | **Knowledge Graph** | Interactive network visualization of memory relationships |
 | **Smart Assembler** | Token-budget assembly with 6 compressors |
