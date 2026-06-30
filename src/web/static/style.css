@@ -1501,16 +1501,6 @@ details.panel > summary:hover { color: var(--accent); }
     flex-shrink: 0;
 }
 
-/* Content fade-in after load */
-.content-loaded {
-    animation: contentFadeIn 0.35s ease;
-}
-
-@keyframes contentFadeIn {
-    from { opacity: 0; transform: translateY(6px); }
-    to { opacity: 1; transform: translateY(0); }
-}
-
 /* ═══════════════════════════════════════════════════════════════
    SETUP WIZARD
    ═══════════════════════════════════════════════════════════════ */
@@ -2497,60 +2487,6 @@ details.panel > summary:hover { color: var(--accent); }
 @keyframes tabFadeIn {
     from { opacity: 0; transform: translateY(8px); }
     to { opacity: 1; transform: translateY(0); }
-}
-
-/* ═══════════════════════════════════════════════════════════════
-   OPERATION STATUS BAR
-   ═══════════════════════════════════════════════════════════════ */
-
-.ops-bar {
-    position: fixed;
-    top: 0;
-    left: 0;
-    right: 0;
-    z-index: 9100;
-    display: flex;
-    flex-direction: column;
-    pointer-events: none;
-}
-
-.ops-bar:empty { display: none; }
-
-.ops-item {
-    height: 28px;
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    padding: 0 24px;
-    background: var(--accent);
-    color: #fff;
-    font-size: 12px;
-    font-weight: 500;
-    font-family: var(--font);
-    animation: opsSlideIn 0.25s ease;
-    pointer-events: auto;
-}
-
-.ops-item .ops-spinner {
-    width: 12px;
-    height: 12px;
-    border: 2px solid rgba(255,255,255,0.3);
-    border-top-color: #fff;
-    border-radius: 50%;
-    animation: spin 0.8s linear infinite;
-    flex-shrink: 0;
-}
-
-.ops-item .ops-text { flex: 1; }
-
-@keyframes opsSlideIn {
-    from { transform: translateY(-100%); opacity: 0; }
-    to { transform: translateY(0); opacity: 1; }
-}
-
-@keyframes opsSlideOut {
-    from { transform: translateY(0); opacity: 1; }
-    to { transform: translateY(-100%); opacity: 0; }
 }
 
 /* ═══════════════════════════════════════════════════════════════

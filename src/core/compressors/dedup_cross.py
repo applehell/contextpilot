@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import copy
 import hashlib
-from typing import List
 
 from ..block import Block
 from .base import BaseCompressor
@@ -45,11 +44,6 @@ class DedupCrossCompressor(BaseCompressor):
         result.content = compressed
         result.invalidate_token_count()
         return result
-
-    def compress_blocks(self, blocks: List[Block]) -> List[Block]:
-        """Convenience: deduplicate across a list of blocks in one call."""
-        self.reset()
-        return [self.compress(b) for b in blocks]
 
     @staticmethod
     def _split_paragraphs(text: str) -> list[str]:

@@ -3935,13 +3935,6 @@ function showToast(title, detail) {
     return id;
 }
 
-function updateToast(id, detail) {
-    const el = document.getElementById(id);
-    if (!el) return;
-    const detailEl = el.querySelector('.toast-detail');
-    if (detailEl) detailEl.textContent = detail;
-}
-
 function completeToast(id, detail, isError) {
     const el = document.getElementById(id);
     if (!el) return;
@@ -4089,11 +4082,6 @@ function showSkeleton(elementId, opts = {}) {
     el.innerHTML = html;
 }
 
-function contentLoaded(elementId) {
-    const el = document.getElementById(elementId);
-    if (el) el.classList.add('content-loaded');
-}
-
 // ═══════════════════════════════════════════════════════════════
 // FLOATING ACTION BUTTON (FAB)
 // ═══════════════════════════════════════════════════════════════
@@ -4136,32 +4124,6 @@ document.addEventListener('click', e => {
         fab.classList.remove('open');
     }
 });
-
-// ═══════════════════════════════════════════════════════════════
-// OPERATION STATUS BAR
-// ═══════════════════════════════════════════════════════════════
-
-function showOperation(id, message) {
-    const bar = document.getElementById('ops-bar');
-    if (!bar) return;
-    let item = document.getElementById('ops-' + id);
-    if (item) {
-        item.querySelector('.ops-text').textContent = message;
-        return;
-    }
-    const html = `<div class="ops-item" id="ops-${escapeAttr(id)}">
-        <div class="ops-spinner"></div>
-        <span class="ops-text">${escapeHtml(message)}</span>
-    </div>`;
-    bar.insertAdjacentHTML('beforeend', html);
-}
-
-function hideOperation(id) {
-    const item = document.getElementById('ops-' + id);
-    if (!item) return;
-    item.style.animation = 'opsSlideOut 0.25s ease forwards';
-    setTimeout(() => item.remove(), 250);
-}
 
 // ═══════════════════════════════════════════════════════════════
 // TAG COLOR CODING

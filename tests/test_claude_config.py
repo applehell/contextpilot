@@ -3,8 +3,6 @@ from __future__ import annotations
 
 import json
 import pytest
-from pathlib import Path
-from unittest.mock import patch
 
 from src.core import claude_config
 
@@ -67,22 +65,6 @@ class TestGetCurrentConfig:
         cfg = claude_config.get_current_config()
         assert cfg is not None
         assert cfg["type"] == "sse"
-
-
-class TestRemoveStdioEntry:
-    def test_removes_stdio_entry(self, isolate_config):
-        config = {"mcpServers": {"context-pilot": {"type": "stdio", "command": "foo"}}}
-        isolate_config.write_text(json.dumps(config))
-        assert claude_config.remove_stdio_entry() is True
-        assert not claude_config.is_registered()
-
-    def test_noop_for_sse_entry(self, isolate_config):
-        claude_config.register_mcp()
-        assert claude_config.remove_stdio_entry() is False
-        assert claude_config.is_registered()
-
-    def test_noop_when_no_entry(self, isolate_config):
-        assert claude_config.remove_stdio_entry() is False
 
 
 class TestAtomicWrite:

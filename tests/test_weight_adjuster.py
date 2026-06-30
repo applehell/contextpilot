@@ -97,25 +97,6 @@ class TestAdjustPriority:
         assert block.priority == Priority.MEDIUM
 
 
-class TestAdjustBlocks:
-    def test_adjusts_all(self, adjuster: WeightAdjuster) -> None:
-        blocks = [
-            Block(content="a", priority=Priority.MEDIUM),
-            Block(content="b", priority=Priority.MEDIUM),
-        ]
-        result = adjuster.adjust_blocks(blocks)
-        assert len(result) == 2
-
-    def test_project_scoped(self, adjuster: WeightAdjuster, store: UsageStore) -> None:
-        bh = block_hash("scoped")
-        records = [UsageRecord(block_hash=bh, project_name="p1", included=True, token_count=10)
-                    for _ in range(10)]
-        store.record_usage(records)
-        blocks = [Block(content="scoped", priority=Priority.MEDIUM)]
-        result = adjuster.adjust_blocks(blocks, project_name="p1")
-        assert len(result) == 1
-
-
 class TestRecomputeAll:
     def test_recompute(self, adjuster: WeightAdjuster, store: UsageStore) -> None:
         bh1 = block_hash("a")

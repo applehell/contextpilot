@@ -1,5 +1,5 @@
 import pytest
-from src.core.block import Block, Priority
+from src.core.block import Block
 from src.core.context import Context
 
 
@@ -55,20 +55,6 @@ def test_context_blocks_returns_copy():
     blocks = ctx.blocks
     blocks.append(Block(content="injected"))
     assert len(ctx) == 1
-
-
-def test_context_blocks_by_priority():
-    ctx = Context()
-    low = Block(content="low", priority=Priority.LOW)
-    high = Block(content="high", priority=Priority.HIGH)
-    med = Block(content="med", priority=Priority.MEDIUM)
-    ctx.add(low)
-    ctx.add(med)
-    ctx.add(high)
-    sorted_blocks = ctx.blocks_by_priority()
-    assert sorted_blocks[0].priority == Priority.HIGH
-    assert sorted_blocks[1].priority == Priority.MEDIUM
-    assert sorted_blocks[2].priority == Priority.LOW
 
 
 def test_context_iter():

@@ -20,7 +20,6 @@ logger = get_logger("core.webhooks")
 
 
 _DATA_DIR = Path(os.environ.get("CONTEXTPILOT_DATA_DIR", str(Path.home() / ".contextpilot")))
-WEBHOOKS_CONFIG = _DATA_DIR / "webhooks.json"
 
 
 @dataclass

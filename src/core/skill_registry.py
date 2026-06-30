@@ -141,24 +141,9 @@ class SkillRegistry:
         ).fetchall()
         return [_row_to_skill(r) for r in rows]
 
-    def list_stale(self) -> List[ExternalSkill]:
-        cutoff = time.time() - _STALE_TIMEOUT
-        rows = self._conn.execute(
-            "SELECT * FROM skill_registry WHERE last_seen <= ? ORDER BY name", (cutoff,),
-        ).fetchall()
-        return [_row_to_skill(r) for r in rows]
-
     def add_blocks_served(self, name: str, count: int) -> None:
         self._conn.execute(
             "UPDATE skill_registry SET blocks_served = blocks_served + ? WHERE name = ?",
             (count, name),
         )
         self._conn.commit()
-
-    def cleanup_stale(self) -> int:
-        cutoff = time.time() - _STALE_TIMEOUT
-        cur = self._conn.execute(
-            "DELETE FROM skill_registry WHERE last_seen <= ?", (cutoff,),
-        )
-        self._conn.commit()
-        return cur.rowcount

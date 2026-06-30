@@ -1,6 +1,6 @@
 from __future__ import annotations
 from typing import List
-from .block import Block, Priority
+from .block import Block
 
 
 class Context:
@@ -23,10 +23,6 @@ class Context:
     @property
     def total_tokens(self) -> int:
         return sum(b.token_count for b in self._blocks)
-
-    def blocks_by_priority(self) -> List[Block]:
-        order = {Priority.HIGH: 0, Priority.MEDIUM: 1, Priority.LOW: 2}
-        return sorted(self._blocks, key=lambda b: order[b.priority])
 
     def __len__(self) -> int:
         return len(self._blocks)

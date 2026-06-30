@@ -3,7 +3,6 @@ from __future__ import annotations
 
 import re
 import shutil
-import sqlite3
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional
@@ -75,17 +74,6 @@ class BackupManager:
             raise ValueError(f"Backup not found: {filename}")
         path.unlink()
 
-    def cleanup_old_backups(self) -> int:
-        backups = self.list_backups()
-        if len(backups) <= self._max_backups:
-            return 0
-        to_delete = backups[self._max_backups:]
-        for b in to_delete:
-            path = self._backup_dir / b["filename"]
-            if path.exists():
-                path.unlink()
-        return len(to_delete)
-
     def export_json(self, store: MemoryStore) -> Dict[str, Any]:
         memories = store.list()
         exported = []
@@ -141,25 +129,3 @@ class BackupManager:
         if age is None:
             return True
         return age > max_age_hours
-
-    def verify_backup(self, filename: str) -> Dict[str, Any]:
-        path = self._validate_filename(filename)
-        if not path.exists():
-            raise ValueError(f"Backup not found: {filename}")
-        try:
-            conn = sqlite3.connect(str(path))
-            conn.execute("SELECT 1")
-            row = conn.execute("PRAGMA user_version").fetchone()
-            schema_version = row[0] if row else 0
-            tables = {r[0] for r in conn.execute(
-                "SELECT name FROM sqlite_master WHERE type='table'"
-            ).fetchall()}
-            if "memories" in tables:
-                row = conn.execute("SELECT COUNT(*) FROM memories").fetchone()
-                memory_count = row[0] if row else 0
-            else:
-                memory_count = 0
-            conn.close()
-            return {"valid": True, "memory_count": memory_count, "schema_version": schema_version}
-        except Exception as exc:
-            return {"valid": False, "error": str(exc)}

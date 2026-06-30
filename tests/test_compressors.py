@@ -669,13 +669,6 @@ class TestDedupCrossCompressor:
         # After reset, same content should be kept.
         assert "modular architecture" in result_b.content
 
-    def test_compress_blocks_convenience(self):
-        blocks = [make_block(PARA_A), make_block(PARA_B)]
-        results = self.comp.compress_blocks(blocks)
-        assert len(results) == 2
-        assert "modular architecture" in results[0].content
-        assert "modular architecture" not in results[1].content
-
     def test_normalisation_catches_whitespace_diffs(self):
         block_a = make_block("Hello   world  test")
         block_b = make_block("Hello world test")
@@ -709,10 +702,6 @@ class TestDedupCrossCompressor:
         block = make_block("")
         result = self.comp.compress(block)
         assert result.content == ""
-
-    def test_compress_blocks_with_empty_list(self):
-        results = self.comp.compress_blocks([])
-        assert results == []
 
     def test_all_paragraphs_already_seen_yields_empty(self):
         block_a = make_block("Shared paragraph here.")

@@ -57,7 +57,6 @@ class TestListAliveStale:
         alive = registry.list_alive()
         assert len(alive) == 1
         assert alive[0].name == "fresh"
-        assert registry.list_stale() == []
 
     def test_old_skill_is_stale(self, registry: SkillRegistry) -> None:
         registry.register("old", "desc")
@@ -68,31 +67,6 @@ class TestListAliveStale:
         )
         registry._conn.commit()
         assert registry.list_alive() == []
-        stale = registry.list_stale()
-        assert len(stale) == 1
-        assert stale[0].name == "old"
-
-
-class TestCleanupStale:
-    def test_cleanup_removes_stale(self, registry: SkillRegistry) -> None:
-        registry.register("fresh", "desc")
-        registry.register("old", "desc")
-        old_time = time.time() - _STALE_TIMEOUT - 100
-        registry._conn.execute(
-            "UPDATE skill_registry SET last_seen = ? WHERE name = ?",
-            (old_time, "old"),
-        )
-        registry._conn.commit()
-
-        removed = registry.cleanup_stale()
-        assert removed == 1
-        assert registry.get("old") is None
-        assert registry.get("fresh") is not None
-
-    def test_cleanup_nothing_stale(self, registry: SkillRegistry) -> None:
-        registry.register("fresh", "desc")
-        removed = registry.cleanup_stale()
-        assert removed == 0
 
 
 class TestUnregister:
