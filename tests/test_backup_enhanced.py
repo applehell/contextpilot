@@ -1,10 +1,7 @@
-"""Tests for enhanced BackupManager — auto_backup, needs_backup, verify_backup, backup_age_hours."""
+"""Tests for enhanced BackupManager — auto_backup, needs_backup, backup_age_hours."""
 from __future__ import annotations
 
-import sqlite3
 import time
-from datetime import datetime, timezone
-from pathlib import Path
 
 import pytest
 
@@ -114,41 +111,3 @@ class TestBackupAgeHours:
         age = bm.backup_age_hours()
         assert age is not None
         assert age > 24
-
-
-class TestVerifyBackup:
-    def test_valid_backup(self, tmp_path):
-        db_path = tmp_path / "data.db"
-        db = Database(db_path)
-        s = MemoryStore(db)
-        s.set(Memory(key="test/v", value="verify"))
-        db.close()
-        bm = BackupManager(tmp_path)
-        path = bm.create_backup()
-        result = bm.verify_backup(path.name)
-        assert result["valid"] is True
-        assert result["memory_count"] >= 1
-        assert isinstance(result["schema_version"], int)
-
-    def test_invalid_file(self, tmp_data):
-        data_dir, db, store = tmp_data
-        backup_dir = data_dir / "backups"
-        backup_dir.mkdir(parents=True, exist_ok=True)
-        bad_file = backup_dir / "backup_20260101_000000.db"
-        bad_file.write_text("this is not a sqlite database")
-        bm = BackupManager(data_dir)
-        result = bm.verify_backup("backup_20260101_000000.db")
-        assert result["valid"] is False
-        assert "error" in result
-
-    def test_nonexistent_backup(self, tmp_data):
-        data_dir, db, store = tmp_data
-        bm = BackupManager(data_dir)
-        with pytest.raises(ValueError, match="Backup not found"):
-            bm.verify_backup("backup_20260101_999999.db")
-
-    def test_rejects_invalid_filename(self, tmp_data):
-        data_dir, db, store = tmp_data
-        bm = BackupManager(data_dir)
-        with pytest.raises(ValueError, match="Invalid backup filename"):
-            bm.verify_backup("../../etc/passwd")

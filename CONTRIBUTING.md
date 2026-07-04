@@ -40,7 +40,6 @@ pytest tests/test_mcp_server.py -v
 src/
   core/         # Block model, assembler, compressors, relevance engine
   storage/      # SQLite database, memory store, profiles, usage tracking
-  connectors/   # Plugin-based connectors (Paperless, GitHub, Gitea, etc.)
   importers/    # Import from Claude, Copilot, SQLite
   interfaces/   # MCP server, CLI
   web/          # FastAPI app, templates, static assets

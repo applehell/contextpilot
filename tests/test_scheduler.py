@@ -81,10 +81,8 @@ class TestRunOnce:
         mock_result.updated = 1
         mock_result.removed = 0
 
-        with patch("src.storage.folders.FolderManager") as MockFM, \
-             patch("src.connectors.registry.ConnectorRegistry") as MockCR:
+        with patch("src.storage.folders.FolderManager") as MockFM:
             MockFM.return_value.scan_all.return_value = {"test_folder": mock_result}
-            MockCR.instance.return_value.list.return_value = []
 
             results = asyncio.new_event_loop().run_until_complete(s.run_once())
 
@@ -99,7 +97,6 @@ class TestRunOnce:
         s._get_profile_dir = None
 
         with patch("src.storage.folders.FolderManager", side_effect=Exception("boom")):
-            with patch("src.connectors.registry.ConnectorRegistry", side_effect=Exception("no conn")):
-                results = asyncio.new_event_loop().run_until_complete(s.run_once())
+            results = asyncio.new_event_loop().run_until_complete(s.run_once())
 
         assert "_error" in results["folders"]

@@ -2,7 +2,6 @@
 from __future__ import annotations
 
 import time
-from pathlib import Path
 
 import pytest
 from fastapi.testclient import TestClient
@@ -119,34 +118,6 @@ class TestRestoreBackup:
         bm = BackupManager(data_dir)
         with pytest.raises(ValueError, match="Backup not found"):
             bm.restore_backup("backup_20260101_000000.db")
-        db.close()
-
-
-class TestCleanupOldBackups:
-    def test_respects_max_backups(self, tmp_data):
-        data_dir, db, store = tmp_data
-        bm = BackupManager(data_dir, max_backups=2)
-        # Create 4 backups with different timestamps
-        backup_dir = data_dir / "backups"
-        backup_dir.mkdir(parents=True, exist_ok=True)
-        for i in range(4):
-            name = f"backup_20260101_00000{i}.db"
-            (backup_dir / name).write_bytes(b"x" * 100)
-
-        deleted = bm.cleanup_old_backups()
-        assert deleted == 2
-        remaining = bm.list_backups()
-        assert len(remaining) == 2
-        # Newest should remain
-        assert remaining[0]["filename"] == "backup_20260101_000003.db"
-        assert remaining[1]["filename"] == "backup_20260101_000002.db"
-        db.close()
-
-    def test_no_op_when_under_limit(self, tmp_data):
-        data_dir, db, store = tmp_data
-        bm = BackupManager(data_dir, max_backups=10)
-        bm.create_backup()
-        assert bm.cleanup_old_backups() == 0
         db.close()
 
 

@@ -34,13 +34,13 @@ def test_traversal_entry_is_skipped(tmp_path: Path) -> None:
     zip_data = _make_zip({
         "profile.json": meta,
         "../../evil.txt": "MALICIOUS CONTENT",
-        "connector_rss.json": '{"ok": true}',
+        "folders.json": '{"ok": true}',
     })
     mgr = ProfileManager()
     profile = mgr.import_profile(zip_data)
 
     profile_dir = tmp_path / "profiles" / profile.id
-    assert (profile_dir / "connector_rss.json").exists()
+    assert (profile_dir / "folders.json").exists()
 
     evil_path = (tmp_path / "evil.txt")
     assert not evil_path.exists(), "Path traversal entry should have been skipped"
@@ -53,11 +53,11 @@ def test_normal_entries_still_extracted(tmp_path: Path) -> None:
     meta = json.dumps({"name": "normal", "description": ""})
     zip_data = _make_zip({
         "profile.json": meta,
-        "connector_email.json": '{"host": "imap.example.com"}',
+        "folders.json": '{"sources": []}',
         "webhooks.json": '{"hooks": {}}',
     })
     mgr = ProfileManager()
     profile = mgr.import_profile(zip_data)
     profile_dir = tmp_path / "profiles" / profile.id
-    assert (profile_dir / "connector_email.json").exists()
+    assert (profile_dir / "folders.json").exists()
     assert (profile_dir / "webhooks.json").exists()

@@ -43,18 +43,6 @@ class AnalyticsEngine:
         sorted_tags = sorted(tag_counts.items(), key=lambda x: -x[1])[:limit]
         return [{"tag": t, "count": c} for t, c in sorted_tags]
 
-    def connector_stats(self) -> List[Dict[str, Any]]:
-        rows = self._db.conn.execute("SELECT key FROM memories").fetchall()
-        counts: Dict[str, int] = {}
-        for r in rows:
-            key = r["key"]
-            source = key.split("/")[0] if "/" in key else "(none)"
-            counts[source] = counts.get(source, 0) + 1
-        return sorted(
-            [{"source": s, "count": c} for s, c in counts.items()],
-            key=lambda x: -x["count"],
-        )
-
     def memory_growth(self, days: int = 30) -> List[Dict[str, Any]]:
         rows = self._db.conn.execute(
             "SELECT created_at FROM memories ORDER BY created_at ASC"

@@ -19,22 +19,11 @@ class SensitivityReport:
     findings: List[SecretFinding] = field(default_factory=list)
 
     @property
-    def is_sensitive(self) -> bool:
-        return len(self.findings) > 0
-
-    @property
     def max_severity(self) -> str:
         if not self.findings:
             return "none"
         order = {"critical": 0, "high": 1, "medium": 2, "low": 3}
         return min(self.findings, key=lambda f: order.get(f.severity, 99)).severity
-
-    @property
-    def severity_counts(self) -> dict:
-        counts = {"critical": 0, "high": 0, "medium": 0, "low": 0}
-        for f in self.findings:
-            counts[f.severity] = counts.get(f.severity, 0) + 1
-        return {k: v for k, v in counts.items() if v > 0}
 
 
 # (pattern_name, severity, regex)
@@ -112,8 +101,3 @@ class SecretDetector:
             if severity in ("critical", "high"):
                 result = pattern.sub(f"[REDACTED:{name}]", result)
         return result
-
-    def classify_memory(self, key: str, value: str, tags: list) -> str:
-        """Returns severity level: 'critical', 'high', 'medium', 'low', or 'none'."""
-        report = self.scan(f"{key}\n{value}\n{' '.join(tags)}")
-        return report.max_severity

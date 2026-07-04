@@ -68,15 +68,3 @@ def get_current_config() -> Optional[dict]:
     """Get the current MCP config entry for Context Pilot."""
     config = _load_config()
     return config.get("mcpServers", {}).get(MCP_NAME)
-
-
-def remove_stdio_entry() -> bool:
-    """Remove any stdio-based Context Pilot entry (the old auto-start config)."""
-    config = _load_config()
-    servers = config.get("mcpServers", {})
-    entry = servers.get(MCP_NAME)
-    if entry and entry.get("type") == "stdio":
-        del servers[MCP_NAME]
-        _save_config(config)
-        return True
-    return False

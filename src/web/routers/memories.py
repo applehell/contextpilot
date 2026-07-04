@@ -2,7 +2,9 @@
 from __future__ import annotations
 
 import asyncio
+import hmac
 import json
+import os
 import time
 from typing import Any, Dict, List
 
@@ -24,6 +26,7 @@ from src.web.deps import (
     _remove_from_index,
     _secret_detector,
     FeedbackIn,
+    InboundPayload,
     MemoryIn,
 )
 
@@ -521,3 +524,21 @@ async def submit_feedback(req: FeedbackIn):
         helpful=req.helpful,
     ))
     return {"status": "recorded", "block_hash": bh}
+
+
+# --- Inbound Webhook ---
+
+@router.post("/api/inbound/{token}")
+async def inbound_webhook(token: str, payload: InboundPayload):
+    expected = os.environ.get("CONTEXTPILOT_INBOUND_TOKEN")
+    if expected is None:
+        raise HTTPException(status_code=403, detail="Inbound webhooks not configured")
+    if not hmac.compare_digest(token, expected):
+        raise HTTPException(status_code=403, detail="Invalid token")
+    if not payload.key or not payload.key.strip():
+        raise HTTPException(status_code=400, detail="Missing key")
+    if not payload.value or not payload.value.strip():
+        raise HTTPException(status_code=400, detail="Missing value")
+    store = _get_memory_store()
+    store.set(Memory(key=payload.key.strip(), value=payload.value.strip(), tags=payload.tags))
+    return {"status": "ok", "key": payload.key.strip()}

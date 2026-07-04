@@ -12,7 +12,7 @@
     <link rel="apple-touch-icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Ccircle cx='16' cy='16' r='15' fill='%23c4a882' stroke='%23a08060' stroke-width='1'/%3E%3Cpath d='M16 4 L18.5 13.5 L28 16 L18.5 18.5 L16 28 L13.5 18.5 L4 16 L13.5 13.5Z' fill='%23fff' stroke='%23a08060' stroke-width='0.5'/%3E%3Ccircle cx='16' cy='16' r='2.5' fill='%23a08060'/%3E%3C/svg%3E">
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="/static/style.css?v=40">
+    <link rel="stylesheet" href="/static/style.css?v=41">
     <script src="https://unpkg.com/vis-network@9.1.9/standalone/umd/vis-network.min.js"></script>
     <link rel="stylesheet" href="https://unpkg.com/easymde@2.18.0/dist/easymde.min.css">
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/font-awesome@4.7.0/css/font-awesome.min.css">
@@ -31,7 +31,7 @@
             <p>Your knowledge hub for AI workflows — memories, documents, and live context.</p>
             <ul class="welcome-features">
                 <li>Store, search and organize memories with full-text search</li>
-                <li>Map folders and sync Paperless-ngx documents as knowledge sources</li>
+                <li>Map local folders (PDF, Markdown, code) as knowledge sources</li>
                 <li>Visualize connections in your knowledge graph</li>
                 <li>Live activity feed — see everything in real-time via SSE</li>
                 <li>Detect sensitive data and intelligently assemble context</li>
@@ -66,8 +66,8 @@
                                 <div><h4>Memories</h4><p>Store, search and organize knowledge with full-text search</p></div>
                             </div>
                             <div class="wizard-feature-card">
-                                <div class="wizard-feature-icon">&#128268;</div>
-                                <div><h4>Connectors</h4><p>Sync from Paperless, Gitea, Home Assistant, Email and more</p></div>
+                                <div class="wizard-feature-icon">&#128193;</div>
+                                <div><h4>Folder Sources</h4><p>Index local files (PDF, Markdown, code) as memories</p></div>
                             </div>
                             <div class="wizard-feature-card">
                                 <div class="wizard-feature-icon">&#128200;</div>
@@ -98,7 +98,7 @@
                         <div class="wizard-info-icon">&#128450;</div>
                         <div>
                             <strong>What's stored here:</strong><br>
-                            SQLite databases (memories, FTS index, embeddings), profile configs, connector settings, folder sources, webhook configs.
+                            SQLite databases (memories, FTS index, embeddings), profile configs, folder sources, webhook configs.
                             Everything is file-based — easy to back up and migrate.
                         </div>
                     </div>
@@ -108,7 +108,7 @@
                 <div class="wizard-step" data-wizard-step="2">
                     <div class="wizard-step-icon">&#128100;</div>
                     <h2>Your First Profile</h2>
-                    <p class="wizard-desc">Profiles keep your data completely isolated. Each profile gets its own database, connectors, and folder sources. You can create more later.</p>
+                    <p class="wizard-desc">Profiles keep your data completely isolated. Each profile gets its own database, memories, and folder sources. You can create more later.</p>
                     <div class="wizard-input-group">
                         <label>Profile Name</label>
                         <input type="text" id="wizard-profile-name" placeholder="e.g. Work, Personal, Homelab..." value="default">
@@ -118,63 +118,14 @@
                         <div class="wizard-info-icon">&#128161;</div>
                         <div>
                             <strong>What's isolated per profile:</strong><br>
-                            Memories &amp; tags, connector configs, folder sources, webhooks, embeddings, templates, and the knowledge graph.
+                            Memories &amp; tags, folder sources, webhooks, embeddings, templates, and the knowledge graph.
                             Switch profiles instantly from the header dropdown.
                         </div>
                     </div>
                 </div>
 
-                <!-- Step 3: Connectors -->
+                <!-- Step 3: Assembler -->
                 <div class="wizard-step" data-wizard-step="3">
-                    <div class="wizard-step-icon">&#128268;</div>
-                    <h2>Source Connectors</h2>
-                    <p class="wizard-desc">Connectors automatically sync knowledge from external services into your memory database. Configure them later under Sources.</p>
-                    <div class="wizard-connector-list" id="wizard-connectors">
-                        <div class="wizard-connector">
-                            <div class="wizard-connector-icon">&#128194;</div>
-                            <div>
-                                <div class="wizard-connector-name">Folder Mapping</div>
-                                <div class="wizard-connector-desc">Index local files (PDF, Markdown, code) as memories</div>
-                            </div>
-                            <div class="wizard-connector-badge">Built-in</div>
-                        </div>
-                        <div class="wizard-connector">
-                            <div class="wizard-connector-icon">&#128196;</div>
-                            <div>
-                                <div class="wizard-connector-name">Paperless-ngx</div>
-                                <div class="wizard-connector-desc">Sync OCR'd documents with tag filtering</div>
-                            </div>
-                            <div class="wizard-connector-badge">REST API</div>
-                        </div>
-                        <div class="wizard-connector">
-                            <div class="wizard-connector-icon">&#127968;</div>
-                            <div>
-                                <div class="wizard-connector-name">Home Assistant</div>
-                                <div class="wizard-connector-desc">Import entities, automations, and device states</div>
-                            </div>
-                            <div class="wizard-connector-badge">REST API</div>
-                        </div>
-                        <div class="wizard-connector">
-                            <div class="wizard-connector-icon">&#128231;</div>
-                            <div>
-                                <div class="wizard-connector-name">Email (IMAP)</div>
-                                <div class="wizard-connector-desc">Sync emails from multiple accounts as memories</div>
-                            </div>
-                            <div class="wizard-connector-badge">IMAP</div>
-                        </div>
-                        <div class="wizard-connector">
-                            <div class="wizard-connector-icon">&#128025;</div>
-                            <div>
-                                <div class="wizard-connector-name">Gitea</div>
-                                <div class="wizard-connector-desc">Import issues, repos, and wiki content</div>
-                            </div>
-                            <div class="wizard-connector-badge">REST API</div>
-                        </div>
-                    </div>
-                </div>
-
-                <!-- Step 4: Assembler -->
-                <div class="wizard-step" data-wizard-step="4">
                     <div class="wizard-step-icon">&#9881;</div>
                     <h2>Context Assembler</h2>
                     <p class="wizard-desc">The assembler intelligently selects and compresses memories to fit within a token budget — perfect for feeding context to AI models.</p>
@@ -207,8 +158,8 @@
                     </div>
                 </div>
 
-                <!-- Step 5: Memories -->
-                <div class="wizard-step" data-wizard-step="5">
+                <!-- Step 4: Memories -->
+                <div class="wizard-step" data-wizard-step="4">
                     <div class="wizard-step-icon">&#128218;</div>
                     <h2>Managing Memories</h2>
                     <p class="wizard-desc">Memories are the building blocks of your knowledge base. Each memory has a key, value, and optional tags.</p>
@@ -240,8 +191,8 @@
                     </div>
                 </div>
 
-                <!-- Step 6: Finish -->
-                <div class="wizard-step" data-wizard-step="6">
+                <!-- Step 5: Finish -->
+                <div class="wizard-step" data-wizard-step="5">
                     <div style="text-align:center;padding-top:24px;">
                         <div class="wizard-finish-orb">
                             <div class="orb-ring"></div>
@@ -268,7 +219,7 @@
                             </div>
                             <div class="wizard-feature-card">
                                 <div class="wizard-feature-icon">&#128268;</div>
-                                <div><h4>Configure connectors</h4><p>Set up Paperless, Gitea, or folder sync</p></div>
+                                <div><h4>Map a folder</h4><p>Index local files (PDF, Markdown, code) under Sources</p></div>
                             </div>
                             <div class="wizard-feature-card">
                                 <div class="wizard-feature-icon">&#129302;</div>
@@ -280,7 +231,7 @@
             </div>
 
             <div class="wizard-footer">
-                <span class="wizard-step-label" id="wizard-step-label">Step 1 of 7</span>
+                <span class="wizard-step-label" id="wizard-step-label">Step 1 of 6</span>
                 <div class="wizard-btns">
                     <button class="wizard-btn-skip" id="wizard-skip-btn" onclick="wizardSkip()">Skip setup</button>
                     <button class="wizard-btn wizard-btn-secondary" id="wizard-back-btn" onclick="wizardBack()" style="display:none;">Back</button>
@@ -371,7 +322,6 @@
                 <div class="status-card"><div class="card-title">Tokens</div><div class="card-value" id="dash-tokens">--</div><div class="card-detail">total tokens</div></div>
                 <div class="status-card"><div class="card-title">Skills</div><div class="card-value" id="dash-skills">--</div><div class="card-detail" id="dash-skills-detail">connected</div></div>
                 <div class="status-card"><div class="card-title">MCP</div><div class="card-value" id="dash-mcp-status">--</div><div class="card-detail" id="dash-mcp-detail"></div></div>
-                <div class="status-card"><div class="card-title">Connectors</div><div class="card-value" id="dash-connectors">--</div><div class="card-detail" id="dash-connectors-detail">configured</div></div>
                 <div class="status-card"><div class="card-title">Scheduler</div><div class="card-value" id="dash-scheduler">--</div><div class="card-detail" id="dash-scheduler-detail"></div></div>
                 <div class="status-card"><div class="card-title">Trash</div><div class="card-value" id="dash-trash">0</div><div class="card-detail"><a href="#" onclick="showTrash();return false;" style="font-size:11px;color:var(--accent);">View trash</a></div></div>
                 <div class="status-card"><div class="card-title">Today</div><div class="card-value" id="dash-new-today">--</div><div class="card-detail" id="dash-new-today-detail">new + updated</div></div>
@@ -383,7 +333,7 @@
                     <h2>Statistics</h2>
                     <button class="btn btn-small" onclick="loadDashboardStats()">Refresh</button>
                 </div>
-                <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:16px;">
+                <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;">
                     <div>
                         <label>Top Tags</label>
                         <div id="dash-top-tags" style="margin-top:4px;"></div>
@@ -391,10 +341,6 @@
                     <div>
                         <label>Size Distribution</label>
                         <div id="dash-size-dist" style="margin-top:4px;"></div>
-                    </div>
-                    <div>
-                        <label>Connector Health</label>
-                        <div id="dash-connector-health" style="margin-top:4px;"></div>
                     </div>
                 </div>
             </div>
@@ -601,14 +547,6 @@
                 <div id="scheduler-status" style="font-size:13px;color:var(--text-secondary);"></div>
             </div>
             <div class="panel">
-                <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;">
-                    <h2 style="margin:0;">Connector Store</h2>
-                    <span id="conn-count" class="muted" style="font-size:13px;"></span>
-                </div>
-                <div class="connector-filters" id="conn-filters"></div>
-                <div class="connector-store" id="connectors-list"></div>
-            </div>
-            <div class="panel">
                 <div style="display:flex;justify-content:space-between;align-items:center;">
                     <h2>Folder Sources</h2>
                     <div style="display:flex;gap:8px;">
@@ -787,7 +725,7 @@
                             <button class="btn btn-small" onclick="exportActiveProfile()">Export Profile ZIP</button>
                             <label class="btn btn-small" style="cursor:pointer;text-align:center;">Import Profile ZIP <input type="file" accept=".zip" style="display:none" onchange="importProfileZip(this)"></label>
                         </div>
-                        <p style="font-size:11px;color:var(--text-muted);margin-top:8px;">ZIP contains DB, connectors, folders, webhooks. Full profile backup &amp; restore.</p>
+                        <p style="font-size:11px;color:var(--text-muted);margin-top:8px;">ZIP contains DB, folders, webhooks. Full profile backup &amp; restore.</p>
                     </div>
                 </div>
             </div>
@@ -848,7 +786,7 @@
     <!-- Global Search -->
     <div class="global-search-overlay" id="global-search-overlay">
         <div class="global-search-box">
-            <input type="text" id="global-search-input" placeholder="Search memories, templates, connectors..." oninput="globalSearch()">
+            <input type="text" id="global-search-input" placeholder="Search memories, templates, folders..." oninput="globalSearch()">
             <div class="global-search-results" id="global-search-results"></div>
         </div>
     </div>
@@ -905,11 +843,10 @@
     </div>
 
     <!-- Operation Status Bar -->
-    <div class="ops-bar" id="ops-bar"></div>
 
     <div id="progress-toast"></div>
 
-    <script src="/static/app.js?v=45"></script>
+    <script src="/static/app.js?v=47"></script>
     <script>init();</script>
 </body>
 </html>

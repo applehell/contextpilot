@@ -68,7 +68,6 @@ class TestGlobalSearch:
         data = r.json()
         assert "memories" in data
         assert "templates" in data
-        assert "connectors" in data
         assert "folders" in data
         assert len(data["memories"]) >= 1
 
@@ -255,7 +254,6 @@ class TestScheduler:
         assert r.status_code == 200
         data = r.json()
         assert "folders" in data
-        assert "connectors" in data
 
 
 class TestEmbeddings:

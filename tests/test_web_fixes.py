@@ -20,10 +20,7 @@ def client(tmp_path, monkeypatch):
     monkeypatch.setattr("src.storage.profiles.DEFAULT_DB", db_path)
     monkeypatch.setattr("src.storage.profiles._DATA_DIR", tmp_path)
     monkeypatch.setattr("src.storage.folders._DATA_DIR", tmp_path)
-    monkeypatch.setattr("src.connectors.base._DATA_DIR", tmp_path)
     monkeypatch.setattr("src.core.webhooks._DATA_DIR", tmp_path)
-    from src.connectors.registry import ConnectorRegistry
-    ConnectorRegistry._instance = None
     monkeypatch.setattr("src.web.app.API_KEY", None)
 
     app = create_app(db_path=db_path)
@@ -40,10 +37,7 @@ def populated_client(tmp_path, monkeypatch):
     monkeypatch.setattr("src.storage.profiles.DEFAULT_DB", db_path)
     monkeypatch.setattr("src.storage.profiles._DATA_DIR", tmp_path)
     monkeypatch.setattr("src.storage.folders._DATA_DIR", tmp_path)
-    monkeypatch.setattr("src.connectors.base._DATA_DIR", tmp_path)
     monkeypatch.setattr("src.core.webhooks._DATA_DIR", tmp_path)
-    from src.connectors.registry import ConnectorRegistry
-    ConnectorRegistry._instance = None
     monkeypatch.setattr("src.web.app.API_KEY", None)
 
     app = create_app(db_path=db_path)
@@ -156,10 +150,7 @@ class TestDBPathEnvVar:
         monkeypatch.setattr("src.storage.profiles.DEFAULT_DB", tmp_path / "default.db")
         monkeypatch.setattr("src.storage.profiles._DATA_DIR", tmp_path)
         monkeypatch.setattr("src.storage.folders._DATA_DIR", tmp_path)
-        monkeypatch.setattr("src.connectors.base._DATA_DIR", tmp_path)
         monkeypatch.setattr("src.core.webhooks._DATA_DIR", tmp_path)
-        from src.connectors.registry import ConnectorRegistry
-        ConnectorRegistry._instance = None
         monkeypatch.setattr("src.web.app.API_KEY", None)
 
         monkeypatch.setenv("CONTEXTPILOT_DB_PATH", str(custom_db))

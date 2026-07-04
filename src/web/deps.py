@@ -6,10 +6,8 @@ import threading
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
-from fastapi import HTTPException
 from pydantic import BaseModel
 
-from src.connectors.registry import ConnectorRegistry
 from src.core.assembler import Assembler
 from src.core.block import Block
 from src.core.compressors.bullet_extract import BulletExtractCompressor
@@ -173,17 +171,6 @@ def _init_db(db_path: Optional[Path] = None) -> None:
 def _get_profile_dir() -> Path:
     pm = ProfileManager()
     return pm.active_data_dir
-
-
-def _get_connectors():
-    return ConnectorRegistry.instance(_get_profile_dir())
-
-
-def _get_connector(name: str):
-    c = _get_connectors().get(name)
-    if not c:
-        raise HTTPException(404, f"Connector '{name}' not found")
-    return c
 
 
 _events = EventBus.instance()

@@ -102,30 +102,6 @@ class TestTopTags:
         db.close()
 
 
-class TestConnectorStats:
-    def test_groups_by_source(self, engine):
-        eng, db = engine
-        result = eng.connector_stats()
-        source_map = {r["source"]: r["count"] for r in result}
-        assert source_map["github"] == 2
-        assert source_map["confluence"] == 1
-        assert source_map["manual"] == 1
-        assert source_map["(none)"] == 1
-        db.close()
-
-    def test_sorted_by_count_desc(self, engine):
-        eng, db = engine
-        result = eng.connector_stats()
-        counts = [r["count"] for r in result]
-        assert counts == sorted(counts, reverse=True)
-        db.close()
-
-    def test_empty_db(self, empty_engine):
-        eng, db = empty_engine
-        assert eng.connector_stats() == []
-        db.close()
-
-
 class TestMemoryGrowth:
     def test_returns_daily_counts(self, engine):
         eng, db = engine
@@ -194,11 +170,6 @@ class TestAnalyticsAPI:
 
     def test_top_tags_endpoint(self, client):
         r = client.get("/api/analytics/top-tags?limit=5")
-        assert r.status_code == 200
-        assert isinstance(r.json(), list)
-
-    def test_connector_stats_endpoint(self, client):
-        r = client.get("/api/analytics/connector-stats")
         assert r.status_code == 200
         assert isinstance(r.json(), list)
 

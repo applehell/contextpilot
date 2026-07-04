@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="https://img.shields.io/badge/version-4.5.0-blue?style=flat-square" alt="Version">
+  <img src="https://img.shields.io/badge/version-4.6.0-blue?style=flat-square" alt="Version">
   <img src="https://img.shields.io/docker/pulls/applehell/contextpilot?style=flat-square&color=blue" alt="Docker Pulls">
   <img src="https://img.shields.io/docker/image-size/applehell/contextpilot/latest?style=flat-square&color=blue" alt="Image Size">
   <img src="https://img.shields.io/badge/python-3.11+-3776AB?style=flat-square&logo=python&logoColor=white" alt="Python">
@@ -28,7 +28,7 @@
 
 ## What is Context Pilot?
 
-Context Pilot gives your AI assistant **persistent, structured memory**. It stores knowledge as searchable memories with tags, connects to external sources (GitHub, Gitea, Paperless-ngx, Email, local folders), and serves context to Claude Code via an MCP Server — all through a clean web UI.
+Context Pilot gives your AI assistant **persistent, structured memory**. It stores knowledge as searchable memories with tags, indexes local folders, and serves context to Claude Code via an MCP Server — all through a clean web UI.
 
 **Key idea:** Instead of repeating yourself, teach your AI once. Context Pilot remembers.
 
@@ -100,12 +100,12 @@ python -m src.web --mcp-port 8500          # Custom MCP port
 
 | Tab | Description |
 |---|---|
-| **Dashboard** | Stats cards, top tags, size distribution, connector health, import, live activity (SSE), context preview |
+| **Dashboard** | Stats cards, top tags, size distribution, import, live activity (SSE), context preview |
 | **Memories** | Full CRUD with Markdown editor, search, filters, tags, TTL, pin, bulk ops, compact view, collapsible sidebar |
 | **Skills** | Connected MCP skill registry with status indicators |
 | **Graph** | Interactive knowledge graph (vis.js) with search, physics toggle, navigation buttons, node detail panel |
 | **Secrets** | Scan memories for API keys, passwords, tokens (OWASP patterns) |
-| **Sources** | Connector Store (17 sources), folder mapping, webhooks, auto-sync scheduler |
+| **Sources** | Folder mapping, webhooks, auto-sync scheduler |
 | **Assembler** | Templates, auto-suggest, 6 compressors, manual block assembly, export (CLAUDE.md, Markdown) |
 | **Settings** | Profiles, MCP server control, DB maintenance, import/export hub, scheduler, system info |
 
@@ -126,30 +126,12 @@ python -m src.web --mcp-port 8500          # Custom MCP port
 | **Backup** | Create, list, restore, delete backups via API |
 | **Export** | JSON, CLAUDE.md, Markdown export (all or filtered by tag) |
 
-### Connector Store — 17 Sources
+### Folder Sources
 
-| Category | Connector | What it syncs |
-|---|---|---|
-| **Documents** | Paperless-ngx | OCR'd documents via REST API |
-| | Microsoft Excel | Spreadsheets as markdown tables (openpyxl) |
-| | Google Drive | Docs, Sheets, Slides via service account |
-| **Development** | GitHub | Repos, releases, READMEs, issues |
-| | Gitea | Self-hosted repos, wikis, packages |
-| **Knowledge** | Obsidian Vault | Markdown notes with frontmatter |
-| | Bookmarks | Web pages fetched and indexed |
-| | RSS / Atom Feeds | Feed articles (no external deps) |
-| | Notion | Pages and databases via API |
-| | KeePass | Notes, titles, URLs only (never passwords) |
-| | Bitwarden | Secure Notes only (never logins) |
-| **Communication** | Email (IMAP) | Emails from any IMAP server |
-| | Telegram | Bot messages via Bot API |
-| | Microsoft Teams | Channel messages via Graph API |
-| **Infrastructure** | Kubernetes | Deployments, services, configmaps (never secrets) |
-| | Dockge | Docker Compose stacks (env values redacted) |
-| **Smart Home** | Home Assistant | Automations, scenes, entities |
-| **Local** | Folder Mapping | Directories with extension filter, PDF extraction |
-
-Each connector tracks **sync history** (last 20 runs), supports **TTL** for auto-expiring synced memories, and exposes a **health dashboard** (`GET /api/connectors/health`).
+Map local directories as memory sources with extension filters and automatic
+content extraction (PDF, Markdown, code). Mapped folders are kept up to date by
+the **auto-sync scheduler** on configurable intervals, with optional **TTL** for
+auto-expiring synced memories.
 
 ### Import
 
@@ -169,7 +151,6 @@ Every profile is a fully isolated workspace:
 ```
 profiles/{name}/
   data.db              <- Memories, tags, FTS index, templates, relations, versions, activity
-  connector_*.json     <- Connector configs (Paperless, GitHub, Gitea, Email, ...)
   folders.json         <- Folder source configuration
   webhooks.json        <- Webhook configuration
   embeddings.db        <- Semantic search index (TF-IDF)
@@ -198,12 +179,12 @@ The Assembler optimizes your memories for AI consumption within a token budget:
 
 | Feature | Description |
 |---|---|
-| **Setup Wizard** | 7-step animated onboarding for fresh installs |
+| **Setup Wizard** | 6-step animated onboarding for fresh installs |
 | **Knowledge Graph** | Interactive vis.js network with search, physics toggle, navigation buttons |
 | **Secrets Scanner** | Detects API keys, passwords, tokens, private keys (OWASP patterns) |
 | **Live Activity** | Real-time SSE event stream with color-coded category badges |
 | **Keyboard Shortcuts** | `?` for cheatsheet, `1`-`8` tabs, `Ctrl+K` search, `N` new memory |
-| **Global Search** | `Ctrl+K` fuzzy search across memories, templates, connectors |
+| **Global Search** | `Ctrl+K` fuzzy search across memories, templates, folders |
 | **Dark Mode** | System preference detection + manual toggle, smooth transitions |
 | **Compact View** | Toggle dense memory list, persisted per browser |
 | **Collapsible Filters** | Sidebar sections fold to save space |
@@ -212,8 +193,8 @@ The Assembler optimizes your memories for AI consumption within a token budget:
 | **PWA Ready** | Web app manifest, standalone display mode |
 | **Security** | DOMPurify (XSS), Security Headers, non-root Docker, secrets redaction |
 | **Inbound Webhooks** | Push memories from external services (n8n, Home Assistant) |
-| **Auto-Sync Scheduler** | Automatic connector sync on configurable intervals |
-| **Analytics** | Top memories, tag stats, connector stats, memory growth, token usage |
+| **Auto-Sync Scheduler** | Automatic folder source sync on configurable intervals |
+| **Analytics** | Top memories, tag stats, memory growth, token usage |
 
 ---
 
@@ -286,7 +267,7 @@ git clone https://github.com/applehell/context-pilot-plugin.git \
 /context-pilot search docker      # Search memories for "docker"
 /context-pilot profile smarthome  # Switch to smarthome profile
 /context-pilot suggest            # Auto-suggest new templates
-/context-pilot status             # Show connector health
+/context-pilot status             # Show system health
 
 /context-pilot-learn infra/nginx Reverse proxy config for port 443 || infra,nginx
 ```
@@ -344,7 +325,7 @@ Browser --> Web UI (FastAPI, Port 8080)
                |-- Skills           Skill Registry, Status Indicators
                |-- Knowledge Graph  Interactive vis.js network, Search, Navigation
                |-- Secrets          Scanner, Redacted View
-               |-- Sources          Connector Store (17), Folder Mapping, Webhooks, Scheduler
+               |-- Sources          Folder Mapping, Webhooks, Scheduler
                |-- Assembler        Templates, Auto-Suggest, Compression, Export
                |-- Settings         Profiles, MCP, DB, Import/Export, Scheduler
 
@@ -356,10 +337,6 @@ Claude Code --> MCP Server (streamable-http, Port 8400)
                    |-- SessionStart hook (auto-profile detection)
                    |-- /context-pilot + /context-pilot-learn commands
                    |-- Skill file (best practices + tool guidance)
-
-Connectors --> 17 sources (GitHub, Gitea, Paperless, Obsidian, Email,
-               Notion, Teams, Telegram, RSS, Excel, Google Drive,
-               KeePass, Bitwarden, Kubernetes, Dockge, Bookmarks, HA)
 
 Storage --> SQLite (WAL mode + FTS5, Schema v13)
 ```
@@ -403,7 +380,7 @@ with dst:
 
 For a full backup, snapshot **every** `*.db` under the data dir (default +
 `profiles/<id>/`) and copy the JSON configs (`profiles.json`, per-profile
-`connector_*`/`folders`/`webhooks`). Restore by untarring into a fresh data dir —
+`folders`/`webhooks`). Restore by untarring into a fresh data dir —
 the directory layout mirrors the live one 1:1; migrations run on next startup.
 
 ---
@@ -450,20 +427,10 @@ the directory layout mirrors the live one 1:1; migrations run on next startup.
 </details>
 
 <details>
-<summary><strong>Connectors</strong></summary>
+<summary><strong>Folder Sources</strong></summary>
 
 | Endpoint | Method | Description |
 |---|---|---|
-| `/api/connectors` | GET | List all connectors with config and schema |
-| `/api/connectors/{name}` | GET | Connector details + schema |
-| `/api/connectors/{name}/setup` | POST | Configure connector |
-| `/api/connectors/{name}` | PUT | Update connector config |
-| `/api/connectors/{name}/test` | POST | Test connection |
-| `/api/connectors/{name}/sync` | POST | Sync data |
-| `/api/connectors/{name}/enable` | POST | Enable/disable |
-| `/api/connectors/{name}/history` | GET | Sync history (last 20) |
-| `/api/connectors/{name}` | DELETE | Remove connector config |
-| `/api/connectors/health` | GET | Health dashboard for all connectors |
 | `/api/folders` | GET/POST | List/add folder sources |
 | `/api/folders/{name}` | PUT/DELETE | Update/remove folder source |
 | `/api/folders/{name}/scan` | POST | Scan single folder |
@@ -538,7 +505,6 @@ the directory layout mirrors the live one 1:1; migrations run on next startup.
 | `/api/analytics/summary` | GET | Overview dashboard data |
 | `/api/analytics/top-memories` | GET | Most accessed memories |
 | `/api/analytics/top-tags` | GET | Most frequent tags |
-| `/api/analytics/connector-stats` | GET | Per-connector statistics |
 | `/api/analytics/memory-growth` | GET | Daily memory count growth |
 | `/api/backups` | GET/POST | List/create backups |
 | `/api/backups/{filename}/restore` | POST | Restore backup |
@@ -595,17 +561,6 @@ src/
     token_budget.py            tiktoken wrapper
     webhooks.py                Inbound webhook processor
     weight_adjuster.py         Usage-based weight adjustment
-  connectors/                  17 external service connectors
-    github.py, gitea.py        Development sources
-    paperless.py, excel.py     Document sources
-    gdrive.py                  Google Drive (service account JWT)
-    obsidian.py, notion.py     Knowledge sources
-    rss.py, bookmarks.py       Web sources
-    keepass.py, bitwarden.py   Secure notes (never passwords)
-    email_imap.py, telegram.py Communication sources
-    teams.py                   Microsoft Teams (Graph API)
-    kubernetes.py, dockge.py   Infrastructure sources
-    homeassistant.py           Smart Home source
   storage/                     SQLite persistence (Schema v13)
     db.py                      DB engine + migrations (v1-v13)
     memory.py                  MemoryStore (CRUD + FTS5)
@@ -624,7 +579,6 @@ src/
     __main__.py                Entry point (web + MCP process launcher)
     routers/                   API endpoints, grouped by domain
       memories.py              Memory CRUD, search, tags, bulk ops, trash
-      connectors.py            Connector store, test/sync/health
       profiles.py              Profile lifecycle, switch, export/import
       assembly.py              Templates, assemble, compress, duplicates, export
       analytics.py             Analytics, backups, maintenance
@@ -667,7 +621,6 @@ python -m src.web --reload    # Hot-reload
 | **Database** | SQLite (WAL mode, FTS5, Schema v13) |
 | **Realtime** | Server-Sent Events (SSE) |
 | **AI Integration** | MCP Server (FastMCP, 20 tools), tiktoken |
-| **Connectors** | requests, openpyxl, PyJWT, pykeepass, PyYAML |
 | **Security** | DOMPurify, Security Headers, secrets scanner, non-root Docker |
 | **Deployment** | Docker (arm64 + amd64), 2100+ tests |
 

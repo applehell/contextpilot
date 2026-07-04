@@ -9,7 +9,6 @@ from ..storage.memory import Memory
 
 IP_RE = re.compile(r"\b(?:\d{1,3}\.){3}\d{1,3}\b")
 URL_RE = re.compile(r"https?://[^\s)<>\"']+")
-HOSTNAME_RE = re.compile(r"\b(?:[a-zA-Z0-9-]+\.)+[a-zA-Z]{2,}\b")
 
 
 def detect_dependencies(memories: List[Memory]) -> List[Dict]:

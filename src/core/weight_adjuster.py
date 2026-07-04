@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import copy
 import time
-from typing import List, Optional
+from typing import Optional
 
 from .block import Block, Priority
 from ..storage.usage import BlockWeight, UsageStore, block_hash
@@ -78,18 +78,6 @@ class WeightAdjuster:
             elif weight.weight <= LOW_THRESHOLD:
                 adjusted.priority = Priority.LOW
         return adjusted
-
-    def adjust_blocks(
-        self,
-        blocks: List[Block],
-        project_name: Optional[str] = None,
-    ) -> List[Block]:
-        """Compute weights and adjust priorities for all blocks."""
-        result: List[Block] = []
-        for b in blocks:
-            w = self.compute_weight(b.content, project_name)
-            result.append(self.adjust_priority(b, w))
-        return result
 
     def recompute_all_weights(self, project_name: Optional[str] = None) -> int:
         """Recompute weights for all known block hashes. Returns count updated."""

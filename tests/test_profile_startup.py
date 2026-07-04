@@ -66,10 +66,7 @@ class TestWebAppStartup:
 
     def test_create_app_uses_active_profile(self, profile_env, monkeypatch):
         monkeypatch.setattr("src.storage.folders._DATA_DIR", profile_env["tmp_path"])
-        monkeypatch.setattr("src.connectors.base._DATA_DIR", profile_env["tmp_path"])
         monkeypatch.setattr("src.core.webhooks._DATA_DIR", profile_env["tmp_path"])
-        from src.connectors.registry import ConnectorRegistry
-        ConnectorRegistry._instance = None
 
         from src.web.app import create_app
         app = create_app(db_path=profile_env["smarthome_db_path"])
@@ -85,10 +82,7 @@ class TestWebAppStartup:
 
     def test_create_app_with_default_shows_default_memories(self, profile_env, monkeypatch):
         monkeypatch.setattr("src.storage.folders._DATA_DIR", profile_env["tmp_path"])
-        monkeypatch.setattr("src.connectors.base._DATA_DIR", profile_env["tmp_path"])
         monkeypatch.setattr("src.core.webhooks._DATA_DIR", profile_env["tmp_path"])
-        from src.connectors.registry import ConnectorRegistry
-        ConnectorRegistry._instance = None
 
         from src.web.app import create_app
         app = create_app(db_path=profile_env["default_db"])
@@ -100,10 +94,7 @@ class TestWebAppStartup:
 
     def test_health_shows_correct_memory_count_on_startup(self, profile_env, monkeypatch):
         monkeypatch.setattr("src.storage.folders._DATA_DIR", profile_env["tmp_path"])
-        monkeypatch.setattr("src.connectors.base._DATA_DIR", profile_env["tmp_path"])
         monkeypatch.setattr("src.core.webhooks._DATA_DIR", profile_env["tmp_path"])
-        from src.connectors.registry import ConnectorRegistry
-        ConnectorRegistry._instance = None
 
         from src.web.app import create_app
         app = create_app(db_path=profile_env["smarthome_db_path"])
@@ -114,10 +105,7 @@ class TestWebAppStartup:
 
     def test_search_works_on_active_profile_without_switch(self, profile_env, monkeypatch):
         monkeypatch.setattr("src.storage.folders._DATA_DIR", profile_env["tmp_path"])
-        monkeypatch.setattr("src.connectors.base._DATA_DIR", profile_env["tmp_path"])
         monkeypatch.setattr("src.core.webhooks._DATA_DIR", profile_env["tmp_path"])
-        from src.connectors.registry import ConnectorRegistry
-        ConnectorRegistry._instance = None
 
         from src.web.app import create_app
         app = create_app(db_path=profile_env["smarthome_db_path"])
@@ -266,10 +254,7 @@ class TestProfileSwitchReloadsData:
 
     def test_switch_shows_new_memories_immediately(self, profile_env, monkeypatch):
         monkeypatch.setattr("src.storage.folders._DATA_DIR", profile_env["tmp_path"])
-        monkeypatch.setattr("src.connectors.base._DATA_DIR", profile_env["tmp_path"])
         monkeypatch.setattr("src.core.webhooks._DATA_DIR", profile_env["tmp_path"])
-        from src.connectors.registry import ConnectorRegistry
-        ConnectorRegistry._instance = None
 
         from src.web.app import create_app
         app = create_app(db_path=profile_env["smarthome_db_path"])
@@ -294,7 +279,6 @@ class TestProfileSwitchReloadsData:
         import src.interfaces.mcp_server as mcp_mod
 
         monkeypatch.setattr("src.storage.folders._DATA_DIR", profile_env["tmp_path"])
-        monkeypatch.setattr("src.connectors.base._DATA_DIR", profile_env["tmp_path"])
         monkeypatch.setattr("src.core.webhooks._DATA_DIR", profile_env["tmp_path"])
 
         # Reset MCP module state
@@ -322,10 +306,7 @@ class TestProfileSwitchReloadsData:
 
     def test_memory_set_after_switch_goes_to_correct_profile(self, profile_env, monkeypatch):
         monkeypatch.setattr("src.storage.folders._DATA_DIR", profile_env["tmp_path"])
-        monkeypatch.setattr("src.connectors.base._DATA_DIR", profile_env["tmp_path"])
         monkeypatch.setattr("src.core.webhooks._DATA_DIR", profile_env["tmp_path"])
-        from src.connectors.registry import ConnectorRegistry
-        ConnectorRegistry._instance = None
 
         from src.web.app import create_app
         app = create_app(db_path=profile_env["smarthome_db_path"])
