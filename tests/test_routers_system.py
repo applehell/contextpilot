@@ -20,6 +20,35 @@ def _seed(client, key="test/mem", value="hello", tags=None):
     client.post("/api/memories", json={"key": key, "value": value, "tags": tags or ["test"]})
 
 
+class TestApiGuide:
+    def test_guide_markdown(self, client):
+        r = client.get("/api/guide")
+        assert r.status_code == 200
+        assert r.headers["content-type"].startswith("text/markdown")
+        assert "ContextPilot" in r.text
+        assert "/api/context-for-task" in r.text
+
+    def test_guide_json(self, client):
+        r = client.get("/api/guide?format=json")
+        assert r.status_code == 200
+        data = r.json()
+        assert "http_guide_markdown" in data
+        assert "mcp_instructions" in data
+        assert data["mcp"]["transport"] == "streamable-http"
+
+    def test_openapi_enriched(self, client):
+        oa = client.get("/openapi.json").json()
+        assert oa["info"]["description"]
+        assert oa["info"]["summary"]
+        tag_names = {t["name"] for t in oa.get("tags", [])}
+        assert {"memories", "assembly", "profiles"} <= tag_names
+
+    def test_mcp_server_has_instructions(self):
+        from src.interfaces.mcp_server import mcp
+        assert mcp.instructions
+        assert "get_context_for_task" in mcp.instructions
+
+
 class TestSetupStatus:
     def test_setup_status_fresh(self, client):
         r = client.get("/api/setup-status")

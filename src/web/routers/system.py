@@ -31,6 +31,29 @@ from src.web.deps import (
 router = APIRouter(tags=["system"])
 
 
+# --- Agent Guide ---
+
+@router.get("/api/guide")
+async def api_guide(request: Request):
+    """Return the agent-facing usage guide.
+
+    Markdown by default; append ``?format=json`` for a small JSON envelope with
+    pointers to the interactive docs and the MCP interface.
+    """
+    from fastapi.responses import PlainTextResponse
+    from src.interfaces.agent_guide import HTTP_GUIDE_MD, MCP_INSTRUCTIONS
+
+    if request.query_params.get("format") == "json":
+        return {
+            "http_guide_markdown": HTTP_GUIDE_MD,
+            "mcp_instructions": MCP_INSTRUCTIONS,
+            "interactive_docs": "/docs",
+            "openapi_schema": "/openapi.json",
+            "mcp": {"port": 8400, "transport": "streamable-http", "path": "/mcp/"},
+        }
+    return PlainTextResponse(HTTP_GUIDE_MD, media_type="text/markdown; charset=utf-8")
+
+
 # --- Setup Status ---
 
 @router.get("/api/setup-status")

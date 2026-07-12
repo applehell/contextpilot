@@ -46,7 +46,9 @@ try:
 except PackageNotFoundError:
     APP_VERSION = "dev"
 
-mcp = FastMCP("context-pilot", stateless_http=True)
+from src.interfaces.agent_guide import MCP_INSTRUCTIONS
+
+mcp = FastMCP("context-pilot", stateless_http=True, instructions=MCP_INSTRUCTIONS)
 mcp._mcp_server.version = APP_VERSION
 
 _assembler = Assembler(compressors=[

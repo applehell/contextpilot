@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="https://img.shields.io/badge/version-4.6.0-blue?style=flat-square" alt="Version">
+  <img src="https://img.shields.io/badge/version-4.7.0-blue?style=flat-square" alt="Version">
   <img src="https://img.shields.io/docker/pulls/applehell/contextpilot?style=flat-square&color=blue" alt="Docker Pulls">
   <img src="https://img.shields.io/docker/image-size/applehell/contextpilot/latest?style=flat-square&color=blue" alt="Image Size">
   <img src="https://img.shields.io/badge/python-3.11+-3776AB?style=flat-square&logo=python&logoColor=white" alt="Python">
@@ -46,7 +46,19 @@ docker run -d --name context-pilot \
   applehell/contextpilot:latest
 ```
 
-> **Web UI:** http://localhost:8080 &nbsp;&nbsp;|&nbsp;&nbsp; **Health:** http://localhost:8080/health
+> **Web UI:** http://localhost:8080 &nbsp;&nbsp;|&nbsp;&nbsp; **Health:** http://localhost:8080/health &nbsp;&nbsp;|&nbsp;&nbsp; **API docs:** http://localhost:8080/docs
+
+### API documentation for agents
+
+ContextPilot ships its own usage guide so a new agent understands it without reading the source:
+
+| Where | What |
+|---|---|
+| `GET /docs` | Interactive Swagger UI (all HTTP endpoints, grouped by tag) |
+| `GET /redoc` | ReDoc rendering of the same schema |
+| `GET /openapi.json` | Machine-readable OpenAPI schema |
+| `GET /api/guide` | Concise agent quickstart as Markdown (`?format=json` for a pointer envelope) — no auth required |
+| MCP `instructions` | Server-level guide shown to any MCP client on connect (port 8400) |
 
 ### Docker Compose
 

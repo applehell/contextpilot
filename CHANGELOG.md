@@ -1,5 +1,24 @@
 # Changelog
 
+## v4.7.0 — 2026-07-12
+
+Agent-facing API documentation baked into the app, so a new agent understands
+how to use ContextPilot without reading the source.
+
+### Added
+- **MCP server instructions** — `FastMCP` now ships server-level `instructions`
+  describing the core agent loop (`get_context_for_task` → work →
+  `capture_learnings`) and every building block. MCP clients see this on connect.
+- **Enriched OpenAPI** — the FastAPI app now has a full `description`
+  (agent quickstart: base URL, optional `X-API-Key` auth, profiles, workflow),
+  a `summary`, `license_info`, and per-tag descriptions. Renders at `/docs`
+  (Swagger UI), `/redoc`, and `/openapi.json`.
+- **`GET /api/guide`** — the same quickstart as Markdown (or `?format=json` for
+  a small envelope with pointers to `/docs`, `/openapi.json` and the MCP
+  interface). Exempt from API-key auth like `/health`, so an agent can always
+  self-orient.
+- Single source of truth for all of the above in `src/interfaces/agent_guide.py`.
+
 ## v4.6.0 — 2026-06-29
 
 Simplification: the entire **connector** subsystem was removed. ContextPilot

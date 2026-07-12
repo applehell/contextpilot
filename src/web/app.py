@@ -49,7 +49,15 @@ def create_app(db_path: Optional[Path] = None) -> FastAPI:
     _init_db(db_path)
 
     from src.interfaces.mcp_server import APP_VERSION
-    app = FastAPI(title="Context Pilot", version=APP_VERSION)
+    from src.interfaces.agent_guide import HTTP_GUIDE_MD, OPENAPI_TAGS
+    app = FastAPI(
+        title="Context Pilot",
+        version=APP_VERSION,
+        summary="Shared, persistent memory and context-assembly store for AI agents.",
+        description=HTTP_GUIDE_MD,
+        openapi_tags=OPENAPI_TAGS,
+        license_info={"name": "MIT"},
+    )
     logger.info("ContextPilot started, version=%s, db=%s", APP_VERSION, db_path)
 
     app.mount("/static", StaticFiles(directory=str(WEB_DIR / "static")), name="static")
@@ -84,7 +92,7 @@ def create_app(db_path: Optional[Path] = None) -> FastAPI:
     async def api_key_auth(request: Request, call_next):
         import sys
         _api_key = sys.modules[__name__].API_KEY
-        if _api_key and request.url.path.startswith("/api/") and request.url.path not in ("/health",):
+        if _api_key and request.url.path.startswith("/api/") and request.url.path not in ("/health", "/api/guide"):
             key = request.headers.get("X-API-Key") or request.query_params.get("api_key")
             if key != _api_key:
                 return JSONResponse(status_code=401, content={"error": "Unauthorized"})
