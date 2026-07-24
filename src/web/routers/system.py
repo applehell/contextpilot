@@ -6,7 +6,7 @@ import json
 import os
 from pathlib import Path
 
-from fastapi import APIRouter, HTTPException, Query, Request
+from fastapi import APIRouter, Body, HTTPException, Query, Request
 
 from src.core.log import get_logger
 
@@ -347,6 +347,40 @@ async def scheduler_run_now():
     results = await s.run_once()
     _events.emit("scheduler", "manual-run", "complete")
     return results
+
+
+# --- Sleep cycle (nightly memory consolidation) ---
+
+@router.get("/api/sleep")
+async def sleep_status():
+    from src.core import sleep
+    from src.core.scheduler import SyncScheduler
+    pdir = _get_profile_dir()
+    return {
+        "config": sleep.load_config(pdir),
+        "state": sleep.load_state(),
+        "last_sleep": SyncScheduler.instance().get_status().get("last_sleep"),
+        "reports": sleep.load_reports(pdir, limit=10),
+    }
+
+
+@router.put("/api/sleep/config")
+async def sleep_config_update(updates: dict = Body(...)):
+    from src.core import sleep
+    cfg = sleep.save_config(_get_profile_dir(), updates)
+    _events.emit("sleep", "config", "updated", json.dumps(updates)[:200])
+    return cfg
+
+
+@router.post("/api/sleep/run")
+async def sleep_run_now(all_profiles: bool = Query(False)):
+    from src.core.scheduler import SyncScheduler
+    from src.storage.profiles import ProfileManager
+    s = SyncScheduler.instance()
+    ids = None if all_profiles else [ProfileManager().active_id]
+    reports = await s.run_sleep(profile_ids=ids)
+    _events.emit("sleep", "manual-run", "complete", f"{len(reports)} profile(s)")
+    return {"reports": reports}
 
 
 # --- Semantic Search ---

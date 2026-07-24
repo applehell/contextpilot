@@ -1,5 +1,46 @@
 # Changelog
 
+## v4.8.0 — 2026-07-24
+
+The "brain" release: ContextPilot now consolidates its memory autonomously.
+(v4.7.0 is reserved for the agent-facing API docs branch.)
+
+### Added
+- **Sleep cycle** (`src/core/sleep.py`) — a nightly consolidation run per
+  profile, executed by the background scheduler after a configurable local
+  hour (default 03:00):
+  - **Episodic → semantic consolidation**: memories with the new category
+    `episodic` that are older than `episodic_age_days` (default 14) are
+    distilled into per-topic monthly digest memories
+    (`digest/<prefix>/<YYYY-MM>`). Originals stay in place, get
+    `consolidated_into` metadata plus a durable relation to their digest, and
+    are skipped on later runs.
+  - **Relation detection**: refreshes auto-detected knowledge-graph edges.
+  - **Duplicates**: reports duplicate groups; optional `auto_merge` (default
+    off) folds near-identical unpinned groups via the existing merge logic.
+  - **Contradiction & low-confidence report**: surfaces conflicts without
+    touching data.
+  - Config per profile in `sleep.json` (enabled, hour, thresholds); reports
+    kept in `sleep_reports.json`; nightly state in `sleep_state.json`.
+    All defaults are additive and non-destructive.
+- **New memory category `episodic`** — for events/observations. No auto-TTL;
+  consumed by the sleep cycle. Exposed via MCP `memory_set` and category
+  stats.
+- **Sleep API** — `GET /api/sleep` (config, state, recent reports),
+  `PUT /api/sleep/config`, `POST /api/sleep/run` (active profile, or
+  `?all_profiles=true`).
+- **Sleep card** in the Settings tab — status, last-report summary,
+  enable/disable and run-now.
+- **`MemoryStore.update_metadata()`** — merge metadata keys without touching
+  `updated_at` (used to mark consolidated episodic memories without skewing
+  recency ranking).
+
+### Changed
+- **The background scheduler now auto-starts with the app** (folder sync +
+  TTL cleanup + nightly sleep cycle). Disable with
+  `CONTEXTPILOT_DISABLE_AUTOSTART=1`. `GET /api/scheduler` gains
+  `last_sleep`.
+
 ## v4.6.0 — 2026-06-29
 
 Simplification: the entire **connector** subsystem was removed. ContextPilot

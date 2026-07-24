@@ -3643,6 +3643,7 @@ async function loadSettings() {
     loadMcpSettings();
     loadDbStats();
     loadSchedulerSettings();
+    loadSleepSettings();
     loadSystemInfo();
 }
 
@@ -3870,6 +3871,77 @@ async function schedulerRunNow() {
         const d = await res.json();
         completeToast(tid, 'Sync complete', false);
         loadSchedulerSettings();
+    } catch (e) { completeToast(tid, 'Failed', true); }
+}
+
+async function loadSleepSettings() {
+    showSkeleton('sleep-status', {rows: 1, type: 'list'});
+    try {
+        const res = await fetch('/api/sleep');
+        const s = await res.json();
+        const el = document.getElementById('sleep-status');
+        const actions = document.getElementById('sleep-actions');
+        const cfg = s.config || {};
+        const last = (s.reports && s.reports[0]) || null;
+        const lastTs = s.last_sleep || (s.state && s.state.last_run);
+        const lastDate = lastTs ? new Date(lastTs * 1000).toLocaleString() : 'never';
+
+        let reportHtml = '';
+        if (last) {
+            const ep = last.episodic || {};
+            const dup = last.duplicates || {};
+            const con = last.contradictions || {};
+            const low = last.low_confidence || {};
+            reportHtml = `
+                <div class="meta" style="margin-top:4px;">
+                    <span class="age">Digests: +${ep.digests_created || 0}/~${ep.digests_updated || 0} (${ep.consolidated || 0} episodic)</span>
+                    <span class="age">Relations: ${(last.relations || {}).added || 0}</span>
+                    <span class="age">Dup-Groups: ${dup.groups || 0}${dup.auto_merged ? ` (${dup.auto_merged} merged)` : ''}</span>
+                    <span class="age">Contradictions: ${con.count || 0}</span>
+                    <span class="age">Low confidence: ${low.count || 0}</span>
+                </div>`;
+        }
+
+        el.innerHTML = `
+            <div class="memory-item" style="cursor:default;border-left:3px solid ${cfg.enabled ? 'var(--success)' : 'var(--text-muted)'};">
+                <div class="main">
+                    <div class="key">
+                        <span class="badge" style="background:${cfg.enabled ? 'var(--success-light)' : 'var(--surface-alt)'};color:${cfg.enabled ? 'var(--success)' : 'var(--text-muted)'};">${cfg.enabled ? 'enabled' : 'disabled'}</span>
+                        Nightly after ${String(cfg.hour).padStart(2, '0')}:00
+                        ${cfg.auto_merge ? '<span class="badge">auto-merge</span>' : ''}
+                    </div>
+                    <div class="meta">
+                        <span class="age">Last run: ${lastDate}</span>
+                        <span class="age">Episodic age: ${cfg.episodic_age_days}d</span>
+                    </div>
+                    ${reportHtml}
+                </div>
+            </div>`;
+
+        actions.innerHTML = `
+            <button class="btn btn-small" onclick="sleepRunNow()">Run Now</button>
+            <button class="btn btn-small ${cfg.enabled ? 'btn-danger' : 'btn-primary'}" onclick="sleepToggle(${cfg.enabled ? 'false' : 'true'})">${cfg.enabled ? 'Disable' : 'Enable'}</button>`;
+    } catch (e) { console.error(e); }
+}
+
+async function sleepToggle(enabled) {
+    await fetch('/api/sleep/config', {
+        method: 'PUT',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({enabled})
+    });
+    loadSleepSettings();
+}
+
+async function sleepRunNow() {
+    const tid = showToast('Sleep cycle', 'consolidating…');
+    try {
+        const res = await fetch('/api/sleep/run', {method: 'POST'});
+        const d = await res.json();
+        const r = (d.reports && d.reports[0]) || {};
+        const ep = r.episodic || {};
+        completeToast(tid, `Sleep done: ${ep.consolidated || 0} episodic consolidated, ${(r.contradictions || {}).count || 0} contradictions`, false);
+        loadSleepSettings();
     } catch (e) { completeToast(tid, 'Failed', true); }
 }
 

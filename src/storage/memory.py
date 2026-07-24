@@ -152,7 +152,7 @@ class MemoryStore:
 
     def category_stats(self) -> dict:
         """Return count of memories per category."""
-        stats = {"persistent": 0, "session": 0, "ephemeral": 0}
+        stats = {"persistent": 0, "episodic": 0, "session": 0, "ephemeral": 0}
         rows = self._db.conn.execute(
             "SELECT COALESCE(category, 'persistent') as cat, count(*) as cnt FROM memories GROUP BY cat"
         ).fetchall()
@@ -248,6 +248,21 @@ class MemoryStore:
         self._db.conn.execute("DELETE FROM memories WHERE key = ?", (key,))
         self._db.conn.commit()
         self._activity.record("deleted", key)
+
+    def update_metadata(self, key: str, updates: Dict[str, Any]) -> None:
+        """Merge keys into a memory's metadata without touching updated_at."""
+        row = self._db.conn.execute(
+            "SELECT metadata FROM memories WHERE key = ?", (key,)).fetchone()
+        if not row:
+            raise KeyError(f"Memory '{key}' not found.")
+        try:
+            meta = json.loads(row["metadata"])
+        except (json.JSONDecodeError, TypeError):
+            meta = {}
+        meta.update(updates)
+        self._db.conn.execute(
+            "UPDATE memories SET metadata = ? WHERE key = ?", (json.dumps(meta), key))
+        self._db.conn.commit()
 
     def pin(self, key: str, pinned: bool = True) -> None:
         self._db.conn.execute("UPDATE memories SET pinned = ? WHERE key = ?", (1 if pinned else 0, key))

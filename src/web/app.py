@@ -25,6 +25,7 @@ from src.web.deps import (
     _estimate_total_tokens,
     _get_db,
     _get_memory_store,
+    _get_profile_dir,
     _init_db,
     _trigger_background_index,
 )
@@ -271,6 +272,19 @@ def create_app(db_path: Optional[Path] = None) -> FastAPI:
 
     # Build search index in background on startup
     _trigger_background_index()
+
+    # Auto-start the background scheduler (folder sync + nightly sleep cycle)
+    if os.environ.get("CONTEXTPILOT_DISABLE_AUTOSTART") != "1":
+        @app.on_event("startup")
+        async def _autostart_scheduler():
+            try:
+                from src.core.scheduler import SyncScheduler
+                s = SyncScheduler.instance()
+                s.start(_get_memory_store, lambda: _get_db(), _get_profile_dir)
+                _events.emit("scheduler", "start", "autostart",
+                             f"{s.interval // 60}m interval")
+            except Exception as e:
+                logger.warning("Scheduler autostart failed: %s", e)
 
     return app
 

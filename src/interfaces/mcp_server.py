@@ -366,7 +366,9 @@ def memory_set(key: str, value: str, tags: Optional[List[str]] = None, category:
         key: Unique memory key.
         value: Memory content.
         tags: List of tags.
-        category: Memory category — "persistent" (no TTL), "session" (24h TTL), or "ephemeral" (1h TTL).
+        category: Memory category — "persistent" (no TTL), "episodic" (event/observation,
+            distilled into digest memories by the nightly sleep cycle),
+            "session" (24h TTL), or "ephemeral" (1h TTL).
     """
     logger.debug("MCP tool call: memory_set key=%s", key)
     if not key or not key.strip():

@@ -1,4 +1,5 @@
-"""Background sync scheduler — periodically syncs folder sources."""
+"""Background sync scheduler — periodic folder-source sync, TTL cleanup, and
+the nightly sleep cycle (memory consolidation)."""
 from __future__ import annotations
 
 import asyncio
@@ -16,6 +17,7 @@ class SyncScheduler:
         self._task: Optional[asyncio.Task] = None
         self._running = False
         self._last_run: Optional[float] = None
+        self._last_sleep: Optional[float] = None
         self._events = EventBus.instance()
 
     @classmethod
@@ -80,6 +82,20 @@ class SyncScheduler:
         self._last_run = time.time()
         return results
 
+    async def run_sleep(self, profile_ids=None, record_state: bool = False) -> list:
+        """Run the sleep cycle (memory consolidation) in a worker thread."""
+        from . import sleep as sleep_mod
+        reports = await asyncio.to_thread(sleep_mod.run_for_profiles, profile_ids, record_state)
+        self._last_sleep = time.time()
+        return reports
+
+    async def _maybe_sleep(self) -> None:
+        from . import sleep as sleep_mod
+        if not sleep_mod.sleep_due():
+            return
+        self._events.emit("sleep", "nightly", "start", "sleep cycle for all profiles")
+        await self.run_sleep(record_state=True)
+
     async def _loop(self) -> None:
         while self._running:
             try:
@@ -88,6 +104,10 @@ class SyncScheduler:
                     break
                 self._events.emit("scheduler", "run", "auto-sync", f"interval={self.interval // 60}m")
                 await self.run_once()
+                try:
+                    await self._maybe_sleep()
+                except Exception as e:
+                    self._events.emit("sleep", "error", "nightly", str(e))
             except asyncio.CancelledError:
                 break
             except Exception as e:
@@ -98,4 +118,5 @@ class SyncScheduler:
             "running": self._running,
             "interval_minutes": self.interval // 60,
             "last_run": self._last_run,
+            "last_sleep": self._last_sleep,
         }

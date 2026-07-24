@@ -129,7 +129,7 @@ class TestCategoryStats:
 
     def test_stats_empty(self, store) -> None:
         stats = store.category_stats()
-        assert stats == {"persistent": 0, "session": 0, "ephemeral": 0}
+        assert stats == {"persistent": 0, "episodic": 0, "session": 0, "ephemeral": 0}
 
 
 class TestMigration:
