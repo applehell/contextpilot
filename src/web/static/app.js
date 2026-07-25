@@ -3907,6 +3907,7 @@ async function loadSleepSettings() {
                     <span class="age">Dup-Groups: ${dup.groups || 0}${dup.auto_merged ? ` (${dup.auto_merged} merged)` : ''}</span>
                     <span class="age">Contradictions: ${con.count || 0}${con.capped ? '+' : ''}</span>
                     <span class="age">Low confidence: ${low.count || 0}</span>
+                    <span class="age">Archived: ${(last.forget || {}).archived || 0}</span>
                 </div>`;
         }
 
@@ -3998,9 +3999,12 @@ function renderSleepViz(reports, catStats) {
             return `<div class="comp-seg" style="flex:${pct} 1 0;background:var(${c.varName});"
                     data-tip="${c.label}: ${n} (${pct.toFixed(1)}%)"></div>`;
         }).join('');
-        const legend = COMP_CATEGORIES.map(c =>
+        let legend = COMP_CATEGORIES.map(c =>
             `<span><span class="dot" style="background:var(${c.varName});"></span>${c.label} <b>${catStats[c.key] || 0}</b></span>`
         ).join('');
+        if (catStats.archived) {
+            legend += `<span><span class="dot" style="background:var(--text-muted);"></span>Archived <b>${catStats.archived}</b></span>`;
+        }
         html += `
         <div class="viz-tile sleep-comp">
             <div class="viz-label">Memory composition</div>
@@ -4049,6 +4053,10 @@ function renderSleepConfigForm(cfg) {
             <label>Episodic age (days)
                 <input type="number" id="sc-age" min="1" max="365" value="${cfg.episodic_age_days}">
             </label>
+            <label class="sleep-check"><input type="checkbox" id="sc-forget" ${cfg.forget_enabled ? 'checked' : ''}> Archive consolidated episodics</label>
+            <label>Archive after (days)
+                <input type="number" id="sc-archive-days" min="1" max="365" value="${cfg.archive_after_days}">
+            </label>
             <label class="sleep-check"><input type="checkbox" id="sc-relations" ${cfg.detect_relations ? 'checked' : ''}> Detect relations</label>
             <label class="sleep-check"><input type="checkbox" id="sc-automerge" ${cfg.auto_merge ? 'checked' : ''}> Auto-merge duplicates</label>
             <label>Merge threshold: <span id="sc-thresh-val">${cfg.merge_threshold}</span>
@@ -4087,6 +4095,8 @@ async function saveSleepConfig() {
         hour: numOr('sc-hour', 3),
         episodic_enabled: document.getElementById('sc-episodic').checked,
         episodic_age_days: numOr('sc-age', 14),
+        forget_enabled: document.getElementById('sc-forget').checked,
+        archive_after_days: numOr('sc-archive-days', 30),
         detect_relations: document.getElementById('sc-relations').checked,
         auto_merge: document.getElementById('sc-automerge').checked,
         merge_threshold: numOr('sc-thresh', 0.9),

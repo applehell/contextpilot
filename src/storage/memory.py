@@ -23,6 +23,7 @@ class Memory:
     pinned: bool = False
     expires_at: Optional[float] = None
     category: str = "persistent"
+    archived: bool = False
 
     @property
     def is_expired(self) -> bool:
@@ -60,6 +61,7 @@ class Memory:
             "pinned": self.pinned,
             "expires_at": self.expires_at,
             "category": self.category,
+            "archived": self.archived,
         }
         d["ttl_label"] = self.ttl_label
         return d
@@ -76,6 +78,7 @@ class Memory:
             pinned=d.get("pinned", False),
             expires_at=d.get("expires_at"),
             category=d.get("category", "persistent"),
+            archived=d.get("archived", False),
         )
 
 
@@ -98,6 +101,7 @@ def _row_to_memory(row) -> Memory:
         pinned=bool(row["pinned"]),
         expires_at=row["expires_at"],
         category=row["category"] or "persistent",
+        archived=bool(row["archived"]) if "archived" in row.keys() else False,
     )
 
 
@@ -106,14 +110,15 @@ class MemoryStore:
 
     CATEGORY_TTL = {"session": 86400, "ephemeral": 3600}
 
-    _COLS = "key, value, tags, metadata, created_at, updated_at, pinned, expires_at, category"
+    _COLS = "key, value, tags, metadata, created_at, updated_at, pinned, expires_at, category, archived"
 
     def __init__(self, db: Database) -> None:
         self._db = db
         self._activity = MemoryActivityLog(db)
 
     def list(self, limit: int = 0, offset: int = 0, source: str = "",
-             sort: str = "key", order: str = "asc", category: Optional[str] = None) -> List[Memory]:
+             sort: str = "key", order: str = "asc", category: Optional[str] = None,
+             include_archived: bool = False) -> List[Memory]:
         allowed_sorts = {"key": "key", "updated": "updated_at", "created": "created_at",
                          "size": "length(value)", "expires": "expires_at"}
         sort_col = allowed_sorts.get(sort, "key")
@@ -122,6 +127,9 @@ class MemoryStore:
         sql = f"SELECT {self._COLS} FROM memories"
         params: list = []
         conditions = []
+
+        if not include_archived:
+            conditions.append("archived = 0")
 
         if source:
             conditions.append("key LIKE ?")
@@ -154,7 +162,7 @@ class MemoryStore:
         """Return count of memories per category."""
         stats = {"persistent": 0, "episodic": 0, "session": 0, "ephemeral": 0}
         rows = self._db.conn.execute(
-            "SELECT COALESCE(category, 'persistent') as cat, count(*) as cnt FROM memories GROUP BY cat"
+            "SELECT COALESCE(category, 'persistent') as cat, count(*) as cnt FROM memories WHERE archived = 0 GROUP BY cat"
         ).fetchall()
         for r in rows:
             cat = r["cat"]
@@ -209,20 +217,21 @@ class MemoryStore:
             memory.updated_at = time.time()
             self._db.conn.execute(
                 """UPDATE memories SET value = ?, tags = ?, metadata = ?,
-                   created_at = ?, updated_at = ?, expires_at = ?, category = ?
+                   created_at = ?, updated_at = ?, expires_at = ?, category = ?, archived = ?
                    WHERE key = ?""",
                 (memory.value, json.dumps(memory.tags), json.dumps(memory.metadata),
                  memory.created_at, memory.updated_at, memory.expires_at, memory.category,
-                 memory.key),
+                 1 if memory.archived else 0, memory.key),
             )
         else:
             self._db.conn.execute(
                 """INSERT INTO memories
-                   (key, value, tags, metadata, created_at, updated_at, pinned, expires_at, category)
-                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                   (key, value, tags, metadata, created_at, updated_at, pinned, expires_at, category, archived)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
                 (memory.key, memory.value, json.dumps(memory.tags),
                  json.dumps(memory.metadata), memory.created_at, memory.updated_at,
-                 1 if memory.pinned else 0, memory.expires_at, memory.category),
+                 1 if memory.pinned else 0, memory.expires_at, memory.category,
+                 1 if memory.archived else 0),
             )
         self._db.conn.commit()
         self._activity.record(
@@ -267,6 +276,20 @@ class MemoryStore:
     def pin(self, key: str, pinned: bool = True) -> None:
         self._db.conn.execute("UPDATE memories SET pinned = ? WHERE key = ?", (1 if pinned else 0, key))
         self._db.conn.commit()
+
+    def archive(self, key: str, archived: bool = True) -> None:
+        """Move a memory out of (or back into) default retrieval. The record
+        stays on disk and remains readable via get()."""
+        cursor = self._db.conn.execute(
+            "UPDATE memories SET archived = ? WHERE key = ?", (1 if archived else 0, key))
+        self._db.conn.commit()
+        if cursor.rowcount == 0:
+            raise KeyError(f"Memory '{key}' not found.")
+        self._activity.record("archived" if archived else "unarchived", key)
+
+    def archived_count(self) -> int:
+        row = self._db.conn.execute("SELECT count(*) FROM memories WHERE archived = 1").fetchone()
+        return row[0] if row else 0
 
     def trash_list(self) -> list:
         try:
@@ -363,9 +386,11 @@ class MemoryStore:
         return row[0] if row else 0
 
     def search(self, query: str, tags: Optional[List[str]] = None,
-               source: str = "", limit: int = 0, offset: int = 0) -> List[Memory]:
+               source: str = "", limit: int = 0, offset: int = 0,
+               include_archived: bool = False) -> List[Memory]:
         q = query.strip()
         tag_set: Optional[Set[str]] = set(tags) if tags else None
+        arch = "" if include_archived else " AND archived = 0"
 
         m_cols = ", ".join(f"m.{c.strip()}" for c in self._COLS.split(","))
 
@@ -380,7 +405,7 @@ class MemoryStore:
                     f"""SELECT {m_cols}
                        FROM memories m
                        JOIN memories_fts fts ON m.rowid = fts.rowid
-                       WHERE memories_fts MATCH ?
+                       WHERE memories_fts MATCH ?{arch.replace('archived', 'm.archived')}
                        ORDER BY rank""",
                     (fts_query,),
                 ).fetchall()
@@ -394,19 +419,19 @@ class MemoryStore:
             like_rows = self._db.conn.execute(
                 f"""SELECT {self._COLS}
                    FROM memories
-                   WHERE (key LIKE ? OR value LIKE ?) AND key NOT IN (
+                   WHERE (key LIKE ? OR value LIKE ?){arch} AND key NOT IN (
                      SELECT key FROM memories WHERE key IN ({",".join("?" * len(fts_keys))})
                    )""" if fts_keys else
                 f"""SELECT {self._COLS}
                    FROM memories
-                   WHERE key LIKE ? OR value LIKE ?""",
+                   WHERE (key LIKE ? OR value LIKE ?){arch}""",
                 (like_pattern, like_pattern, *fts_keys) if fts_keys else
                 (like_pattern, like_pattern),
             ).fetchall()
             all_rows = list(rows) + list(like_rows)
         else:
             all_rows = self._db.conn.execute(
-                f"SELECT {self._COLS} FROM memories"
+                f"SELECT {self._COLS} FROM memories" + (" WHERE archived = 0" if not include_archived else "")
             ).fetchall()
 
         results = []
@@ -499,7 +524,7 @@ class MemoryStore:
         return sorted(all_tags)
 
     def export_json(self) -> str:
-        memories = self.list()
+        memories = self.list(include_archived=True)
         return json.dumps({"memories": [m.to_dict() for m in memories]}, indent=2)
 
     def import_json(self, data: str, merge: bool = True) -> int:

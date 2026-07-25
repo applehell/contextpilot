@@ -6,6 +6,9 @@ for every profile:
 - **Episodic consolidation** — distills ``episodic`` memories older than
   ``episodic_age_days`` into per-topic monthly digest memories. Originals stay
   in place, are linked to their digest and skipped on later runs.
+- **Active forgetting** — consolidated episodic originals older than
+  ``archive_after_days`` are archived: out of default retrieval, still on
+  disk and readable via ``get()``. Their content lives on in the digest.
 - **Relation detection** — refreshes auto-detected knowledge-graph edges.
 - **Duplicates** — reports duplicate groups; optional ``auto_merge`` (off by
   default) folds near-identical unpinned groups into one record.
@@ -39,6 +42,8 @@ DEFAULT_CONFIG: Dict[str, Any] = {
     "merge_threshold": 0.9,
     "episodic_enabled": True,
     "episodic_age_days": 14,
+    "forget_enabled": True,
+    "archive_after_days": 30,
     "max_memories": 5000,
     "keep_reports": 14,
 }
@@ -61,6 +66,7 @@ _RUN_LOCK = threading.Lock()
 def _clamp_config(cfg: Dict[str, Any]) -> Dict[str, Any]:
     cfg["hour"] = min(23, max(0, int(cfg["hour"])))
     cfg["episodic_age_days"] = max(0, int(cfg["episodic_age_days"]))
+    cfg["archive_after_days"] = max(1, int(cfg["archive_after_days"]))
     cfg["max_memories"] = max(1, int(cfg["max_memories"]))
     cfg["keep_reports"] = min(100, max(1, int(cfg["keep_reports"])))
     cfg["merge_threshold"] = min(1.0, max(0.6, float(cfg["merge_threshold"])))
@@ -252,6 +258,23 @@ def run_sleep_cycle(db: Database, profile_dir: Path,
         except Exception as e:
             report["errors"].append(f"episodic: {e}")
 
+    # Active forgetting: archive consolidated episodic originals — their
+    # content lives on in the digest; the record stays readable via get().
+    if cfg["forget_enabled"]:
+        try:
+            cutoff = time.time() - cfg["archive_after_days"] * 86400
+            candidates = [m for m in memories
+                          if m.category == "episodic" and not m.pinned
+                          and m.metadata.get("consolidated_into")
+                          and m.updated_at <= cutoff]
+            for m in candidates:
+                store.archive(m.key)
+            report["forget"] = {"archived": len(candidates)}
+            if candidates:
+                memories = store.list()[:cfg["max_memories"]]
+        except Exception as e:
+            report["errors"].append(f"forget: {e}")
+
     if cfg["detect_relations"]:
         try:
             rels = detect_dependencies(memories)
@@ -308,8 +331,15 @@ def run_sleep_cycle(db: Database, profile_dir: Path,
 
     try:
         now = time.time()
+        # Relation count corroborates a memory — well-connected facts score higher
+        corroboration: Dict[str, int] = {}
+        for rel in rel_store.list_all():
+            corroboration[rel.source_key] = corroboration.get(rel.source_key, 0) + 1
+            corroboration[rel.target_key] = corroboration.get(rel.target_key, 0) + 1
         low = sorted(
-            ({"key": m.key, "confidence": confidence_score(m, now=now)} for m in memories),
+            ({"key": m.key,
+              "confidence": confidence_score(m, corroboration=corroboration.get(m.key, 0), now=now)}
+             for m in memories),
             key=lambda x: x["confidence"])
         low = [x for x in low if x["confidence"] < 0.4]
         report["low_confidence"] = {"count": len(low), "samples": low[:10]}
@@ -363,7 +393,8 @@ def _run_for_profiles_locked(profile_ids, record_state,
         try:
             report = run_sleep_cycle(db, profile_dir, cfg)
             changed = (report.get("episodic", {}).get("consolidated", 0)
-                       + report.get("duplicates", {}).get("auto_merged", 0))
+                       + report.get("duplicates", {}).get("auto_merged", 0)
+                       + report.get("forget", {}).get("archived", 0))
             # Embedding refresh only works for the active profile (the
             # embeddings module is bound to it); other profiles reindex on
             # their next activation via _trigger_background_index.

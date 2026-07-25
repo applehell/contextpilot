@@ -18,6 +18,7 @@ from src.core.token_budget import TokenBudget
 from src.storage.memory import Memory
 from src.storage.usage import FeedbackRecord, block_hash
 from src.web.deps import (
+    _auto_relate,
     _events,
     _get_db,
     _get_memory_store,
@@ -111,9 +112,11 @@ async def ttl_stats():
 
 
 @router.get("/api/memories/category-stats")
-async def category_stats():
+async def category_stats_endpoint():
     store = _get_memory_store()
-    return store.category_stats()
+    stats = store.category_stats()
+    stats["archived"] = store.archived_count()
+    return stats
 
 
 @router.get("/api/memories/{key:path}/related")
@@ -175,6 +178,7 @@ async def set_memory(req: MemoryIn):
                metadata=metadata, expires_at=expires_at, category=req.category)
     store.set(m)
     _index_or_bootstrap(m)
+    _auto_relate(m)
     _events.emit("memory", "create", req.key, f"tags={req.tags}")
     return {"status": "saved", "key": req.key}
 
@@ -304,6 +308,27 @@ async def pin_memory(key: str, pinned: bool = Query(True)):
     store.pin(key, pinned)
     _events.emit("memory", "pin" if pinned else "unpin", key)
     return {"status": "ok", "pinned": pinned}
+
+
+# --- Archive (active forgetting: out of retrieval, kept on disk) ---
+
+@router.post("/api/memories/{key:path}/archive")
+async def archive_memory(key: str, archived: bool = Query(True)):
+    store = _get_memory_store()
+    try:
+        store.archive(key, archived)
+    except KeyError:
+        raise HTTPException(404, f"Memory '{key}' not found")
+    _events.emit("memory", "archive" if archived else "unarchive", key)
+    return {"status": "ok", "archived": archived}
+
+
+@router.get("/api/archive")
+async def list_archive():
+    store = _get_memory_store()
+    mems = [m for m in store.list(include_archived=True) if m.archived]
+    return [{"key": m.key, "value": m.value[:200], "tags": m.tags,
+             "category": m.category, "updated_at": m.updated_at} for m in mems]
 
 
 # --- Trash ---

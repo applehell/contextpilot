@@ -321,3 +321,15 @@ def _index_or_bootstrap(memory):
         _index_memories(_get_memory_store().list())
     finally:
         _index_lock.release()
+
+
+def _auto_relate(memory) -> None:
+    """Best-effort incremental relation detection after a memory write."""
+    try:
+        from src.core.dependency_detector import detect_for_memory
+        from src.storage.relations import RelationStore
+        rels = detect_for_memory(memory, _get_db())
+        if rels:
+            RelationStore(_get_db()).bulk_add_auto(rels)
+    except Exception:
+        pass

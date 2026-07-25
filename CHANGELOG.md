@@ -35,11 +35,33 @@ The "brain" release: ContextPilot now consolidates its memory autonomously.
   `updated_at` (used to mark consolidated episodic memories without skewing
   recency ranking).
 
+- **Spreading activation** (`src/core/activation.py`) — associative recall:
+  `get_context_for_task` (MCP) and `POST /api/context-for-task` expand their
+  reranked hits over the knowledge graph. Related memories up to two hops away
+  join the result with decaying activation (edge confidence × 0.5 per hop),
+  marked `method: "associated"`, capped at 8, guarded with a fallback.
+- **Archive stage — active forgetting** (schema v14, `archived` column) —
+  archived memories leave default retrieval (list/search/hybrid/graph seeds)
+  but stay on disk, remain readable via `get()`/exports, and can be restored.
+  The sleep cycle archives consolidated episodic originals older than
+  `archive_after_days` (default 30) — their content lives on in the digest.
+  New endpoints: `POST /api/memories/{key}/archive`, `GET /api/archive`.
+- **Write-time relation detection** — every memory write (REST create, MCP
+  `memory_set`, `capture_learnings`) runs a cheap incremental scan (key
+  references both directions, shared IPs/URLs) and adds auto-relations
+  immediately; the nightly cycle still does the full pass including tag
+  clusters. `capture_learnings` now also persists the `category` column
+  (previously tag-only).
+- **Corroboration in confidence** — the sleep cycle counts knowledge-graph
+  relations per memory and feeds them into `confidence_score`; well-connected
+  memories score higher in the low-confidence report.
+
 ### Changed
 - **The background scheduler now auto-starts with the app** (folder sync +
   TTL cleanup + nightly sleep cycle). Disable with
   `CONTEXTPILOT_DISABLE_AUTOSTART=1`. `GET /api/scheduler` gains
   `last_sleep`.
+- **DB schema v14** — `memories.archived` (default 0); automatic migration.
 
 ## v4.6.0 — 2026-06-29
 

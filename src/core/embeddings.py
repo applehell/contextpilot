@@ -343,7 +343,11 @@ def index_memories(memories: list, profile_dir: Optional[Path] = None) -> Dict[s
         text = f"{m.key} {' '.join(m.tags)} {m.value}"
         content_hash = hashlib.sha256(text.encode()).hexdigest()[:16]
 
-        if store.has(m.key, content_hash):
+        # Skip unchanged memories — but not ones with an empty stored vector
+        # (written by index_single_memory while its vocabulary was still
+        # missing from the IDF corpus; the corpus was just rebuilt above,
+        # so re-vectorizing now repairs them).
+        if store.has(m.key, content_hash) and store.get(m.key):
             skipped += 1
             continue
 
@@ -369,9 +373,14 @@ def index_single_memory(memory) -> bool:
     store = _get_store()
     text = f"{memory.key} {' '.join(memory.tags)} {memory.value}"
     content_hash = hashlib.sha256(text.encode()).hexdigest()[:16]
-    if store.has(memory.key, content_hash):
+    if store.has(memory.key, content_hash) and store.get(memory.key):
         return True
     vec = embed_text(text)
+    if _backend == "tfidf" and not vec:
+        # Entirely new vocabulary — the current IDF corpus can't represent it.
+        # Report failure so the caller triggers a full reindex (which rebuilds
+        # the corpus including this document).
+        return False
     store.store(memory.key, content_hash, vec)
     return True
 
@@ -475,11 +484,16 @@ def hybrid_search(
         fused[key] = fts_weight * f + semantic_weight * s
 
     # Step 5: Sort and build output
-    # Load memory data for keys found only via semantic search
-    for key in all_keys:
+    # Load memory data for keys found only via semantic search; drop archived
+    # ones (their vectors may linger in the index but they left retrieval)
+    for key in list(all_keys):
         if key not in memory_data:
             try:
                 m = store.get(key)
+                if getattr(m, "archived", False):
+                    all_keys.discard(key)
+                    fused.pop(key, None)
+                    continue
                 memory_data[key] = {"value": m.value, "tags": m.tags}
             except (KeyError, Exception):
                 memory_data[key] = {"value": "", "tags": []}

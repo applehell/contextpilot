@@ -121,6 +121,17 @@ def _get_activity_log() -> MemoryActivityLog:
         return _activity_log
 
 
+def _auto_relate(memory) -> None:
+    """Best-effort incremental relation detection after a memory write."""
+    try:
+        from src.core.dependency_detector import detect_for_memory
+        rels = detect_for_memory(memory, _get_db())
+        if rels:
+            RelationStore(_get_db()).bulk_add_auto(rels)
+    except Exception:
+        pass
+
+
 def _dicts_to_blocks(raw: List[Dict[str, Any]]) -> List[Block]:
     blocks = []
     for item in raw:
@@ -374,7 +385,9 @@ def memory_set(key: str, value: str, tags: Optional[List[str]] = None, category:
     if not key or not key.strip():
         return {"error": "Memory key must not be empty."}
     store = _get_memory_store()
-    store.set(Memory(key=key, value=value, tags=tags or [], category=category))
+    mem = Memory(key=key, value=value, tags=tags or [], category=category)
+    store.set(mem)
+    _auto_relate(mem)
     return {"status": "saved", "key": key}
 
 
@@ -441,8 +454,10 @@ def get_context_for_task(
 ) -> Dict[str, Any]:
     """Find relevant memories for a task and assemble them within a token budget.
 
-    Uses hybrid search to find related memories, assigns priorities,
-    and assembles the result within the given token budget.
+    Uses hybrid search to find related memories, reranks them, associatively
+    expands the hits over the knowledge graph (spreading activation — related
+    memories up to two hops away join with decaying priority), assigns
+    priorities, and assembles the result within the given token budget.
 
     Args:
         task_description: Description of the task to find context for.
@@ -470,6 +485,14 @@ def get_context_for_task(
         results = rerank_candidates(task_description, results, store)
     except Exception as e:
         logger.warning("rerank failed, falling back to hybrid order: %s", e)
+
+    # Associative expansion over the knowledge graph
+    try:
+        from src.core.activation import expand_results
+        from src.storage.relations import RelationStore
+        results.extend(expand_results(results, store, RelationStore(_get_db())))
+    except Exception as e:
+        logger.warning("spreading activation failed: %s", e)
     memories_considered = len(results)
 
     # Convert to Blocks with priority assignment
@@ -558,9 +581,13 @@ def capture_learnings(learnings: List[Dict[str, Any]]) -> Dict[str, Any]:
             ))
             updated += 1
         except KeyError:
-            store.set(Memory(key=key, value=value, tags=tags))
+            store.set(Memory(key=key, value=value, tags=tags, category=category))
             saved += 1
 
+        try:
+            _auto_relate(store.get(key))
+        except KeyError:
+            pass
         keys.append(key)
 
     return {"saved": saved, "updated": updated, "skipped": skipped, "keys": keys}
