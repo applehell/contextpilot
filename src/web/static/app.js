@@ -3931,7 +3931,105 @@ async function loadSleepSettings() {
             <button class="btn btn-small" onclick="sleepRunNow()">Run Now</button>
             <button class="btn btn-small" onclick="toggleSleepConfig()">Configure</button>
             <button class="btn btn-small ${cfg.enabled ? 'btn-danger' : 'btn-primary'}" onclick="sleepToggle(${cfg.enabled ? 'false' : 'true'})">${cfg.enabled ? 'Disable' : 'Enable'}</button>`;
+
+        let catStats = null;
+        try { catStats = await (await fetch('/api/memories/category-stats')).json(); } catch (e2) {}
+        renderSleepViz(s.reports || [], catStats);
     } catch (e) { console.error(e); }
+}
+
+// --- Sleep viz: run-history sparklines + memory composition ---
+
+const SLEEP_METRICS = [
+    {label: 'Consolidated', get: r => (r.episodic || {}).consolidated || 0},
+    {label: 'Relations', get: r => (r.relations || {}).added || 0},
+    {label: 'Dup groups', get: r => (r.duplicates || {}).groups || 0},
+    {label: 'Contradictions', get: r => (r.contradictions || {}).count || 0},
+    {label: 'Low confidence', get: r => (r.low_confidence || {}).count || 0},
+];
+
+const COMP_CATEGORIES = [
+    {key: 'persistent', label: 'Persistent', varName: '--cat-1'},
+    {key: 'episodic', label: 'Episodic', varName: '--cat-2'},
+    {key: 'session', label: 'Session', varName: '--cat-3'},
+    {key: 'ephemeral', label: 'Ephemeral', varName: '--cat-4'},
+];
+
+function renderSleepViz(reports, catStats) {
+    const el = document.getElementById('sleep-viz');
+    if (!el) return;
+    const runs = (reports || []).filter(r => !r.skipped).slice().reverse(); // chronological
+    let html = '';
+
+    if (!runs.length) {
+        html += '<div class="viz-tile sleep-comp"><div class="viz-empty">No sleep runs recorded yet — history appears after the first cycle.</div></div>';
+    } else {
+        for (const m of SLEEP_METRICS) {
+            const values = runs.map(m.get);
+            const max = Math.max(1, ...values);
+            const latest = values[values.length - 1];
+            const vw = runs.length * 10;
+            const bars = values.map((v, i) => {
+                const h = v > 0 ? Math.max(3, (v / max) * 32) : 1.5;
+                const cls = 'viz-bar' + (i === runs.length - 1 ? ' latest' : '') + (v === 0 ? ' stub' : '');
+                const when = runs[i].started_at ? new Date(runs[i].started_at * 1000).toLocaleString() : `run ${i + 1}`;
+                return `<rect class="${cls}" x="${i * 10}" y="${34 - h}" width="8" height="${h}" rx="2"
+                        data-tip="${escapeAttr(when)} — ${m.label}: ${v}"></rect>`;
+            }).join('');
+            html += `
+            <div class="viz-tile">
+                <div class="viz-label">${m.label}</div>
+                <div class="viz-value">${latest}</div>
+                <svg viewBox="0 0 ${vw} 34" preserveAspectRatio="none" aria-label="${m.label} over last ${runs.length} runs">${bars}</svg>
+            </div>`;
+        }
+    }
+
+    if (catStats) {
+        const total = COMP_CATEGORIES.reduce((s, c) => s + (catStats[c.key] || 0), 0);
+        const segs = COMP_CATEGORIES.filter(c => (catStats[c.key] || 0) > 0).map(c => {
+            const n = catStats[c.key];
+            const pct = (n / total) * 100;
+            return `<div class="comp-seg" style="flex:${pct} 1 0;background:var(${c.varName});"
+                    data-tip="${c.label}: ${n} (${pct.toFixed(1)}%)"></div>`;
+        }).join('');
+        const legend = COMP_CATEGORIES.map(c =>
+            `<span><span class="dot" style="background:var(${c.varName});"></span>${c.label} <b>${catStats[c.key] || 0}</b></span>`
+        ).join('');
+        html += `
+        <div class="viz-tile sleep-comp">
+            <div class="viz-label">Memory composition</div>
+            ${total > 0 ? `<div class="comp-track">${segs}</div>` : '<div class="viz-empty">No memories yet.</div>'}
+            <div class="comp-legend">${legend}</div>
+        </div>`;
+    }
+
+    el.innerHTML = html;
+    el.querySelectorAll('[data-tip]').forEach(node => {
+        node.addEventListener('mousemove', e => showVizTooltip(e, node.dataset.tip));
+        node.addEventListener('mouseleave', hideVizTooltip);
+    });
+}
+
+let _vizTooltipEl = null;
+function showVizTooltip(evt, text) {
+    if (!_vizTooltipEl) {
+        _vizTooltipEl = document.createElement('div');
+        _vizTooltipEl.className = 'viz-tooltip';
+        document.body.appendChild(_vizTooltipEl);
+    }
+    _vizTooltipEl.textContent = text;
+    _vizTooltipEl.style.display = 'block';
+    const pad = 12;
+    let x = evt.clientX + pad, y = evt.clientY - 30;
+    const w = _vizTooltipEl.offsetWidth;
+    if (x + w > window.innerWidth - 8) x = evt.clientX - w - pad;
+    if (y < 8) y = evt.clientY + pad;
+    _vizTooltipEl.style.left = x + 'px';
+    _vizTooltipEl.style.top = y + 'px';
+}
+function hideVizTooltip() {
+    if (_vizTooltipEl) _vizTooltipEl.style.display = 'none';
 }
 
 function renderSleepConfigForm(cfg) {
