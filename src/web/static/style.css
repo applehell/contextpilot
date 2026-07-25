@@ -2799,3 +2799,118 @@ header.header-collapsed .header-breadcrumb {
     border-color: var(--accent) !important;
     box-shadow: 0 2px 8px rgba(0,0,0,0.1) !important;
 }
+
+/* ═══════════════════════════════════════════════════════════════
+   SLEEP CYCLE — nightly brain animations
+   ═══════════════════════════════════════════════════════════════ */
+
+.activity-cat.cat-sleep { background: #e8e6fa; color: #5b4fc4; }
+[data-theme="dark"] .activity-cat.cat-sleep { background: rgba(91,79,196,0.25); color: #a8b2f0; }
+
+/* Header orb: sleeping — night palette, slow breathing, floating Zzz */
+.bot-orb.sleeping .orb {
+    background: conic-gradient(from 160deg, #9aa8e8, #4a5ac4, #7a8ad8, #4a5ac4, #9aa8e8);
+    box-shadow: 0 0 20px rgba(90,102,196,0.45), 0 0 8px rgba(90,102,196,0.6) inset;
+    animation: orbSleep 4.5s ease-in-out infinite;
+}
+.bot-orb.sleeping .orb-ring {
+    border-color: rgba(90,102,196,0.3);
+    animation: ringSleep 4.5s ease-in-out infinite;
+}
+@keyframes orbSleep {
+    0%, 100% { transform: scale(0.96); box-shadow: 0 0 16px rgba(90,102,196,0.35), 0 0 6px rgba(90,102,196,0.5) inset; }
+    50% { transform: scale(1.05); box-shadow: 0 0 30px rgba(90,102,196,0.6), 0 0 10px rgba(90,102,196,0.7) inset; }
+}
+@keyframes ringSleep {
+    0%, 100% { transform: scale(1); opacity: 0.2; }
+    50% { transform: scale(1.12); opacity: 0.5; }
+}
+.bot-orb.sleeping::after {
+    content: 'z';
+    position: absolute; top: -8px; right: -6px;
+    font-size: 12px; font-weight: 700; color: #5b4fc4;
+    animation: zzzFloat 2.4s ease-in infinite;
+    pointer-events: none;
+}
+.bot-orb.sleeping::before {
+    content: 'z';
+    position: absolute; top: -2px; right: 2px;
+    font-size: 9px; font-weight: 700; color: #7a8ad8;
+    animation: zzzFloat 2.4s ease-in infinite 1.2s;
+    pointer-events: none; z-index: 1;
+}
+[data-theme="dark"] .bot-orb.sleeping::after { color: #a8b2f0; }
+[data-theme="dark"] .bot-orb.sleeping::before { color: #8a96e0; }
+@keyframes zzzFloat {
+    0% { opacity: 0; transform: translate(0, 0) scale(0.7); }
+    25% { opacity: 1; }
+    100% { opacity: 0; transform: translate(7px, -15px) scale(1.3); }
+}
+
+/* Sleep card: running state — moon + EEG brainwave */
+.sleep-run-box {
+    display: flex; align-items: center; gap: 14px;
+    margin-top: 10px; padding: 12px 16px;
+    border: 1px solid rgba(90,102,196,0.35);
+    border-radius: var(--radius);
+    background: linear-gradient(135deg, rgba(90,102,196,0.10), rgba(90,102,196,0.02));
+}
+.sleep-moon {
+    font-size: 24px; line-height: 1; color: #5b4fc4;
+    animation: moonPulse 3s ease-in-out infinite;
+}
+[data-theme="dark"] .sleep-moon { color: #a8b2f0; }
+@keyframes moonPulse {
+    0%, 100% { transform: rotate(-10deg) scale(1); opacity: 0.8; }
+    50% { transform: rotate(6deg) scale(1.12); opacity: 1; }
+}
+.brainwave { flex: 1; height: 36px; min-width: 0; }
+.brainwave path {
+    fill: none; stroke: #5b4fc4; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round;
+    stroke-dasharray: 65 35;
+    animation: eegSweep 2.2s linear infinite;
+    opacity: 0.9;
+}
+.brainwave path.wave2 {
+    stroke: #9aa8e8; stroke-width: 1.4;
+    animation-duration: 3.4s; opacity: 0.55;
+}
+[data-theme="dark"] .brainwave path { stroke: #a8b2f0; }
+[data-theme="dark"] .brainwave path.wave2 { stroke: #6a76c8; }
+@keyframes eegSweep {
+    from { stroke-dashoffset: 100; }
+    to { stroke-dashoffset: 0; }
+}
+.sleep-phase-label {
+    font-size: 12px; font-weight: 600; color: #5b4fc4;
+    animation: phaseBlink 2.2s ease-in-out infinite;
+    white-space: nowrap;
+}
+[data-theme="dark"] .sleep-phase-label { color: #a8b2f0; }
+@keyframes phaseBlink {
+    0%, 100% { opacity: 0.5; }
+    50% { opacity: 1; }
+}
+
+/* Sleep config form */
+.sleep-config-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+    gap: 10px 18px;
+    margin-top: 12px;
+}
+.sleep-config-grid label {
+    display: flex; flex-direction: column; gap: 4px;
+    font-size: 12px; color: var(--text-secondary);
+}
+.sleep-config-grid label.sleep-check {
+    flex-direction: row; align-items: center; gap: 8px;
+    padding-top: 14px;
+}
+.sleep-config-grid input[type="number"] {
+    width: 90px; padding: 4px 8px; font-size: 12px;
+    border: 1px solid var(--border); border-radius: 6px;
+    background: var(--surface); color: var(--text);
+}
+.sleep-config-grid input[type="range"] { width: 140px; accent-color: #5b4fc4; }
+.sleep-config-grid input[type="checkbox"] { accent-color: #5b4fc4; }

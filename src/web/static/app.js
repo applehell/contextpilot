@@ -524,6 +524,8 @@ function connectSSE() {
             if (event.category === 'profile' && event.action === 'switch') {
                 handleExternalProfileSwitch(event.subject);
             }
+            // Sleep cycle activity — put the bot to sleep while it consolidates
+            if (event.category === 'sleep') handleSleepEvent(event);
         } catch (err) { console.error('SSE parse error:', err); }
     };
 
@@ -647,8 +649,11 @@ async function loadDashboard() {
             const el = document.getElementById('dash-scheduler');
             if (sched.running) { el.textContent = 'ON'; el.className = 'card-value green'; }
             else { el.textContent = 'OFF'; el.className = 'card-value'; }
+            const sleepInfo = sched.last_sleep
+                ? ` · ☾ ${new Date(sched.last_sleep * 1000).toLocaleTimeString([], {hour: '2-digit', minute: '2-digit'})}`
+                : '';
             document.getElementById('dash-scheduler-detail').textContent =
-                sched.running ? `every ${sched.interval_minutes}m` : 'not running';
+                (sched.running ? `every ${sched.interval_minutes}m` : 'not running') + sleepInfo;
         } catch (e) {}
     } catch (e) { console.error('Dashboard load failed:', e); } finally { botIdle(); }
 
@@ -2773,9 +2778,11 @@ async function loadScheduler() {
                 <button class="btn btn-small" onclick="runSchedulerNow()">Run Now</button>
                 <button class="btn btn-small btn-danger" onclick="stopScheduler()">Stop</button>`;
             status.textContent = `Running every ${d.interval_minutes} minutes` +
-                (d.last_run ? ` | Last: ${new Date(d.last_run * 1000).toLocaleString()}` : '');
+                (d.last_run ? ` | Last: ${new Date(d.last_run * 1000).toLocaleString()}` : '') +
+                (d.last_sleep ? ` | Sleep: ${new Date(d.last_sleep * 1000).toLocaleString()}` : '');
             if (dashVal) { dashVal.textContent = 'ON'; dashVal.className = 'card-value green'; }
-            if (dashDetail) dashDetail.textContent = `every ${d.interval_minutes}m`;
+            if (dashDetail) dashDetail.textContent = `every ${d.interval_minutes}m` +
+                (d.last_sleep ? ` · ☾ ${new Date(d.last_sleep * 1000).toLocaleTimeString([], {hour: '2-digit', minute: '2-digit'})}` : '');
         } else {
             actions.innerHTML = `
                 <select id="sched-interval" style="width:auto;font-size:12px;padding:2px 8px;">
@@ -3918,10 +3925,76 @@ async function loadSleepSettings() {
                 </div>
             </div>`;
 
+        el.innerHTML += renderSleepConfigForm(cfg);
+
         actions.innerHTML = `
             <button class="btn btn-small" onclick="sleepRunNow()">Run Now</button>
+            <button class="btn btn-small" onclick="toggleSleepConfig()">Configure</button>
             <button class="btn btn-small ${cfg.enabled ? 'btn-danger' : 'btn-primary'}" onclick="sleepToggle(${cfg.enabled ? 'false' : 'true'})">${cfg.enabled ? 'Disable' : 'Enable'}</button>`;
     } catch (e) { console.error(e); }
+}
+
+function renderSleepConfigForm(cfg) {
+    return `
+    <div id="sleep-config" style="display:none;margin-top:12px;border-top:1px solid var(--border);padding-top:4px;">
+        <div class="sleep-config-grid">
+            <label class="sleep-check"><input type="checkbox" id="sc-enabled" ${cfg.enabled ? 'checked' : ''}> Nightly run enabled</label>
+            <label>Run after (hour, local)
+                <input type="number" id="sc-hour" min="0" max="23" value="${cfg.hour}">
+            </label>
+            <label class="sleep-check"><input type="checkbox" id="sc-episodic" ${cfg.episodic_enabled ? 'checked' : ''}> Episodic &rarr; digests</label>
+            <label>Episodic age (days)
+                <input type="number" id="sc-age" min="1" max="365" value="${cfg.episodic_age_days}">
+            </label>
+            <label class="sleep-check"><input type="checkbox" id="sc-relations" ${cfg.detect_relations ? 'checked' : ''}> Detect relations</label>
+            <label class="sleep-check"><input type="checkbox" id="sc-automerge" ${cfg.auto_merge ? 'checked' : ''}> Auto-merge duplicates</label>
+            <label>Merge threshold: <span id="sc-thresh-val">${cfg.merge_threshold}</span>
+                <input type="range" id="sc-thresh" min="0.6" max="1" step="0.01" value="${cfg.merge_threshold}"
+                       oninput="document.getElementById('sc-thresh-val').textContent = this.value">
+            </label>
+            <label>Max memories per run
+                <input type="number" id="sc-max" min="100" max="50000" step="100" value="${cfg.max_memories}">
+            </label>
+            <label>Reports to keep
+                <input type="number" id="sc-keep" min="1" max="100" value="${cfg.keep_reports}">
+            </label>
+        </div>
+        <div style="display:flex;gap:8px;margin-top:14px;">
+            <button class="btn btn-small btn-primary" onclick="saveSleepConfig()">Save</button>
+            <button class="btn btn-small" onclick="toggleSleepConfig(false)">Cancel</button>
+        </div>
+    </div>`;
+}
+
+function toggleSleepConfig(show) {
+    const el = document.getElementById('sleep-config');
+    if (!el) return;
+    const visible = el.style.display !== 'none';
+    el.style.display = (show === undefined ? !visible : show) ? 'block' : 'none';
+}
+
+async function saveSleepConfig() {
+    const cfg = {
+        enabled: document.getElementById('sc-enabled').checked,
+        hour: parseInt(document.getElementById('sc-hour').value) || 3,
+        episodic_enabled: document.getElementById('sc-episodic').checked,
+        episodic_age_days: parseInt(document.getElementById('sc-age').value) || 14,
+        detect_relations: document.getElementById('sc-relations').checked,
+        auto_merge: document.getElementById('sc-automerge').checked,
+        merge_threshold: parseFloat(document.getElementById('sc-thresh').value) || 0.9,
+        max_memories: parseInt(document.getElementById('sc-max').value) || 5000,
+        keep_reports: parseInt(document.getElementById('sc-keep').value) || 14,
+    };
+    const tid = showToast('Sleep config', 'saving…');
+    try {
+        await fetch('/api/sleep/config', {
+            method: 'PUT',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify(cfg)
+        });
+        completeToast(tid, 'Sleep config saved', false);
+        loadSleepSettings();
+    } catch (e) { completeToast(tid, 'Failed', true); }
 }
 
 async function sleepToggle(enabled) {
@@ -3935,14 +4008,16 @@ async function sleepToggle(enabled) {
 
 async function sleepRunNow() {
     const tid = showToast('Sleep cycle', 'consolidating…');
+    botSleep();
     try {
         const res = await fetch('/api/sleep/run', {method: 'POST'});
         const d = await res.json();
         const r = (d.reports && d.reports[0]) || {};
         const ep = r.episodic || {};
         completeToast(tid, `Sleep done: ${ep.consolidated || 0} episodic consolidated, ${(r.contradictions || {}).count || 0} contradictions`, false);
+        botWake(600);
         loadSleepSettings();
-    } catch (e) { completeToast(tid, 'Failed', true); }
+    } catch (e) { completeToast(tid, 'Failed', true); botWake(0); }
 }
 
 async function loadSystemInfo() {
@@ -4122,6 +4197,39 @@ function setBotState(state) {
     if (!bot) return;
     bot.classList.remove('speaking', 'busy', 'error', 'connected');
     if (state) bot.classList.add(state);
+}
+
+// --- Sleep cycle animations ---
+
+let sleepWakeTimer = null;
+
+function botSleep() {
+    document.getElementById('header-bot')?.classList.add('sleeping');
+    setSleepCardRunning(true);
+    clearTimeout(sleepWakeTimer);
+}
+
+function botWake(delay = 1500) {
+    clearTimeout(sleepWakeTimer);
+    sleepWakeTimer = setTimeout(() => {
+        document.getElementById('header-bot')?.classList.remove('sleeping');
+        setSleepCardRunning(false);
+        if (document.getElementById('sleep-status')?.innerHTML) loadSleepSettings();
+    }, delay);
+}
+
+function handleSleepEvent(event) {
+    if (event.action === 'nightly' || event.action === 'cycle') {
+        botSleep();
+        botWake(8000); // stays asleep while per-profile cycle events keep arriving
+    } else if (event.action === 'manual-run' || event.action === 'error') {
+        botWake(1500);
+    }
+}
+
+function setSleepCardRunning(running) {
+    const anim = document.getElementById('sleep-run-anim');
+    if (anim) anim.style.display = running ? 'flex' : 'none';
 }
 
 // Skeleton loading

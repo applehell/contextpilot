@@ -369,6 +369,7 @@
                             <option value="folder">Folder</option>
                             <option value="paperless">Paperless</option>
                             <option value="profile">Profile</option>
+                            <option value="sleep">Sleep</option>
                             <option value="system">System</option>
                         </select>
                         <button class="btn btn-small" onclick="clearActivityFeed()">Clear</button>
@@ -761,6 +762,14 @@
                     <div id="sleep-actions" style="display:flex;gap:8px;"></div>
                 </div>
                 <div style="font-size:12px;color:var(--text-muted);margin-top:4px;">Nightly consolidation: episodic digests, relation detection, duplicate &amp; contradiction report.</div>
+                <div id="sleep-run-anim" class="sleep-run-box" style="display:none;">
+                    <div class="sleep-moon">&#9790;</div>
+                    <svg class="brainwave" viewBox="0 0 300 36" preserveAspectRatio="none" aria-hidden="true">
+                        <path class="wave2" pathLength="100" d="M0,18 L20,18 26,12 32,24 38,18 58,18 66,8 72,28 78,18 98,18 108,15 116,21 124,18 146,18 154,10 160,26 166,18 186,18 194,5 200,31 206,18 228,18 236,13 242,23 248,18 270,18 278,8 284,28 290,18 300,18"/>
+                        <path class="wave1" pathLength="100" d="M0,18 L18,18 26,6 33,30 40,18 62,18 70,12 76,24 82,18 104,18 112,2 118,34 124,18 148,18 156,11 162,25 168,18 190,18 198,7 204,29 210,18 234,18 242,3 248,33 254,18 276,18 284,12 290,24 300,18"/>
+                    </svg>
+                    <div class="sleep-phase-label">consolidating&hellip;</div>
+                </div>
                 <div id="sleep-status" style="margin-top:8px;"></div>
             </div>
 
@@ -856,7 +865,7 @@
 
     <div id="progress-toast"></div>
 
-    <script src="/static/app.js?v=48"></script>
+    <script src="/static/app.js?v=49"></script>
     <script>init();</script>
 </body>
 </html>
