@@ -92,14 +92,21 @@ def _conflict(va: str, vb: str) -> Optional[str]:
     return None
 
 
-def find_contradictions(memories: List[Memory], min_similarity: float = 0.4) -> List[Contradiction]:
+def find_contradictions(memories: List[Memory], min_similarity: float = 0.4,
+                        max_results: Optional[int] = None) -> List[Contradiction]:
     """Flag topically-related memory pairs whose values numerically or
     polaritically disagree. Conservative — gated on text similarity to avoid
-    flagging unrelated facts that merely share a tag."""
+    flagging unrelated facts that merely share a tag.
+
+    ``max_results`` stops the O(n²) scan early once that many pairs are
+    collected — pathological corpora can otherwise produce hundreds of
+    thousands of Contradiction objects."""
     cand = [m for m in memories if len(m.value) >= 20]
     words = {m.key: set(_TOKEN_RE.findall(m.value.lower())) for m in cand}
     out: List[Contradiction] = []
     for i in range(len(cand)):
+        if max_results is not None and len(out) >= max_results:
+            break
         for j in range(i + 1, len(cand)):
             a, b = cand[i], cand[j]
             if not _related(a, b):
@@ -110,6 +117,8 @@ def find_contradictions(memories: List[Memory], min_similarity: float = 0.4) -> 
             reason = _conflict(a.value, b.value)
             if reason:
                 out.append(Contradiction(a.key, b.key, round(sim, 2), reason))
+                if max_results is not None and len(out) >= max_results:
+                    break
     return sorted(out, key=lambda c: -c.similarity)
 
 

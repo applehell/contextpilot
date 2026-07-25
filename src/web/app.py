@@ -286,6 +286,14 @@ def create_app(db_path: Optional[Path] = None) -> FastAPI:
             except Exception as e:
                 logger.warning("Scheduler autostart failed: %s", e)
 
+        @app.on_event("shutdown")
+        async def _stop_scheduler():
+            try:
+                from src.core.scheduler import SyncScheduler
+                SyncScheduler.instance().stop()
+            except Exception:
+                pass
+
     return app
 
 

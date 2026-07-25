@@ -213,13 +213,16 @@ class TFIDFEngine:
         self._doc_count = 0
 
     def build_idf(self, documents: List[str]) -> None:
-        self._doc_count = len(documents)
+        # Build locally, swap last — vectorize() may run concurrently in
+        # another thread and must never see a doc_count/idf mismatch.
+        doc_count = len(documents)
         df = Counter()
         for doc in documents:
             words = set(_tokenize(doc))
             for w in words:
                 df[w] += 1
-        self._idf = {w: math.log((self._doc_count + 1) / (count + 1)) + 1 for w, count in df.items()}
+        idf = {w: math.log((doc_count + 1) / (count + 1)) + 1 for w, count in df.items()}
+        self._idf, self._doc_count = idf, doc_count
 
     def vectorize(self, text: str) -> Dict[str, float]:
         words = _tokenize(text)

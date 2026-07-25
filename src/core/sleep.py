@@ -18,6 +18,7 @@ additive and non-destructive.
 from __future__ import annotations
 
 import json
+import threading
 import time
 from pathlib import Path
 from typing import Any, Dict, List, Optional
@@ -48,6 +49,33 @@ STATE_FILE = "sleep_state.json"
 
 DIGEST_PREFIX = "digest/"
 
+# O(n²)/output guards for a single cycle
+MAX_CONTRADICTIONS = 200
+MAX_AUTO_RELATIONS = 5000
+
+# One sleep run at a time per process — concurrent runs race on
+# digest read-modify-write and duplicate the O(n²) work.
+_RUN_LOCK = threading.Lock()
+
+
+def _clamp_config(cfg: Dict[str, Any]) -> Dict[str, Any]:
+    cfg["hour"] = min(23, max(0, int(cfg["hour"])))
+    cfg["episodic_age_days"] = max(0, int(cfg["episodic_age_days"]))
+    cfg["max_memories"] = max(1, int(cfg["max_memories"]))
+    cfg["keep_reports"] = min(100, max(1, int(cfg["keep_reports"])))
+    cfg["merge_threshold"] = min(1.0, max(0.6, float(cfg["merge_threshold"])))
+    return cfg
+
+
+def _atomic_write(path: Path, text: str) -> None:
+    tmp = path.with_suffix(path.suffix + ".tmp")
+    tmp.write_text(text, encoding="utf-8")
+    try:
+        tmp.replace(path)
+    except OSError:
+        tmp.unlink(missing_ok=True)
+        raise
+
 
 def _data_dir() -> Path:
     from ..storage.profiles import _DATA_DIR
@@ -61,8 +89,9 @@ def load_config(profile_dir: Optional[Path] = None) -> Dict[str, Any]:
         try:
             stored = json.loads(path.read_text(encoding="utf-8"))
             cfg.update({k: v for k, v in stored.items() if k in DEFAULT_CONFIG})
-        except (json.JSONDecodeError, OSError):
-            pass
+            cfg = _clamp_config(cfg)
+        except (json.JSONDecodeError, OSError, TypeError, ValueError):
+            cfg = dict(DEFAULT_CONFIG)
     return cfg
 
 
@@ -81,15 +110,8 @@ def save_config(profile_dir: Optional[Path], updates: Dict[str, Any]) -> Dict[st
             cfg[k] = float(v)
         else:
             cfg[k] = v
-    cfg["hour"] = min(23, max(0, cfg["hour"]))
-    path = profile_dir / CONFIG_FILE
-    tmp = path.with_suffix(path.suffix + ".tmp")
-    tmp.write_text(json.dumps(cfg, indent=2), encoding="utf-8")
-    try:
-        tmp.replace(path)
-    except OSError:
-        tmp.unlink(missing_ok=True)
-        raise
+    cfg = _clamp_config(cfg)
+    _atomic_write(profile_dir / CONFIG_FILE, json.dumps(cfg, indent=2))
     return cfg
 
 
@@ -104,8 +126,7 @@ def load_state() -> Dict[str, Any]:
 
 
 def save_state(state: Dict[str, Any]) -> None:
-    path = _data_dir() / STATE_FILE
-    path.write_text(json.dumps(state, indent=2), encoding="utf-8")
+    _atomic_write(_data_dir() / STATE_FILE, json.dumps(state, indent=2))
 
 
 def load_reports(profile_dir: Optional[Path] = None, limit: int = 10) -> List[Dict[str, Any]]:
@@ -120,18 +141,21 @@ def load_reports(profile_dir: Optional[Path] = None, limit: int = 10) -> List[Di
 
 
 def _save_report(profile_dir: Path, report: Dict[str, Any], keep: int) -> None:
-    path = profile_dir / REPORTS_FILE
+    keep = max(1, keep)
     reports = load_reports(profile_dir, limit=keep)
     reports.insert(0, report)
-    path.write_text(json.dumps(reports[:keep], indent=2), encoding="utf-8")
+    _atomic_write(profile_dir / REPORTS_FILE, json.dumps(reports[:keep], indent=2))
 
 
 def sleep_due(now: Optional[float] = None) -> bool:
     """True when the nightly run for today has not happened yet and the
-    configured hour (from the default profile's config) has passed."""
+    configured hour has passed.
+
+    The *schedule* (hour, once per day) is global and read from the default
+    profile's config; whether an individual profile participates is that
+    profile's own ``enabled`` flag, checked in :func:`run_for_profiles`.
+    """
     cfg = load_config(_data_dir())
-    if not cfg["enabled"]:
-        return False
     now = now if now is not None else time.time()
     lt = time.localtime(now)
     today = time.strftime("%Y-%m-%d", lt)
@@ -231,9 +255,13 @@ def run_sleep_cycle(db: Database, profile_dir: Path,
     if cfg["detect_relations"]:
         try:
             rels = detect_dependencies(memories)
+            capped = len(rels) > MAX_AUTO_RELATIONS
+            if capped:
+                rels = sorted(rels, key=lambda r: -r["confidence"])[:MAX_AUTO_RELATIONS]
             cleared = rel_store.clear_auto()
             added = rel_store.bulk_add_auto(rels)
-            report["relations"] = {"detected": len(rels), "added": added, "cleared": cleared}
+            report["relations"] = {"detected": len(rels), "added": added,
+                                   "cleared": cleared, "capped": capped}
         except Exception as e:
             report["errors"].append(f"relations: {e}")
 
@@ -248,7 +276,8 @@ def run_sleep_cycle(db: Database, profile_dir: Path,
                 group_mems = [by_key[k] for k in g.keys if k in by_key]
                 if len(group_mems) < 2 or any(m.pinned for m in group_mems):
                     continue
-                if any(m.key.startswith(DIGEST_PREFIX) for m in group_mems):
+                if any(m.key.startswith(DIGEST_PREFIX)
+                       or m.metadata.get("consolidated_into") for m in group_mems):
                     continue
                 try:
                     survivor = merge_group(store, [m.key for m in group_mems])
@@ -266,9 +295,10 @@ def run_sleep_cycle(db: Database, profile_dir: Path,
         report["errors"].append(f"duplicates: {e}")
 
     try:
-        contras = find_contradictions(memories)
+        contras = find_contradictions(memories, max_results=MAX_CONTRADICTIONS)
         report["contradictions"] = {
             "count": len(contras),
+            "capped": len(contras) >= MAX_CONTRADICTIONS,
             "samples": [{"key_a": c.key_a, "key_b": c.key_b,
                          "similarity": c.similarity, "reason": c.reason}
                         for c in contras[:10]],
@@ -302,6 +332,17 @@ def run_for_profiles(profile_ids: Optional[List[str]] = None,
     worker thread regardless of which profile is currently active.
     """
     from ..storage.profiles import DEFAULT_ID, PROFILES_DIR, ProfileManager
+    if not _RUN_LOCK.acquire(blocking=False):
+        return [{"skipped": "already_running"}]
+    try:
+        return _run_for_profiles_locked(profile_ids, record_state,
+                                        DEFAULT_ID, PROFILES_DIR, ProfileManager)
+    finally:
+        _RUN_LOCK.release()
+
+
+def _run_for_profiles_locked(profile_ids, record_state,
+                             DEFAULT_ID, PROFILES_DIR, ProfileManager) -> List[Dict[str, Any]]:
     pm = ProfileManager()
     events = EventBus.instance()
     reports: List[Dict[str, Any]] = []
@@ -323,6 +364,9 @@ def run_for_profiles(profile_ids: Optional[List[str]] = None,
             report = run_sleep_cycle(db, profile_dir, cfg)
             changed = (report.get("episodic", {}).get("consolidated", 0)
                        + report.get("duplicates", {}).get("auto_merged", 0))
+            # Embedding refresh only works for the active profile (the
+            # embeddings module is bound to it); other profiles reindex on
+            # their next activation via _trigger_background_index.
             if changed and p.id == pm.active_id:
                 try:
                     from . import embeddings

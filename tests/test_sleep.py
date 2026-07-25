@@ -48,6 +48,23 @@ class TestConfig:
         assert cfg["auto_merge"] is True
         assert cfg["episodic_age_days"] == 7
 
+    def test_out_of_range_values_clamped(self, tmp_path) -> None:
+        cfg = sleep.save_config(tmp_path, {
+            "episodic_age_days": -5, "max_memories": 0,
+            "keep_reports": 0, "merge_threshold": 7.5,
+        })
+        assert cfg["episodic_age_days"] == 0
+        assert cfg["max_memories"] == 1
+        assert cfg["keep_reports"] == 1
+        assert cfg["merge_threshold"] == 1.0
+
+    def test_hand_edited_file_clamped_on_load(self, tmp_path) -> None:
+        (tmp_path / sleep.CONFIG_FILE).write_text(
+            json.dumps({"episodic_age_days": -99, "merge_threshold": 0.1}))
+        cfg = sleep.load_config(tmp_path)
+        assert cfg["episodic_age_days"] == 0
+        assert cfg["merge_threshold"] == 0.6
+
     def test_corrupt_file_falls_back(self, tmp_path) -> None:
         (tmp_path / sleep.CONFIG_FILE).write_text("{broken")
         assert sleep.load_config(tmp_path) == sleep.DEFAULT_CONFIG
@@ -72,10 +89,17 @@ class TestSleepDue:
         sleep.save_state({"last_date": time.strftime("%Y-%m-%d", time.localtime(noon))})
         assert sleep.sleep_due(noon) is False
 
-    def test_disabled_never_due(self, _data_dir) -> None:
+    def test_schedule_is_global_profile_enabled_is_not(self, _data_dir) -> None:
+        # 'enabled' gates a profile inside run_for_profiles, not the schedule
         sleep.save_config(_data_dir, {"enabled": False})
         noon = time.mktime((2026, 7, 24, 12, 0, 0, 0, 0, -1))
-        assert sleep.sleep_due(noon) is False
+        assert sleep.sleep_due(noon) is True
+
+    def test_hour_zero_is_valid(self, _data_dir) -> None:
+        cfg = sleep.save_config(_data_dir, {"hour": 0})
+        assert cfg["hour"] == 0
+        one_am = time.mktime((2026, 7, 24, 1, 0, 0, 0, 0, -1))
+        assert sleep.sleep_due(one_am) is True
 
 
 class TestEpisodicConsolidation:
@@ -198,6 +222,41 @@ class TestReportAndRelations:
         for key in ("total_memories", "duplicates", "contradictions", "low_confidence", "duration_ms"):
             assert key in report
         assert report["errors"] == []
+
+
+class TestCapsAndLock:
+    def test_contradiction_scan_capped(self, db, store, tmp_path, monkeypatch) -> None:
+        monkeypatch.setattr(sleep, "MAX_CONTRADICTIONS", 1)
+        for i in range(4):
+            store.set(Memory(key=f"geraet/g{i}", value=f"Der Sensor misst {i * 100} Watt Leistung im Betrieb",
+                             tags=["sensor", "watt"]), reset_ttl=False)
+        report = sleep.run_sleep_cycle(db, tmp_path)
+        assert report["contradictions"]["count"] == 1
+        assert report["contradictions"]["capped"] is True
+
+    def test_relations_capped(self, db, store, tmp_path, monkeypatch) -> None:
+        monkeypatch.setattr(sleep, "MAX_AUTO_RELATIONS", 1)
+        for i in range(3):
+            store.set(Memory(key=f"a{i}", value=f"Dienst {i} nutzt 192.168.1.78 als Ziel"), reset_ttl=False)
+        report = sleep.run_sleep_cycle(db, tmp_path)
+        assert report["relations"]["capped"] is True
+        assert report["relations"]["added"] == 1
+
+    def test_auto_merge_skips_consolidated_originals(self, db, store, tmp_path) -> None:
+        val = "Identische episodische Beobachtung mit ausreichend langem Inhalt für Shingles-Vergleich."
+        store.set(_episodic("log/a", val, 20), reset_ttl=False)
+        store.set(_episodic("log/b", val, 20), reset_ttl=False)
+        sleep.run_sleep_cycle(db, tmp_path)  # consolidates both into a digest
+        report = sleep.run_sleep_cycle(db, tmp_path, {"auto_merge": True})
+        assert report["duplicates"]["auto_merged"] == 0
+        assert store.get("log/a") and store.get("log/b")
+
+    def test_run_lock_skips_concurrent(self) -> None:
+        assert sleep._RUN_LOCK.acquire(blocking=False)
+        try:
+            assert sleep.run_for_profiles() == [{"skipped": "already_running"}]
+        finally:
+            sleep._RUN_LOCK.release()
 
 
 class TestStoreAdditions:

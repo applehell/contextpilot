@@ -516,8 +516,9 @@ function connectSSE() {
             activityBuffer.unshift(event);
             if (activityBuffer.length > MAX_ACTIVITY) activityBuffer.pop();
             appendActivityItem(event);
-            // Pulse the bot on non-api events
-            if (event.category !== 'api') { botBusy(); setTimeout(botIdle, 600); }
+            // Pulse the bot on non-api events (sleep events get the sleeping
+            // animation instead — busy would fight the sleeping class)
+            if (event.category !== 'api' && event.category !== 'sleep') { botBusy(); setTimeout(botIdle, 600); }
             // Increment event badge when not on dashboard
             if (event.category !== 'api') incrementEventBadge();
             // Profile switched externally (CLI, agent, another tab) — reload active view
@@ -3904,7 +3905,7 @@ async function loadSleepSettings() {
                     <span class="age">Digests: +${ep.digests_created || 0}/~${ep.digests_updated || 0} (${ep.consolidated || 0} episodic)</span>
                     <span class="age">Relations: ${(last.relations || {}).added || 0}</span>
                     <span class="age">Dup-Groups: ${dup.groups || 0}${dup.auto_merged ? ` (${dup.auto_merged} merged)` : ''}</span>
-                    <span class="age">Contradictions: ${con.count || 0}</span>
+                    <span class="age">Contradictions: ${con.count || 0}${con.capped ? '+' : ''}</span>
                     <span class="age">Low confidence: ${low.count || 0}</span>
                 </div>`;
         }
@@ -3935,7 +3936,11 @@ async function loadSleepSettings() {
         let catStats = null;
         try { catStats = await (await fetch('/api/memories/category-stats')).json(); } catch (e2) {}
         renderSleepViz(s.reports || [], catStats);
-    } catch (e) { console.error(e); }
+    } catch (e) {
+        console.error(e);
+        const el = document.getElementById('sleep-status');
+        if (el) el.innerHTML = '<div class="viz-empty">Failed to load sleep status.</div>';
+    }
 }
 
 // --- Sleep viz: run-history sparklines + memory composition ---
@@ -4037,8 +4042,8 @@ function renderSleepConfigForm(cfg) {
     <div id="sleep-config" style="display:none;margin-top:12px;border-top:1px solid var(--border);padding-top:4px;">
         <div class="sleep-config-grid">
             <label class="sleep-check"><input type="checkbox" id="sc-enabled" ${cfg.enabled ? 'checked' : ''}> Nightly run enabled</label>
-            <label>Run after (hour, local)
-                <input type="number" id="sc-hour" min="0" max="23" value="${cfg.hour}">
+            <label>Run after (hour — global schedule)
+                <input type="number" id="sc-hour" min="0" max="23" value="${cfg.hour}" title="The nightly schedule (hour) is global; all other settings apply to the current profile.">
             </label>
             <label class="sleep-check"><input type="checkbox" id="sc-episodic" ${cfg.episodic_enabled ? 'checked' : ''}> Episodic &rarr; digests</label>
             <label>Episodic age (days)
@@ -4071,17 +4076,22 @@ function toggleSleepConfig(show) {
     el.style.display = (show === undefined ? !visible : show) ? 'block' : 'none';
 }
 
+function numOr(id, fallback) {
+    const v = parseFloat(document.getElementById(id).value);
+    return Number.isFinite(v) ? v : fallback;   // 0 is a valid value — no ||-fallback
+}
+
 async function saveSleepConfig() {
     const cfg = {
         enabled: document.getElementById('sc-enabled').checked,
-        hour: parseInt(document.getElementById('sc-hour').value) || 3,
+        hour: numOr('sc-hour', 3),
         episodic_enabled: document.getElementById('sc-episodic').checked,
-        episodic_age_days: parseInt(document.getElementById('sc-age').value) || 14,
+        episodic_age_days: numOr('sc-age', 14),
         detect_relations: document.getElementById('sc-relations').checked,
         auto_merge: document.getElementById('sc-automerge').checked,
-        merge_threshold: parseFloat(document.getElementById('sc-thresh').value) || 0.9,
-        max_memories: parseInt(document.getElementById('sc-max').value) || 5000,
-        keep_reports: parseInt(document.getElementById('sc-keep').value) || 14,
+        merge_threshold: numOr('sc-thresh', 0.9),
+        max_memories: numOr('sc-max', 5000),
+        keep_reports: numOr('sc-keep', 14),
     };
     const tid = showToast('Sleep config', 'saving…');
     try {
@@ -4312,7 +4322,11 @@ function botWake(delay = 1500) {
     sleepWakeTimer = setTimeout(() => {
         document.getElementById('header-bot')?.classList.remove('sleeping');
         setSleepCardRunning(false);
-        if (document.getElementById('sleep-status')?.innerHTML) loadSleepSettings();
+        // Don't reload while the config form is open — it would wipe unsaved edits
+        const cfgForm = document.getElementById('sleep-config');
+        if (document.getElementById('sleep-status')?.innerHTML && cfgForm?.style.display !== 'block') {
+            loadSleepSettings();
+        }
     }, delay);
 }
 
