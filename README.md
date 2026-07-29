@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="https://img.shields.io/badge/version-4.6.0-blue?style=flat-square" alt="Version">
+  <img src="https://img.shields.io/badge/version-4.8.0-blue?style=flat-square" alt="Version">
   <img src="https://img.shields.io/docker/pulls/applehell/contextpilot?style=flat-square&color=blue" alt="Docker Pulls">
   <img src="https://img.shields.io/docker/image-size/applehell/contextpilot/latest?style=flat-square&color=blue" alt="Image Size">
   <img src="https://img.shields.io/badge/python-3.11+-3776AB?style=flat-square&logo=python&logoColor=white" alt="Python">
@@ -107,7 +107,7 @@ python -m src.web --mcp-port 8500          # Custom MCP port
 | **Secrets** | Scan memories for API keys, passwords, tokens (OWASP patterns) |
 | **Sources** | Folder mapping, webhooks, auto-sync scheduler |
 | **Assembler** | Templates, auto-suggest, 6 compressors, manual block assembly, export (CLAUDE.md, Markdown) |
-| **Settings** | Profiles, MCP server control, DB maintenance, import/export hub, scheduler, system info |
+| **Settings** | Profiles, MCP server control, sleep cycle config + visualization, DB maintenance, import/export hub, scheduler, system info |
 
 ### Memories
 
@@ -116,7 +116,8 @@ python -m src.web --mcp-port 8500          # Custom MCP port
 | **Create & Edit** | Modal editor with Markdown support (EasyMDE), live preview |
 | **Search** | Full-text search via SQLite FTS5 + hybrid semantic search |
 | **Tags** | Clickable tag filtering, color-coded top tags, bulk tag operations |
-| **Categories** | `persistent`, `session` (24h TTL), `ephemeral` (1h TTL) — auto-expiry |
+| **Categories** | `persistent`, `episodic` (consolidated nightly), `session` (24h TTL), `ephemeral` (1h TTL) |
+| **Archive** | Cold storage stage — archived memories leave search/list but stay readable and restorable |
 | **TTL** | Time-to-live with auto-expiry, color-coded lifetime indicators (urgent/soon/limited/permanent) |
 | **Pin** | Pin important memories to the top |
 | **Relations** | Cross-references between memories, bidirectional graph edges |
@@ -174,6 +175,32 @@ The Assembler optimizes your memories for AI consumption within a token budget:
 | **Duplicate Detection** | Find and remove duplicate or near-duplicate memories |
 | **Export** | Generate CLAUDE.md or Markdown from templates |
 | **MCP Integration** | `assemble_template`, `suggest_templates`, `list_templates` tools |
+
+### Sleep Cycle — Autonomous Memory Consolidation
+
+Every night (default 03:00), Context Pilot "sleeps": each profile runs an
+autonomous consolidation pass, inspired by how biological memory works.
+
+| Stage | What happens |
+|---|---|
+| **Episodic → Semantic** | `episodic` memories older than 14 days are distilled into persistent `digest/<prefix>/<month>` memories |
+| **Relation Detection** | Cross-references between memories are re-detected and refreshed (graph edges) |
+| **Duplicate Report** | Near-duplicates are reported; optional auto-merge (off by default) |
+| **Contradiction Check** | Conflicting memories are flagged for review |
+| **Corroboration** | Well-connected memories gain confidence via relation counts |
+| **Forgetting** | Consolidated episodic originals are archived after 30 days — never deleted, never pinned memories |
+
+Fully configurable per profile via the Sleep Cycle card in Settings (schedule,
+thresholds, stages on/off) or `PUT /api/sleep/config`. Reports of the last runs
+are visualized with sparklines and a memory-composition chart.
+
+### Associative Recall — Spreading Activation
+
+`get_context_for_task` doesn't stop at search hits: activation spreads along
+graph edges (2 hops, decaying with distance and edge confidence), pulling in
+related memories that share **no vocabulary** with the query — marked as
+`method: "associated"`. Relations are also detected at write time (key
+references, shared IPs/URLs), so the graph grows as agents write.
 
 ### More Features
 
@@ -338,7 +365,7 @@ Claude Code --> MCP Server (streamable-http, Port 8400)
                    |-- /context-pilot + /context-pilot-learn commands
                    |-- Skill file (best practices + tool guidance)
 
-Storage --> SQLite (WAL mode + FTS5, Schema v13)
+Storage --> SQLite (WAL mode + FTS5, Schema v14)
 ```
 
 ### Data Paths
@@ -416,6 +443,8 @@ the directory layout mirrors the live one 1:1; migrations run on next startup.
 | `/api/memories/{key}/related` | GET | Related memories (cross-references) |
 | `/api/memories/{key}/versions` | GET | Version history |
 | `/api/memories/{key}/pin` | POST | Pin/unpin memory |
+| `/api/memories/{key}/archive` | POST | Archive/unarchive memory |
+| `/api/archive` | GET | List archived memories |
 | `/api/memories/bulk-delete` | POST | Bulk delete |
 | `/api/memories/bulk-ttl` | POST | Bulk TTL update |
 | `/api/memories/bulk-tag` | POST | Bulk tag operations |
@@ -531,6 +560,9 @@ the directory layout mirrors the live one 1:1; migrations run on next startup.
 | `/api/mcp/register` | POST | Register MCP in ~/.claude.json |
 | `/api/mcp/deregister` | POST | Deregister MCP |
 | `/api/scheduler/*` | GET/POST | Auto-sync scheduler control |
+| `/api/sleep` | GET | Sleep cycle config, state and reports |
+| `/api/sleep/config` | PUT | Update sleep cycle configuration |
+| `/api/sleep/run` | POST | Trigger sleep cycle manually (`?all_profiles=true`) |
 
 </details>
 
@@ -541,8 +573,10 @@ the directory layout mirrors the live one 1:1; migrations run on next startup.
 ```
 src/
   core/                        Core logic
+    activation.py              Spreading activation (associative recall)
     assembler.py               3-phase token-budget assembler
     analytics.py               Usage analytics engine
+    consolidation.py           Contradiction + low-confidence detection
     backup.py                  Backup & restore manager
     block.py                   Block data model
     claude_config.py           ~/.claude.json reader/writer
@@ -555,14 +589,16 @@ src/
     events.py                  Global EventBus with SSE broadcast
     log.py                      Logging setup + logger factory
     relevance.py               Relevance scoring engine
-    scheduler.py               Auto-sync scheduler (APScheduler)
+    rerank.py                  Retrieval re-ranking
+    scheduler.py               Auto-sync scheduler + nightly sleep trigger
     secrets.py                 Secrets detector (OWASP patterns)
     skill_registry.py          MCP skill lifecycle tracker
+    sleep.py                   Sleep cycle (consolidation, forgetting, reports)
     token_budget.py            tiktoken wrapper
     webhooks.py                Inbound webhook processor
     weight_adjuster.py         Usage-based weight adjustment
-  storage/                     SQLite persistence (Schema v13)
-    db.py                      DB engine + migrations (v1-v13)
+  storage/                     SQLite persistence (Schema v14)
+    db.py                      DB engine + migrations (v1-v14)
     memory.py                  MemoryStore (CRUD + FTS5)
     memory_activity.py         Access tracking & usage stats
     profiles.py                Profile manager
@@ -598,7 +634,7 @@ src/
     claude.py                  CLAUDE.md parser
     copilot.py                 copilot-instructions.md parser
     sqlite.py                  memory-mcp SQLite importer
-tests/                         2100+ tests
+tests/                         1290+ tests
 ```
 
 ## Development
@@ -618,11 +654,11 @@ python -m src.web --reload    # Hot-reload
 |---|---|
 | **Backend** | Python 3.11+, FastAPI, Uvicorn |
 | **Frontend** | Vanilla JS, vis.js (graph), EasyMDE (editor), DOMPurify (XSS) |
-| **Database** | SQLite (WAL mode, FTS5, Schema v13) |
+| **Database** | SQLite (WAL mode, FTS5, Schema v14) |
 | **Realtime** | Server-Sent Events (SSE) |
 | **AI Integration** | MCP Server (FastMCP, 20 tools), tiktoken |
 | **Security** | DOMPurify, Security Headers, secrets scanner, non-root Docker |
-| **Deployment** | Docker (arm64 + amd64), 2100+ tests |
+| **Deployment** | Docker (arm64 + amd64), 1290+ tests |
 
 ---
 
