@@ -1,5 +1,11 @@
 # Changelog
 
+## v4.8.1 — 2026-07-29
+
+### Fixed
+- Pin `mcp>=1.27.0,<2` — the mcp 2.0.0 SDK removes `mcp.server.fastmcp`,
+  which crashed fresh Docker builds on startup.
+
 ## v4.8.0 — 2026-07-24
 
 The "brain" release: ContextPilot now consolidates its memory autonomously.
