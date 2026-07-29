@@ -9,7 +9,7 @@ from src.core.log import get_logger
 
 logger = get_logger("storage.db")
 
-SCHEMA_VERSION = 13
+SCHEMA_VERSION = 14
 
 MIGRATIONS = {
     1: [
@@ -231,6 +231,10 @@ MIGRATIONS = {
     13: [
         # -- memory categories with retention policies --
         """ALTER TABLE memories ADD COLUMN category TEXT DEFAULT 'persistent'""",
+    ],
+    14: [
+        # -- archive stage (active forgetting: out of default retrieval, kept on disk) --
+        """ALTER TABLE memories ADD COLUMN archived INTEGER DEFAULT 0""",
     ],
 }
 

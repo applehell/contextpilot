@@ -87,3 +87,52 @@ def detect_dependencies(memories: List[Memory]) -> List[Dict]:
             best[key] = r
 
     return list(best.values())
+
+
+def detect_for_memory(memory: Memory, db, max_relations: int = 20) -> List[Dict]:
+    """Incremental relation detection for a single (new or updated) memory.
+
+    Cheap enough to run on every write: SQL LIKE scans instead of the full
+    O(n²) pass — key references both directions plus shared IP/URL entities.
+    Tag clusters are left to the nightly sleep cycle.
+    """
+    results: List[Dict] = []
+    conn = db.conn
+
+    # Existing keys mentioned in the new value
+    rows = conn.execute("SELECT key FROM memories WHERE key != ? AND length(key) >= 4",
+                        (memory.key,)).fetchall()
+    for r in rows:
+        if len(results) >= max_relations:
+            return results
+        if r["key"] in memory.value:
+            results.append({"source_key": memory.key, "target_key": r["key"],
+                            "relation_type": "references", "confidence": 0.9})
+
+    # The new key mentioned in existing values
+    if len(memory.key) >= 4:
+        rows = conn.execute(
+            "SELECT key FROM memories WHERE key != ? AND value LIKE ? LIMIT ?",
+            (memory.key, f"%{memory.key}%", max_relations)).fetchall()
+        for r in rows:
+            if len(results) >= max_relations:
+                return results
+            results.append({"source_key": r["key"], "target_key": memory.key,
+                            "relation_type": "references", "confidence": 0.9})
+
+    # Shared entities (IPs, URLs)
+    entities = set(IP_RE.findall(memory.value)) | set(URL_RE.findall(memory.value))
+    for entity in list(entities)[:5]:
+        rows = conn.execute(
+            "SELECT key FROM memories WHERE key != ? AND value LIKE ? LIMIT 10",
+            (memory.key, f"%{entity}%")).fetchall()
+        if len(rows) > 10:
+            continue
+        for r in rows:
+            if len(results) >= max_relations:
+                return results
+            pair = tuple(sorted([memory.key, r["key"]]))
+            results.append({"source_key": pair[0], "target_key": pair[1],
+                            "relation_type": "shared_entity", "confidence": 0.7})
+
+    return results

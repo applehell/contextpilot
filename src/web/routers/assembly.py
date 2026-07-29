@@ -101,6 +101,14 @@ async def context_for_task(request: Request):
     except Exception as e:
         logger.warning("rerank failed, falling back to hybrid order: %s", e)
 
+    # Associative expansion over the knowledge graph
+    try:
+        from src.core.activation import expand_results
+        from src.storage.relations import RelationStore
+        results.extend(expand_results(results, store, RelationStore(_get_db())))
+    except Exception as e:
+        logger.warning("spreading activation failed: %s", e)
+
     blocks = []
     for i, r in enumerate(results):
         prio = Priority.HIGH if i < 5 else Priority.MEDIUM if i < 15 else Priority.LOW

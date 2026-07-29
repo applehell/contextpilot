@@ -516,14 +516,17 @@ function connectSSE() {
             activityBuffer.unshift(event);
             if (activityBuffer.length > MAX_ACTIVITY) activityBuffer.pop();
             appendActivityItem(event);
-            // Pulse the bot on non-api events
-            if (event.category !== 'api') { botBusy(); setTimeout(botIdle, 600); }
+            // Pulse the bot on non-api events (sleep events get the sleeping
+            // animation instead — busy would fight the sleeping class)
+            if (event.category !== 'api' && event.category !== 'sleep') { botBusy(); setTimeout(botIdle, 600); }
             // Increment event badge when not on dashboard
             if (event.category !== 'api') incrementEventBadge();
             // Profile switched externally (CLI, agent, another tab) — reload active view
             if (event.category === 'profile' && event.action === 'switch') {
                 handleExternalProfileSwitch(event.subject);
             }
+            // Sleep cycle activity — put the bot to sleep while it consolidates
+            if (event.category === 'sleep') handleSleepEvent(event);
         } catch (err) { console.error('SSE parse error:', err); }
     };
 
@@ -647,8 +650,11 @@ async function loadDashboard() {
             const el = document.getElementById('dash-scheduler');
             if (sched.running) { el.textContent = 'ON'; el.className = 'card-value green'; }
             else { el.textContent = 'OFF'; el.className = 'card-value'; }
+            const sleepInfo = sched.last_sleep
+                ? ` · ☾ ${new Date(sched.last_sleep * 1000).toLocaleTimeString([], {hour: '2-digit', minute: '2-digit'})}`
+                : '';
             document.getElementById('dash-scheduler-detail').textContent =
-                sched.running ? `every ${sched.interval_minutes}m` : 'not running';
+                (sched.running ? `every ${sched.interval_minutes}m` : 'not running') + sleepInfo;
         } catch (e) {}
     } catch (e) { console.error('Dashboard load failed:', e); } finally { botIdle(); }
 
@@ -2773,9 +2779,11 @@ async function loadScheduler() {
                 <button class="btn btn-small" onclick="runSchedulerNow()">Run Now</button>
                 <button class="btn btn-small btn-danger" onclick="stopScheduler()">Stop</button>`;
             status.textContent = `Running every ${d.interval_minutes} minutes` +
-                (d.last_run ? ` | Last: ${new Date(d.last_run * 1000).toLocaleString()}` : '');
+                (d.last_run ? ` | Last: ${new Date(d.last_run * 1000).toLocaleString()}` : '') +
+                (d.last_sleep ? ` | Sleep: ${new Date(d.last_sleep * 1000).toLocaleString()}` : '');
             if (dashVal) { dashVal.textContent = 'ON'; dashVal.className = 'card-value green'; }
-            if (dashDetail) dashDetail.textContent = `every ${d.interval_minutes}m`;
+            if (dashDetail) dashDetail.textContent = `every ${d.interval_minutes}m` +
+                (d.last_sleep ? ` · ☾ ${new Date(d.last_sleep * 1000).toLocaleTimeString([], {hour: '2-digit', minute: '2-digit'})}` : '');
         } else {
             actions.innerHTML = `
                 <select id="sched-interval" style="width:auto;font-size:12px;padding:2px 8px;">
@@ -3643,6 +3651,7 @@ async function loadSettings() {
     loadMcpSettings();
     loadDbStats();
     loadSchedulerSettings();
+    loadSleepSettings();
     loadSystemInfo();
 }
 
@@ -3873,6 +3882,262 @@ async function schedulerRunNow() {
     } catch (e) { completeToast(tid, 'Failed', true); }
 }
 
+async function loadSleepSettings() {
+    showSkeleton('sleep-status', {rows: 1, type: 'list'});
+    try {
+        const res = await fetch('/api/sleep');
+        const s = await res.json();
+        const el = document.getElementById('sleep-status');
+        const actions = document.getElementById('sleep-actions');
+        const cfg = s.config || {};
+        const last = (s.reports && s.reports[0]) || null;
+        const lastTs = s.last_sleep || (s.state && s.state.last_run);
+        const lastDate = lastTs ? new Date(lastTs * 1000).toLocaleString() : 'never';
+
+        let reportHtml = '';
+        if (last) {
+            const ep = last.episodic || {};
+            const dup = last.duplicates || {};
+            const con = last.contradictions || {};
+            const low = last.low_confidence || {};
+            reportHtml = `
+                <div class="meta" style="margin-top:4px;">
+                    <span class="age">Digests: +${ep.digests_created || 0}/~${ep.digests_updated || 0} (${ep.consolidated || 0} episodic)</span>
+                    <span class="age">Relations: ${(last.relations || {}).added || 0}</span>
+                    <span class="age">Dup-Groups: ${dup.groups || 0}${dup.auto_merged ? ` (${dup.auto_merged} merged)` : ''}</span>
+                    <span class="age">Contradictions: ${con.count || 0}${con.capped ? '+' : ''}</span>
+                    <span class="age">Low confidence: ${low.count || 0}</span>
+                    <span class="age">Archived: ${(last.forget || {}).archived || 0}</span>
+                </div>`;
+        }
+
+        el.innerHTML = `
+            <div class="memory-item" style="cursor:default;border-left:3px solid ${cfg.enabled ? 'var(--success)' : 'var(--text-muted)'};">
+                <div class="main">
+                    <div class="key">
+                        <span class="badge" style="background:${cfg.enabled ? 'var(--success-light)' : 'var(--surface-alt)'};color:${cfg.enabled ? 'var(--success)' : 'var(--text-muted)'};">${cfg.enabled ? 'enabled' : 'disabled'}</span>
+                        Nightly after ${String(cfg.hour).padStart(2, '0')}:00
+                        ${cfg.auto_merge ? '<span class="badge">auto-merge</span>' : ''}
+                    </div>
+                    <div class="meta">
+                        <span class="age">Last run: ${lastDate}</span>
+                        <span class="age">Episodic age: ${cfg.episodic_age_days}d</span>
+                    </div>
+                    ${reportHtml}
+                </div>
+            </div>`;
+
+        el.innerHTML += renderSleepConfigForm(cfg);
+
+        actions.innerHTML = `
+            <button class="btn btn-small" onclick="sleepRunNow()">Run Now</button>
+            <button class="btn btn-small" onclick="toggleSleepConfig()">Configure</button>
+            <button class="btn btn-small ${cfg.enabled ? 'btn-danger' : 'btn-primary'}" onclick="sleepToggle(${cfg.enabled ? 'false' : 'true'})">${cfg.enabled ? 'Disable' : 'Enable'}</button>`;
+
+        let catStats = null;
+        try { catStats = await (await fetch('/api/memories/category-stats')).json(); } catch (e2) {}
+        renderSleepViz(s.reports || [], catStats);
+    } catch (e) {
+        console.error(e);
+        const el = document.getElementById('sleep-status');
+        if (el) el.innerHTML = '<div class="viz-empty">Failed to load sleep status.</div>';
+    }
+}
+
+// --- Sleep viz: run-history sparklines + memory composition ---
+
+const SLEEP_METRICS = [
+    {label: 'Consolidated', get: r => (r.episodic || {}).consolidated || 0},
+    {label: 'Relations', get: r => (r.relations || {}).added || 0},
+    {label: 'Dup groups', get: r => (r.duplicates || {}).groups || 0},
+    {label: 'Contradictions', get: r => (r.contradictions || {}).count || 0},
+    {label: 'Low confidence', get: r => (r.low_confidence || {}).count || 0},
+];
+
+const COMP_CATEGORIES = [
+    {key: 'persistent', label: 'Persistent', varName: '--cat-1'},
+    {key: 'episodic', label: 'Episodic', varName: '--cat-2'},
+    {key: 'session', label: 'Session', varName: '--cat-3'},
+    {key: 'ephemeral', label: 'Ephemeral', varName: '--cat-4'},
+];
+
+function renderSleepViz(reports, catStats) {
+    const el = document.getElementById('sleep-viz');
+    if (!el) return;
+    const runs = (reports || []).filter(r => !r.skipped).slice().reverse(); // chronological
+    let html = '';
+
+    if (!runs.length) {
+        html += '<div class="viz-tile sleep-comp"><div class="viz-empty">No sleep runs recorded yet — history appears after the first cycle.</div></div>';
+    } else {
+        for (const m of SLEEP_METRICS) {
+            const values = runs.map(m.get);
+            const max = Math.max(1, ...values);
+            const latest = values[values.length - 1];
+            const vw = runs.length * 10;
+            const bars = values.map((v, i) => {
+                const h = v > 0 ? Math.max(3, (v / max) * 32) : 1.5;
+                const cls = 'viz-bar' + (i === runs.length - 1 ? ' latest' : '') + (v === 0 ? ' stub' : '');
+                const when = runs[i].started_at ? new Date(runs[i].started_at * 1000).toLocaleString() : `run ${i + 1}`;
+                return `<rect class="${cls}" x="${i * 10}" y="${34 - h}" width="8" height="${h}" rx="2"
+                        data-tip="${escapeAttr(when)} — ${m.label}: ${v}"></rect>`;
+            }).join('');
+            html += `
+            <div class="viz-tile">
+                <div class="viz-label">${m.label}</div>
+                <div class="viz-value">${latest}</div>
+                <svg viewBox="0 0 ${vw} 34" preserveAspectRatio="none" aria-label="${m.label} over last ${runs.length} runs">${bars}</svg>
+            </div>`;
+        }
+    }
+
+    if (catStats) {
+        const total = COMP_CATEGORIES.reduce((s, c) => s + (catStats[c.key] || 0), 0);
+        const segs = COMP_CATEGORIES.filter(c => (catStats[c.key] || 0) > 0).map(c => {
+            const n = catStats[c.key];
+            const pct = (n / total) * 100;
+            return `<div class="comp-seg" style="flex:${pct} 1 0;background:var(${c.varName});"
+                    data-tip="${c.label}: ${n} (${pct.toFixed(1)}%)"></div>`;
+        }).join('');
+        let legend = COMP_CATEGORIES.map(c =>
+            `<span><span class="dot" style="background:var(${c.varName});"></span>${c.label} <b>${catStats[c.key] || 0}</b></span>`
+        ).join('');
+        if (catStats.archived) {
+            legend += `<span><span class="dot" style="background:var(--text-muted);"></span>Archived <b>${catStats.archived}</b></span>`;
+        }
+        html += `
+        <div class="viz-tile sleep-comp">
+            <div class="viz-label">Memory composition</div>
+            ${total > 0 ? `<div class="comp-track">${segs}</div>` : '<div class="viz-empty">No memories yet.</div>'}
+            <div class="comp-legend">${legend}</div>
+        </div>`;
+    }
+
+    el.innerHTML = html;
+    el.querySelectorAll('[data-tip]').forEach(node => {
+        node.addEventListener('mousemove', e => showVizTooltip(e, node.dataset.tip));
+        node.addEventListener('mouseleave', hideVizTooltip);
+    });
+}
+
+let _vizTooltipEl = null;
+function showVizTooltip(evt, text) {
+    if (!_vizTooltipEl) {
+        _vizTooltipEl = document.createElement('div');
+        _vizTooltipEl.className = 'viz-tooltip';
+        document.body.appendChild(_vizTooltipEl);
+    }
+    _vizTooltipEl.textContent = text;
+    _vizTooltipEl.style.display = 'block';
+    const pad = 12;
+    let x = evt.clientX + pad, y = evt.clientY - 30;
+    const w = _vizTooltipEl.offsetWidth;
+    if (x + w > window.innerWidth - 8) x = evt.clientX - w - pad;
+    if (y < 8) y = evt.clientY + pad;
+    _vizTooltipEl.style.left = x + 'px';
+    _vizTooltipEl.style.top = y + 'px';
+}
+function hideVizTooltip() {
+    if (_vizTooltipEl) _vizTooltipEl.style.display = 'none';
+}
+
+function renderSleepConfigForm(cfg) {
+    return `
+    <div id="sleep-config" style="display:none;margin-top:12px;border-top:1px solid var(--border);padding-top:4px;">
+        <div class="sleep-config-grid">
+            <label class="sleep-check"><input type="checkbox" id="sc-enabled" ${cfg.enabled ? 'checked' : ''}> Nightly run enabled</label>
+            <label>Run after (hour — global schedule)
+                <input type="number" id="sc-hour" min="0" max="23" value="${cfg.hour}" title="The nightly schedule (hour) is global; all other settings apply to the current profile.">
+            </label>
+            <label class="sleep-check"><input type="checkbox" id="sc-episodic" ${cfg.episodic_enabled ? 'checked' : ''}> Episodic &rarr; digests</label>
+            <label>Episodic age (days)
+                <input type="number" id="sc-age" min="1" max="365" value="${cfg.episodic_age_days}">
+            </label>
+            <label class="sleep-check"><input type="checkbox" id="sc-forget" ${cfg.forget_enabled ? 'checked' : ''}> Archive consolidated episodics</label>
+            <label>Archive after (days)
+                <input type="number" id="sc-archive-days" min="1" max="365" value="${cfg.archive_after_days}">
+            </label>
+            <label class="sleep-check"><input type="checkbox" id="sc-relations" ${cfg.detect_relations ? 'checked' : ''}> Detect relations</label>
+            <label class="sleep-check"><input type="checkbox" id="sc-automerge" ${cfg.auto_merge ? 'checked' : ''}> Auto-merge duplicates</label>
+            <label>Merge threshold: <span id="sc-thresh-val">${cfg.merge_threshold}</span>
+                <input type="range" id="sc-thresh" min="0.6" max="1" step="0.01" value="${cfg.merge_threshold}"
+                       oninput="document.getElementById('sc-thresh-val').textContent = this.value">
+            </label>
+            <label>Max memories per run
+                <input type="number" id="sc-max" min="100" max="50000" step="100" value="${cfg.max_memories}">
+            </label>
+            <label>Reports to keep
+                <input type="number" id="sc-keep" min="1" max="100" value="${cfg.keep_reports}">
+            </label>
+        </div>
+        <div style="display:flex;gap:8px;margin-top:14px;">
+            <button class="btn btn-small btn-primary" onclick="saveSleepConfig()">Save</button>
+            <button class="btn btn-small" onclick="toggleSleepConfig(false)">Cancel</button>
+        </div>
+    </div>`;
+}
+
+function toggleSleepConfig(show) {
+    const el = document.getElementById('sleep-config');
+    if (!el) return;
+    const visible = el.style.display !== 'none';
+    el.style.display = (show === undefined ? !visible : show) ? 'block' : 'none';
+}
+
+function numOr(id, fallback) {
+    const v = parseFloat(document.getElementById(id).value);
+    return Number.isFinite(v) ? v : fallback;   // 0 is a valid value — no ||-fallback
+}
+
+async function saveSleepConfig() {
+    const cfg = {
+        enabled: document.getElementById('sc-enabled').checked,
+        hour: numOr('sc-hour', 3),
+        episodic_enabled: document.getElementById('sc-episodic').checked,
+        episodic_age_days: numOr('sc-age', 14),
+        forget_enabled: document.getElementById('sc-forget').checked,
+        archive_after_days: numOr('sc-archive-days', 30),
+        detect_relations: document.getElementById('sc-relations').checked,
+        auto_merge: document.getElementById('sc-automerge').checked,
+        merge_threshold: numOr('sc-thresh', 0.9),
+        max_memories: numOr('sc-max', 5000),
+        keep_reports: numOr('sc-keep', 14),
+    };
+    const tid = showToast('Sleep config', 'saving…');
+    try {
+        await fetch('/api/sleep/config', {
+            method: 'PUT',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify(cfg)
+        });
+        completeToast(tid, 'Sleep config saved', false);
+        loadSleepSettings();
+    } catch (e) { completeToast(tid, 'Failed', true); }
+}
+
+async function sleepToggle(enabled) {
+    await fetch('/api/sleep/config', {
+        method: 'PUT',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({enabled})
+    });
+    loadSleepSettings();
+}
+
+async function sleepRunNow() {
+    const tid = showToast('Sleep cycle', 'consolidating…');
+    botSleep();
+    try {
+        const res = await fetch('/api/sleep/run', {method: 'POST'});
+        const d = await res.json();
+        const r = (d.reports && d.reports[0]) || {};
+        const ep = r.episodic || {};
+        completeToast(tid, `Sleep done: ${ep.consolidated || 0} episodic consolidated, ${(r.contradictions || {}).count || 0} contradictions`, false);
+        botWake(600);
+        loadSleepSettings();
+    } catch (e) { completeToast(tid, 'Failed', true); botWake(0); }
+}
+
 async function loadSystemInfo() {
     showSkeleton('settings-system-info', {rows: 6, type: 'cards'});
     try {
@@ -4050,6 +4315,43 @@ function setBotState(state) {
     if (!bot) return;
     bot.classList.remove('speaking', 'busy', 'error', 'connected');
     if (state) bot.classList.add(state);
+}
+
+// --- Sleep cycle animations ---
+
+let sleepWakeTimer = null;
+
+function botSleep() {
+    document.getElementById('header-bot')?.classList.add('sleeping');
+    setSleepCardRunning(true);
+    clearTimeout(sleepWakeTimer);
+}
+
+function botWake(delay = 1500) {
+    clearTimeout(sleepWakeTimer);
+    sleepWakeTimer = setTimeout(() => {
+        document.getElementById('header-bot')?.classList.remove('sleeping');
+        setSleepCardRunning(false);
+        // Don't reload while the config form is open — it would wipe unsaved edits
+        const cfgForm = document.getElementById('sleep-config');
+        if (document.getElementById('sleep-status')?.innerHTML && cfgForm?.style.display !== 'block') {
+            loadSleepSettings();
+        }
+    }, delay);
+}
+
+function handleSleepEvent(event) {
+    if (event.action === 'nightly' || event.action === 'cycle') {
+        botSleep();
+        botWake(8000); // stays asleep while per-profile cycle events keep arriving
+    } else if (event.action === 'manual-run' || event.action === 'error') {
+        botWake(1500);
+    }
+}
+
+function setSleepCardRunning(running) {
+    const anim = document.getElementById('sleep-run-anim');
+    if (anim) anim.style.display = running ? 'flex' : 'none';
 }
 
 // Skeleton loading
